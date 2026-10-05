@@ -1,0 +1,33 @@
+{% extends 'base.html' %}{% from 'macros.html' import csrf,badge,filter_form,pagination with context %}
+{% block title %}Job matches · StudentConnect{% endblock %}{% block content %}
+<div class="top2"><div><h1>Job matches</h1><p class="sub">Your saved matches, ranked by resume fit.</p></div><div class="actions"><a class="btn" href="{{ url_for('settings_page') }}#companies">Choose companies</a><a class="btn p" href="#save-search">Save search</a></div></div>
+{% if user %}
+{{ filter_form('jobs') }}<p class="sub">Job-type filtering uses fields supplied by the ATS. Postings without that field cannot match a specific type.</p>
+<details class="card" id="save-search"><summary>Save this search</summary><form method="post" action="{{ url_for('save_search') }}" class="fields">{{ csrf() }}
+<label class="field">Search name<input name="name" maxlength="80" required></label>
+{% for name,value in [('q',search),('company',company),('min_score',min_score),('location',location),('job_type',job_type),('days',days),('sort',sort)] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<button class="btn p">Save search</button></form>
+<div class="chips">{% for item in saved_searches %}<a class="btn" href="{{ item.link }}">{{ item.name }}</a>{% endfor %}</div></details>
+<div class="split"><div class="list">{% for item in matches %}
+<a {% if selected and selected.job_id == item.job_id %}aria-current="true"{% endif %} class="jc {{ 'sel' if selected and selected.job_id == item.job_id else '' }}" href="{{ url_for('jobs',job=item.job_id,page=page,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}"><div><div class="role">{{ item.title }}</div><div class="co">{{ item.company_name }} · {{ item.location or 'Not specified' }}</div></div>{{ badge(item.fit_score) }}</a>
+{% else %}<div class="card">No current matches for these filters. Save your resume and run the scoring command to populate them.</div>{% endfor %}{{ pagination('jobs') }}</div>
+<div class="card detail-card">{% if selected %}<div class="hd"><div><h2>{{ selected.title }}</h2><p class="sub">{{ selected.company_name }} · {{ selected.location or 'Not specified' }}</p></div>{{ badge(selected.fit_score) }}</div>
+<p>{{ selected.reasoning }}</p>
+{% if selected.evaluation %}{% set evaluation = selected.evaluation %}
+<h3>{{ evaluation.match_category }}</h3><p class="sub">AI resume–JD match estimate; not an employer ATS score or hiring probability.</p>
+<div class="scroll"><table><thead><tr><th>Component</th><th>Score</th><th>Explanation</th></tr></thead><tbody>
+{% for name,maximum in [('skills_match',40),('experience_relevance',25),('role_alignment',15),('education_fit',10),('other_requirements',10)] %}
+<tr><td>{{ name|replace('_',' ')|title }}</td><td>{{ evaluation.components[name].score }}/{{ maximum }}</td><td>{{ evaluation.components[name].explanation }}</td></tr>{% endfor %}
+</tbody></table></div>
+{% if evaluation.hard_blockers %}<h3>Confirmed eligibility blockers</h3><p>Raw score {{ evaluation.raw_score }}/100; final score capped at 40.</p>{% for entry in evaluation.hard_blockers %}<p>{{ entry.requirement }}<br>JD: <q>{{ entry.jd_evidence }}</q><br>Resume: <q>{{ entry.resume_evidence }}</q></p>{% endfor %}{% endif %}
+{% if evaluation.unknown_eligibility %}<h3>Eligibility information to confirm</h3><ul>{% for entry in evaluation.unknown_eligibility %}<li>{{ entry }}</li>{% endfor %}</ul>{% endif %}
+<details><summary>Evidence supporting matches</summary>{% for entry in evaluation.matched_requirements %}<p>{{ entry.requirement }}<br>JD: <q>{{ entry.jd_evidence }}</q><br>Resume: <q>{{ entry.resume_evidence }}</q></p>{% else %}<p>No supporting matches recorded.</p>{% endfor %}</details>
+{% else %}<p class="sub">Legacy score; the new rubric breakdown is unavailable until this job is rescored.</p>{% endif %}
+<h3>Skills demonstrated or listed</h3><div class="chips spaced">{% for skill in selected.matched_skills %}<span class="tag ok">{{ skill }}</span>{% else %}<span class="co">None recorded</span>{% endfor %}</div>
+<h3>Gaps to close</h3><div class="chips spaced">{% for skill in selected.missing_requirements %}<span class="tag gap">{{ skill }}</span>{% else %}<span class="co">None recorded</span>{% endfor %}</div>
+<div class="actions">{% if selected.url %}<a class="btn p" href="{{ selected.url }}" target="_blank" rel="noopener noreferrer">Apply on company website</a>{% endif %}
+<form method="post" action="{{ url_for('applications') }}">{{ csrf() }}<input type="hidden" name="job_id" value="{{ selected.job_id }}"><input type="hidden" name="status" value="saved"><button class="btn">Save job</button></form>
+<form method="post" action="{{ url_for('applications') }}">{{ csrf() }}<input type="hidden" name="job_id" value="{{ selected.job_id }}"><input type="hidden" name="status" value="applied"><button class="btn">Track as applied</button></form></div>
+<p class="sub">Tracking a status does not submit an application. Update existing entries on the Applications screen.</p>
+<details class="spaced"><summary>Full job description</summary><div class="description">{{ selected.description }}</div></details>
+{% else %}<h2>Select a match</h2><p class="sub">Its score, skills, gaps, and full description will appear here.</p>{% endif %}</div></div>
+{% endif %}{% endblock %}

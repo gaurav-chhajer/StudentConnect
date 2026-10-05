@@ -1,0 +1,16 @@
+company,ats,slug,job_count,api_url
+Groww,greenhouse,groww,5,https://boards-api.greenhouse.io/v1/boards/groww/jobs
+Meesho,lever,meesho,48,https://api.lever.co/v0/postings/meesho?mode=json
+CRED,lever,cred,14,https://api.lever.co/v0/postings/cred?mode=json
+Porter,lever,porter,27,https://api.lever.co/v0/postings/porter?mode=json
+Freshworks,lever,freshworks,0,https://api.lever.co/v0/postings/freshworks?mode=json
+Postman,greenhouse,postman,63,https://boards-api.greenhouse.io/v1/boards/postman/jobs
+Paytm,lever,paytm,227,https://api.lever.co/v0/postings/paytm?mode=json
+Zeta,lever,zeta,20,https://api.lever.co/v0/postings/zeta?mode=json
+Pine Labs,greenhouse,pine,4,https://boards-api.greenhouse.io/v1/boards/pine/jobs
+Slice,greenhouse,slice,26,https://boards-api.greenhouse.io/v1/boards/slice/jobs
+Fi Money,lever,fi,8,https://api.lever.co/v0/postings/fi?mode=json
+Zeta Suite,lever,zeta,20,https://api.lever.co/v0/postings/zeta?mode=json
+Clari,lever,clari,0,https://api.lever.co/v0/postings/clari?mode=json
+Netradyne,greenhouse,netradyne,26,https://boards-api.greenhouse.io/v1/boards/netradyne/jobs
+Observe.AI,greenhouse,observeai,16,https://boards-api.greenhouse.io/v1/boards/observeai/jobs

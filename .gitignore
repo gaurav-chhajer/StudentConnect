@@ -1,0 +1,48 @@
+# Local contributor instructions
+/AGENTS.md
+
+# Python environments and generated caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+/tests/tmp*/
+
+# Credentials: keep only the placeholder configuration template
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+secrets/
+.aws/
+.ssh/
+
+# Private runtime data; company-board definitions remain versioned
+/data/*
+!/data/boards/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+
+# Logs and local review/editor artifacts
+*.log
+logs/
+/.ui-review/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

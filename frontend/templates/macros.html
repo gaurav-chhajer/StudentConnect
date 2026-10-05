@@ -1,0 +1,31 @@
+{% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
+{% macro icon(name) %}
+{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4', 'applications':'M5 12l4 4 10-10', 'email':'M3 6h18v12H3zM3 7l9 7 9-7', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M12 8v8M8 12h8M4 4h16v16H4z'} %}
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="{{ paths[name] }}"></path></svg>
+{% endmacro %}
+{% macro score_trend(items) %}
+{% if items %}
+<svg class="trend-chart" viewBox="0 0 600 230" role="img" aria-label="Weekly average match scores; exact values listed below">
+{% for score in [0,25,50,75,100] %}<path class="chart-grid" d="M40 {{ 200-score*1.8 }}H580"></path><text class="chart-label" x="4" y="{{ 204-score*1.8 }}">{{ score }}</text>{% endfor %}
+<polyline class="chart-line draw" pathLength="1" points="{% for item in items %}{{ 40+loop.index0*540/([items|length-1,1]|max) }},{{ 200-item.average*1.8 }} {% endfor %}"></polyline>
+{% for item in items %}<circle class="chart-dot" cx="{{ 40+loop.index0*540/([items|length-1,1]|max) }}" cy="{{ 200-item.average*1.8 }}" r="4"><title>{{ item.week }}: {{ item.average }}%</title></circle>{% endfor %}
+</svg>
+<details class="chart-values"><summary>View weekly scores</summary>{% for item in items %}<div class="li"><span>{{ item.week }}</span><span>{{ item.average }}%</span></div>{% endfor %}</details>
+{% else %}<p class="sub empty-state">No recent scores to chart yet.</p>{% endif %}
+{% endmacro %}
+{% macro badge(score) %}<span class="m {{ 'h' if score >= 85 else 'md' if score >= 60 else 'lo' }}">{{ score }}%</span>{% endmacro %}
+{% macro filter_form(action) %}
+<form class="filters" method="get" action="{{ url_for(action) }}">
+<label>Search<input type="search" name="q" maxlength="200" value="{{ search }}" placeholder="Role, company, skill"></label>
+<label>Company<select name="company"><option value="0">All matched companies</option>{% for item in companies %}<option value="{{ item.id }}" {% if company == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
+<label>Minimum match<input type="number" name="min_score" min="0" max="100" value="{{ min_score }}"></label>
+<label>Location<input name="location" maxlength="100" value="{{ location }}" placeholder="Any location"></label>
+<label>Job type<select name="job_type"><option value="">All types</option>{% for value in ['internship','full-time','part-time'] %}<option value="{{ value }}" {% if job_type == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label>
+<label>Discovered<select name="days">{% for value,label in [(0,'Any time'),(1,'Last 24 hours'),(7,'Last 7 days'),(30,'Last 30 days')] %}<option value="{{ value }}" {% if days == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+<label>Sort<select name="sort"><option value="best" {% if sort == 'best' %}selected{% endif %}>Best match</option><option value="recent" {% if sort == 'recent' %}selected{% endif %}>Recently discovered</option></select></label>
+<button class="btn p">Filter</button></form>
+{% endmacro %}
+{% macro pagination(action) %}<div class="pagination">
+{% if page > 1 %}<a class="btn" href="{{ url_for(action,page=page-1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}">Previous</a>{% endif %}
+<span>Page {{ page }} of {{ pages }}</span>
+{% if page < pages %}<a class="btn" href="{{ url_for(action,page=page+1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}">Next</a>{% endif %}</div>{% endmacro %}

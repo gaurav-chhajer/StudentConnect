@@ -1,0 +1,10 @@
+company,ats,slug,job_count,api_url
+Bounce,ashby,bounce,9,https://api.ashbyhq.com/posting-api/job-board/bounce
+FamPay,lever,fampay,15,https://api.lever.co/v0/postings/fampay?mode=json
+Hevo Data,lever,hevodata,43,https://api.lever.co/v0/postings/hevodata?mode=json
+Hevo Data,lever,hevo,1,https://api.lever.co/v0/postings/hevo?mode=json
+InMobi,greenhouse,inmobi,65,https://boards-api.greenhouse.io/v1/boards/inmobi/jobs
+Glance,greenhouse,glance,49,https://boards-api.greenhouse.io/v1/boards/glance/jobs
+Scaler,ashby,scaler,0,https://api.ashbyhq.com/posting-api/job-board/scaler
+Newton School,greenhouse,newton,1,https://boards-api.greenhouse.io/v1/boards/newton/jobs
+Newton School,lever,newton,3,https://api.lever.co/v0/postings/newton?mode=json

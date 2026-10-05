@@ -1,0 +1,32 @@
+{% extends 'base.html' %}{% from 'macros.html' import csrf %}{% block title %}Settings · StudentConnect{% endblock %}
+{% block content %}<div class="top2"><div><h1>Settings</h1><p class="sub">Your profile, job preferences, and company choices.</p></div><button class="btn p" type="submit" form="settings-form">{{ 'Save changes' if user else 'Create profile' }}</button></div>
+<form method="post" class="page-form" id="settings-form">{{ csrf() }}
+<section class="card"><h2>Profile</h2><div class="fields spaced">
+<label class="field">Full name<input name="name" maxlength="100" value="{{ user.name if user else '' }}" required></label>
+<label class="field">Email<input name="email" type="email" maxlength="254" value="{{ user.email if user else '' }}" required></label>
+<label class="field">University<input name="university" maxlength="200" value="{{ settings.university }}"></label>
+<label class="field">Graduation year<input name="graduation_year" type="number" min="1950" max="2100" value="{{ settings.graduation_year or '' }}"></label></div></section>
+<section class="card" id="companies"><h2>Target companies</h2><p class="sub">Choose the boards to follow. Choosing none means no jobs are scored or emailed. Multiple boards for one company are listed separately.</p>
+<div class="company-grid spaced">{% for item in available_companies %}<label class="chk"><input type="checkbox" name="companies" value="{{ item.id }}" {% if item.id in subscriptions %}checked{% endif %}><span>{{ item.name }}<small class="co"> · {{ item.ats_type }} / {{ item.board_slug }}</small></span></label>{% else %}<p>No companies yet. Run the fetch command to seed the company list.</p>{% endfor %}</div></section>
+<section class="card" id="email"><h2>Email alerts</h2><p class="sub">Choose which matches reach your inbox. Delivery runs through the email command or an installed local schedule.</p>
+<fieldset class="cadence"><legend>Frequency</legend><div class="seg">{% for option in ['daily','weekly','off'] %}<label><input type="radio" name="cadence" value="{{ option }}" {% if settings.cadence == option %}checked{% endif %} required><span>{{ option|title }}</span></label>{% endfor %}</div></fieldset><div class="fields spaced">
+<label class="field">Send at<input name="send_time" type="time" value="{{ settings.send_time }}" required></label>
+<label class="field">Timezone<select name="timezone">{% for zone in ['Asia/Kolkata','UTC'] %}<option {% if settings.timezone == zone %}selected{% endif %}>{{ zone }}</option>{% endfor %}</select></label>
+<label class="field">Minimum email match<input name="min_score" type="number" min="0" max="100" value="{{ settings.min_score }}" required></label></div>
+<label class="chk"><input type="checkbox" name="include_gaps" {% if settings.include_gaps %}checked{% endif %}>Include gaps in email summaries</label></section>
+<section class="card"><h2>Job preferences</h2><p class="sub">The matching pipeline currently targets student and entry-level roles.</p><div class="fields spaced">
+<label class="field">Roles (comma-separated)<input name="roles" maxlength="1000" value="{{ preferences.get('roles',[])|join(', ') }}" placeholder="Software Engineer, Backend"></label>
+<div class="field" id="location-picker"><label for="location-input">Locations — type a city or state</label>
+{% set selected_locations = preferences.get('locations',[]) %}
+<div class="location-entry"><input id="location-input" name="locations" maxlength="100" list="location-options" placeholder="Type ben, Karnataka, or Remote" aria-describedby="location-help location-status" autocomplete="off"><button class="btn" id="location-add" type="button" disabled>Add</button></div>
+<datalist id="location-options">{% for item in location_suggestions %}<option value="{{ item.value }}" label="{{ item.example }} ({{ item.count }} postings)"></option>{% endfor %}</datalist>
+<ul class="location-selections" id="selected-locations" aria-label="Selected locations">{% for location in selected_locations %}<li class="tag"><span>{{ location }}</span><input type="hidden" name="locations" value="{{ location }}"><button type="button" class="location-remove" aria-label="Remove {{ location }}" disabled>&times;</button></li>{% endfor %}</ul>
+<small id="location-help">Select a suggestion, or type a location and press Enter or Add. Up to 20 locations; no selections means any location.</small>
+<small id="location-status" role="status" aria-live="polite"></small>
+<noscript><small>JavaScript is disabled. Existing selections are retained; enter additional locations separated by commas and save the form.</small></noscript></div>
+<label class="field">Minimum stipend (INR)<input name="min_stipend" type="number" min="0" max="1000000" value="{{ preferences.get('min_stipend') or '' }}"></label></div>
+<p class="sub">Leave these fields empty to skip their filters. Changing job preferences marks old scores stale; run scoring again. Compensation matching remains approximate.</p>
+{% for kind in ['internship','full-time','part-time'] %}<label class="chk"><input type="checkbox" name="employment_types" value="{{ kind }}" {% if kind in preferences.get('employment_types',[]) %}checked{% endif %}>{{ kind|title }}</label>{% endfor %}
+<p class="sub">No types selected means any type. Specific types require structured ATS data.</p></section>
+<div class="form-footer"><button class="btn p">{{ 'Save changes' if user else 'Create profile' }}</button></div></form>
+<script src="{{ url_for('static', filename='locations.js') }}" nonce="{{ script_nonce }}" defer></script>{% endblock %}

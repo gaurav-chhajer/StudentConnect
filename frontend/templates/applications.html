@@ -1,0 +1,16 @@
+{% extends 'base.html' %}{% from 'macros.html' import csrf,badge %}{% block title %}Applications · StudentConnect{% endblock %}
+{% block content %}<div class="top2"><div><h1>Applications</h1><p class="sub">Track every role from saved to offer. Stages are updated by you.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">Find a job</a>{% if user %}<a class="btn p" href="#add">Add application</a>{% endif %}</div></div>
+{% if user %}<details class="card" id="add"><summary>Add an application</summary><form method="post" class="page-form spaced">{{ csrf() }}<div class="fields">
+<label class="field">Role<input name="title" maxlength="200" required></label><label class="field">Company<input name="company_name" maxlength="200" required></label>
+<label class="field">Job URL (optional)<input name="url" type="url" maxlength="2000"></label>
+<label class="field">Stage<select name="status">{% for status in statuses %}<option value="{{ status }}">{{ status|title }}</option>{% endfor %}</select></label></div>
+<label class="field">Notes<textarea name="notes" maxlength="2000" rows="3"></textarea></label><button class="btn p">Add application</button></form></details>
+<div class="kan">{% for status in statuses %}<section class="col" data-stage="{{ status }}" aria-label="{{ status|title }} applications"><h3><span>{{ status|title }}</span><span class="co">{{ application_counts.get(status,0) }}</span></h3>
+{% for item in application_rows if item.status == status %}<article class="kc"><div class="role">{{ item.title }}</div><div class="co">{{ item.company_name }}</div>
+{% if item.fit_score is not none %}{{ badge(item.fit_score) }}{% endif %}<small class="co">Updated {{ item.updated_at }}</small>
+{% if item.url %}<a class="btn" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Company posting</a>{% endif %}
+<form method="post" class="page-form">{{ csrf() }}<input type="hidden" name="application_id" value="{{ item.id }}">
+<label class="field">Stage<select name="status">{% for option in statuses %}<option value="{{ option }}" {% if option == item.status %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select></label>
+<label class="field">Notes<textarea name="notes" rows="3" maxlength="2000">{{ item.notes }}</textarea></label><button class="btn">Update</button></form></article>
+{% else %}<p class="co">No {{ status }} entries yet.</p>{% endfor %}</section>{% endfor %}</div>
+<p class="sub">Shows the latest 200 entries. Clicking a company link does not automatically change an application status.</p>{% endif %}{% endblock %}
