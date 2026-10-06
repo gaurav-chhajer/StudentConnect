@@ -15,7 +15,9 @@ requests) should reuse what you already built in ats_board_finder.py.
 import sqlite3
 import json
 import os
-import hashlib
+import smtplib
+import ssl
+from email.message import EmailMessage
 import re
 import requests
 from pathlib import Path
@@ -699,11 +701,19 @@ def mark_sent(conn, user_id, job_ids, channel="email"):
 # Stage 5: Deliver (email today - swap/add a function for web later)
 # ---------------------------------------------------------------------------
 
-RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-# Resend requires sending from a domain you've verified in their dashboard -
-# a bare gmail/outlook address will be rejected. Swap this once you've set
-# that up; until then this is a placeholder.
+GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 DIGEST_FROM_EMAIL = os.environ.get("DIGEST_FROM_EMAIL", "")
+
+
+def validate_email_configuration():
+    """Fail before creating account codes or sending when Gmail is unconfigured."""
+    password = GMAIL_APP_PASSWORD.replace(" ", "")
+    if not password:
+        raise RuntimeError("GMAIL_APP_PASSWORD is not set in the environment")
+    if not re.fullmatch(r"[A-Za-z0-9]{16}",password):
+        raise ValueError("Configure a valid 16-character Google App Password")
+    if not re.fullmatch(r"[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+",DIGEST_FROM_EMAIL):
+        raise ValueError("Configure a valid Gmail sender address")
 
 
 def _render_email_html(user_row, matches):
@@ -802,47 +812,52 @@ def _render_email_text(user_row, matches):
 def deliver_email(user_row, matches):
     """
     Formats `matches` (rows from get_unsent_top_matches) into an email
-    digest and sends it via the Resend API. Kept dumb on purpose - this
+    digest and sends it through Gmail SMTP over verified TLS. This
     function only renders and sends what it's given; it doesn't decide
     which jobs to include or query the DB itself.
 
-    Raises requests.HTTPError on a failed send - caller decides whether to
-    retry, and should NOT call mark_sent() for a batch that failed to send.
+    Raises on SMTP/connection failure; never automatically retry uncertain sends.
+    SMTP acceptance is not proof of inbox delivery.
     """
-    if not RESEND_API_KEY:
-        raise RuntimeError("RESEND_API_KEY is not set in the environment")
+    validate_email_configuration()
+    password = GMAIL_APP_PASSWORD.replace(" ", "")
     address_pattern = r"[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+"
-    if not re.fullmatch(address_pattern, DIGEST_FROM_EMAIL):
-        raise ValueError("Set DIGEST_FROM_EMAIL to a valid Resend sender address")
     if not re.fullmatch(address_pattern, user_row["email"] or ""):
         raise ValueError("Save a valid recipient email in Settings")
     if not matches:
         raise ValueError("Cannot send an empty job digest")
 
-    payload = {
-        "from": DIGEST_FROM_EMAIL,
-        "to": [user_row["email"]],
-        "subject": f"{len(matches)} job match{'es' if len(matches) != 1 else ''} for you today",
-        "html": _render_email_html(user_row, matches),
-        "text": _render_email_text(user_row, matches),
-    }
+    message = EmailMessage()
+    message["From"] = DIGEST_FROM_EMAIL
+    message["To"] = user_row["email"]
+    message["Subject"] = f"{len(matches)} job match{'es' if len(matches) != 1 else ''} for you today"
+    message.set_content(_render_email_text(user_row, matches))
+    message.add_alternative(_render_email_html(user_row, matches), subtype="html")
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15, context=ssl.create_default_context()) as smtp:
+        smtp.login(DIGEST_FROM_EMAIL, password)
+        refused = smtp.send_message(message, from_addr=DIGEST_FROM_EMAIL, to_addrs=[user_row["email"]])
+        if refused:
+            raise smtplib.SMTPRecipientsRefused(refused)
+    return {"accepted": True}
 
-    resp = requests.post(
-        "https://api.resend.com/emails",
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-              "Content-Type": "application/json",
-            "Idempotency-Key": "studentconnect/" + hashlib.sha256(
-                json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest(),
-        },
-        json=payload,
-        timeout=15,
-    )
-    resp.raise_for_status()
-    result = resp.json()
-    if not isinstance(result, dict) or not isinstance(result.get("id"), str) or not result["id"].strip():
-        raise ValueError("Resend did not return an email acceptance ID")
-    return result
+
+def deliver_account_email(recipient, subject, text):
+    """Send a private account code without logging it or automatically retrying."""
+    validate_email_configuration()
+    password = GMAIL_APP_PASSWORD.replace(" ", "")
+    pattern = r"[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+"
+    if not re.fullmatch(pattern,recipient):
+        raise ValueError("Configure valid sender and recipient addresses")
+    if not isinstance(subject,str) or not 1<=len(subject)<=200 or "\r" in subject or "\n" in subject or not isinstance(text,str) or not 1<=len(text)<=10000:
+        raise ValueError("Invalid account message")
+    message = EmailMessage()
+    message["From"], message["To"], message["Subject"] = DIGEST_FROM_EMAIL, recipient, subject
+    message.set_content(text)
+    with smtplib.SMTP_SSL("smtp.gmail.com",465,timeout=15,context=ssl.create_default_context()) as smtp:
+        smtp.login(DIGEST_FROM_EMAIL,password)
+        refused = smtp.send_message(message,from_addr=DIGEST_FROM_EMAIL,to_addrs=[recipient])
+        if refused:
+            raise smtplib.SMTPRecipientsRefused(refused)
 
 
 # ---------------------------------------------------------------------------

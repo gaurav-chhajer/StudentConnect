@@ -12,7 +12,7 @@ if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $databasePath -PathType Leaf)) {
     throw 'Initialize the local database first.'
 }
-foreach ($credentialName in @('RESEND_API_KEY', 'DIGEST_FROM_EMAIL')) {
+foreach ($credentialName in @('GMAIL_APP_PASSWORD', 'DIGEST_FROM_EMAIL')) {
     if ($WhatIfPreference) { continue }
     if (-not [Environment]::GetEnvironmentVariable($credentialName, 'User') -and
         -not [Environment]::GetEnvironmentVariable($credentialName, 'Machine')) {
@@ -29,7 +29,7 @@ $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -Repetiti
 $taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ErrorAction Stop
 $currentAccount = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal -UserId $currentAccount -LogonType Interactive -RunLevel Limited -ErrorAction Stop
-if ($PSCmdlet.ShouldProcess($taskName, 'Enable automatic real Resend emails every 15 minutes when a digest is due')) {
+if ($PSCmdlet.ShouldProcess($taskName, 'Enable automatic real Gmail SMTP emails every 15 minutes when a digest is due')) {
     Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $taskSettings -Principal $principal -Description 'Emails saved StudentConnect job scores at the profile cadence and local send time.' -ErrorAction Stop | Out-Null
     Write-Output 'Email task activated. It runs while this Windows user is logged in; disable it in Task Scheduler to stop it.'
 }

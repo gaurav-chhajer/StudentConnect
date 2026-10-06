@@ -1,9 +1,10 @@
 import unittest
+import smtplib
+import ssl
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-import requests
 from backend import pipeline_skeleton as pipeline
 from scripts.run_local_email import send_digest, schedule_due, main
 from tests import test_web_flows
@@ -11,7 +12,11 @@ from tests.test_evaluation import sample_result
 
 
 class EmailTests(unittest.TestCase):
-    setUp = test_web_flows.WebFlowTests.setUp
+    def setUp(self):
+        test_web_flows.WebFlowTests.setUp(self)
+        smtp = patch.object(pipeline.smtplib, "SMTP_SSL", side_effect=AssertionError("Unexpected SMTP connection"))
+        smtp.start()
+        self.addCleanup(smtp.stop)
     seed_user = test_web_flows.WebFlowTests.seed_user
 
     def test_daily_timezone_and_time_boundary(self):
@@ -51,7 +56,7 @@ class EmailTests(unittest.TestCase):
         self.seed_user()
         marker = Path(self.database).parent / "email_schedule.paused"
         with patch.object(pipeline,"DB_PATH",str(self.database)), \
-                patch("scripts.run_local_email.send_digest",side_effect=requests.Timeout()) as send:
+                patch("scripts.run_local_email.send_digest",side_effect=smtplib.SMTPServerDisconnected()) as send:
             with self.assertLogs("scripts.run_local_email",level="ERROR"):
                 self.assertEqual(main(["--scheduled","--send"]),1)
             self.assertTrue(marker.exists())
@@ -74,22 +79,32 @@ class EmailTests(unittest.TestCase):
     def test_send_acceptance_and_repeat_dedup(self):
         self.seed_user()
         pipeline.store_score(self.conn, 1, 1, sample_result())
-        with patch.object(pipeline,"RESEND_API_KEY","test-placeholder"), \
+        with patch.object(pipeline,"GMAIL_APP_PASSWORD","abcdefghijklmnop"), \
                 patch.object(pipeline,"DIGEST_FROM_EMAIL","jobs@example.test"), \
-                patch.object(pipeline.requests,"post") as post:
-            post.return_value.json.return_value={"id":"synthetic-email-id"}
+                patch.object(pipeline.smtplib,"SMTP_SSL") as smtp:
+            client = smtp.return_value.__enter__.return_value
+            client.send_message.return_value = {}
             self.assertEqual(send_digest(self.conn,send=True),2)
-            body=post.call_args.kwargs["json"]
-            self.assertIn("Strong Match",body["html"])
-            self.assertIn("Skills Match: 40",body["text"])
-            self.assertIn("Idempotency-Key",post.call_args.kwargs["headers"])
+            message=client.send_message.call_args.args[0]
+            self.assertIn("Strong Match",message.get_body(preferencelist=("html",)).get_content())
+            self.assertIn("Skills Match: 40",message.get_body(preferencelist=("plain",)).get_content())
+            self.assertEqual(message["From"],"jobs@example.test")
+            self.assertEqual(message["To"],"owner@example.test")
+            client.login.assert_called_once_with("jobs@example.test","abcdefghijklmnop")
+            self.assertEqual(smtp.call_args.args,("smtp.gmail.com",465))
+            self.assertEqual(smtp.call_args.kwargs["timeout"],15)
+            context=smtp.call_args.kwargs["context"]
+            self.assertTrue(context.check_hostname)
+            self.assertEqual(context.verify_mode,ssl.CERT_REQUIRED)
             self.assertEqual(send_digest(self.conn,send=True),0)
-            post.assert_called_once()
+            smtp.assert_called_once()
+            client.send_message.assert_called_once()
+            smtp.return_value.__exit__.assert_called_once()
             self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sent_log").fetchone()[0],2)
 
     def test_failure_never_marks_sent(self):
         self.seed_user()
-        for failure in (requests.Timeout(), requests.HTTPError()):
+        for failure in (TimeoutError(), smtplib.SMTPAuthenticationError(535,b"synthetic failure"), smtplib.SMTPDataError(550,b"synthetic refusal")):
             with patch.object(pipeline,"deliver_email",side_effect=failure), self.assertRaises(type(failure)):
                 send_digest(self.conn,send=True)
             self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sent_log").fetchone()[0],0)
@@ -105,23 +120,37 @@ class EmailTests(unittest.TestCase):
         self.conn.commit()
         self.assertEqual(send_digest(self.conn,send=True),0)
 
-    def test_delivery_validation_and_stable_key(self):
+    def test_delivery_validation_before_connection(self):
         self.seed_user()
         user=self.conn.execute("SELECT * FROM users WHERE id=1").fetchone()
         matches=pipeline.get_unsent_top_matches(self.conn,1)
-        with patch.object(pipeline,"RESEND_API_KEY","test-placeholder"), \
+        with patch.object(pipeline,"GMAIL_APP_PASSWORD","abcdefghijklmnop"), \
                 patch.object(pipeline,"DIGEST_FROM_EMAIL","jobs@example.test"), \
-                patch.object(pipeline.requests,"post") as post:
-            post.return_value.json.return_value={}
-            with self.assertRaises(ValueError):
-                pipeline.deliver_email(user,matches)
-            first=post.call_args.kwargs["headers"]["Idempotency-Key"]
-            post.return_value.json.return_value={"id":"synthetic-email-id"}
-            pipeline.deliver_email(user,matches)
-            self.assertEqual(first,post.call_args.kwargs["headers"]["Idempotency-Key"])
-            post.reset_mock()
+                patch.object(pipeline.smtplib,"SMTP_SSL") as smtp:
             with patch.object(pipeline,"DIGEST_FROM_EMAIL","invalid"),self.assertRaises(ValueError):
                 pipeline.deliver_email(user,matches)
             with self.assertRaises(ValueError):
                 pipeline.deliver_email(user,[])
-            post.assert_not_called()
+            for password in ("", "short", "abcdefghijklmn\r\n"):
+                with patch.object(pipeline,"GMAIL_APP_PASSWORD",password),self.assertRaises((ValueError,RuntimeError)):
+                    pipeline.deliver_email(user,matches)
+            with self.assertRaises(ValueError):
+                pipeline.deliver_email(dict(email="owner@example.test\r\nBcc:bad@example.test"),matches)
+            smtp.assert_not_called()
+
+    def test_smtp_refusal_and_auth_failure_never_mark_sent(self):
+        self.seed_user()
+        with patch.object(pipeline,"GMAIL_APP_PASSWORD","abcd efgh ijkl mnop"), \
+                patch.object(pipeline,"DIGEST_FROM_EMAIL","jobs@example.test"), \
+                patch.object(pipeline.smtplib,"SMTP_SSL") as smtp:
+            client=smtp.return_value.__enter__.return_value
+            client.login.side_effect=smtplib.SMTPAuthenticationError(535,b"synthetic failure")
+            with self.assertRaises(smtplib.SMTPAuthenticationError):
+                send_digest(self.conn,send=True)
+            client.send_message.assert_not_called()
+            client.login.side_effect=None
+            client.send_message.return_value={"owner@example.test":(550,b"synthetic refusal")}
+            with self.assertRaises(smtplib.SMTPRecipientsRefused):
+                send_digest(self.conn,send=True)
+            self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sent_log").fetchone()[0],0)
+            self.assertFalse(self.conn.in_transaction)

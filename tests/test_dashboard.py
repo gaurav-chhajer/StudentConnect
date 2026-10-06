@@ -31,6 +31,7 @@ class DashboardTests(unittest.TestCase):
 
     def seed(self):
         self.conn.execute("INSERT INTO users(id,name,email,resume_text) VALUES (1,?,?,?)", ("Student <script>alert(1)</script>", "one@example.test", "Private resume"))
+        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00')")
         self.conn.execute("INSERT INTO companies(id,name,ats_type,board_slug) VALUES(1,'Example','lever','example')")
         for number, score, active in ((1, 85, 1), (2, 55, 1), (3, 99, 0)):
             self.conn.execute("""INSERT INTO jobs(id,company_id,external_id,title,location,url,first_seen_at,last_seen_at,is_active)
@@ -39,11 +40,13 @@ class DashboardTests(unittest.TestCase):
             self.conn.execute("""INSERT INTO scores(job_id,user_id,fit_score,reasoning,matched_skills,missing_requirements,scored_at)
                 VALUES(?,1,?,'Good fit','["Python"]','["SQL"]','2026-10-02T00:00:00+00:00')""", (number, score))
         self.conn.commit()
+        with self.client.session_transaction() as session:
+            session["user_id"],session["session_version"] = 1,0
 
     def test_empty_profile(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No active profile", response.data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"],"/login")
 
     def test_saved_matches_are_rendered_safely_without_writes(self):
         self.seed()
@@ -68,13 +71,14 @@ class DashboardTests(unittest.TestCase):
             with self.subTest(query=query):
                 self.assertEqual(self.client.get("/?" + query).status_code, 400)
 
-    def test_multiple_profiles_refuse_selection(self):
+    def test_multiple_profiles_use_authenticated_account(self):
         self.seed()
         self.conn.execute("INSERT INTO users(name,email,resume_text) VALUES('Other','two@example.test','Secret')")
         self.conn.commit()
         response = self.client.get("/?user_id=2")
-        self.assertEqual(response.status_code, 409)
-        self.assertNotIn(b"Engineer 1", response.data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Engineer 1", response.data)
+        self.assertNotIn(b"Secret", response.data)
 
     def test_scores_for_other_users_are_not_exposed(self):
         self.seed()
@@ -88,8 +92,8 @@ class DashboardTests(unittest.TestCase):
 
     def test_missing_database_and_missing_schema(self):
         response = create_app(Path(self.directory.name) / "absent.db").test_client().get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No job database", response.data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["Location"],"/login")
         self.conn.execute("DROP TABLE scores")
         self.seed_user_only()
         with self.assertLogs(self.application.logger, level="ERROR"):
@@ -97,7 +101,10 @@ class DashboardTests(unittest.TestCase):
 
     def seed_user_only(self):
         self.conn.execute("INSERT INTO users(name,email,resume_text) VALUES('Student','one@example.test','Resume')")
+        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00')")
         self.conn.commit()
+        with self.client.session_transaction() as session:
+            session["user_id"],session["session_version"] = 1,0
 
     def test_invalid_saved_score_and_skill_list(self):
         self.seed()

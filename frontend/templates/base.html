@@ -10,7 +10,8 @@
 {% for endpoint,label in navigation %}<a href="{{ url_for(endpoint) }}" {% if active == endpoint %}class="on" aria-current="page"{% endif %}>{{ icon(endpoint) }}{{ label }}</a>
 {% if endpoint == 'jobs' %}<a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}Target companies</a>{% endif %}
 {% if endpoint == 'applications' %}<a href="{{ url_for('settings_page') }}#email">{{ icon('email') }}Email alerts</a>{% endif %}
-{% endfor %}</nav>
+{% endfor %}{% if is_account_admin %}<a href="{{ url_for('accounts.invitations') }}">Invite testers</a>{% endif %}</nav>
+{% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Sign out</button></form>{% endif %}
 <div class="me"><div class="av">{{ (user.name or 'Student')[0]|upper if user else 'S' }}</div><div><strong>{{ user.name or 'Student' if user else 'Your profile' }}</strong><div class="co">{{ settings.university if user and settings is defined else 'Local workspace' }}</div></div></div>
 </aside><main class="main" id="main" tabindex="-1">
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}

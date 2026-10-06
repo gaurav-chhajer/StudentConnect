@@ -3,7 +3,7 @@
 <form method="post" class="page-form" id="settings-form">{{ csrf() }}
 <section class="card"><h2>Profile</h2><div class="fields spaced">
 <label class="field">Full name<input name="name" maxlength="100" value="{{ user.name if user else '' }}" required></label>
-<label class="field">Email<input name="email" type="email" maxlength="254" value="{{ user.email if user else '' }}" required></label>
+<label class="field">Verified email<input name="email" type="email" maxlength="254" value="{{ user.email if user else '' }}" readonly required></label>
 <label class="field">University<input name="university" maxlength="200" value="{{ settings.university }}"></label>
 <label class="field">Graduation year<input name="graduation_year" type="number" min="1950" max="2100" value="{{ settings.graduation_year or '' }}"></label></div></section>
 <section class="card" id="companies"><h2>Target companies</h2><p class="sub">Choose the boards to follow. Choosing none means no jobs are scored or emailed. Multiple boards for one company are listed separately.</p>

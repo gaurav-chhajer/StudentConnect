@@ -45,9 +45,12 @@ class WebFlowTests(unittest.TestCase):
 
     def seed_user(self):
         self.conn.execute("INSERT INTO users(id,name,email,resume_text) VALUES(1,'Owner','owner@example.test','Python resume')")
+        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00')")
         for number, score in ((1, 85), (2, 75)):
             store_score(self.conn, number, 1, dict(fit_score=score, reasoning="Good fit", matched_skills=["Python"], missing_requirements=["SQL"]))
         self.conn.commit()
+        with self.client.session_transaction() as session:
+            session["user_id"],session["session_version"] = 1,0
 
     def post(self, path, data, client=None):
         client = client or self.client
@@ -71,7 +74,7 @@ class WebFlowTests(unittest.TestCase):
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 2)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 3)
 
     def test_location_suggestions_use_active_posting_terms_and_escape_markup(self):
         self.seed_user()
@@ -113,9 +116,14 @@ class WebFlowTests(unittest.TestCase):
         for route in routes:
             with self.subTest(route=route):
                 response = self.client.get(route)
-                self.assertEqual(response.status_code, 200)
-                for target in routes:
-                    self.assertIn(('href="' + target + '"').encode(), response.data)
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.headers["Location"], "/login")
+        self.seed_user()
+        for route in routes:
+            response=self.client.get(route)
+            self.assertEqual(response.status_code,200)
+            for target in routes:
+                self.assertIn(('href="'+target+'"').encode(),response.data)
 
     def test_refined_screens_preserve_local_navigation_and_read_only_rendering(self):
         self.seed_user()
@@ -159,6 +167,7 @@ class WebFlowTests(unittest.TestCase):
         self.assertEqual(saved["locations"], ["Bengaluru", "Karnataka", "Remote"])
 
     def test_location_script_nonce_matches_policy_and_changes_per_response(self):
+        self.seed_user()
         nonces = []
         for _ in range(2):
             page = self.client.get("/settings")
@@ -233,6 +242,7 @@ class WebFlowTests(unittest.TestCase):
         self.assertNotIn(b"nan", analytics.data.lower())
 
     def test_profile_onboarding_and_subscriptions_affect_every_match_view(self):
+        self.seed_user()
         response = self.post("/settings", self.settings_data())
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.conn.execute("SELECT name FROM users").fetchone()[0], "Owner")

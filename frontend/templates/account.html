@@ -1,0 +1,18 @@
+{% from 'macros.html' import csrf %}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Account · StudentConnect</title><link rel="stylesheet" href="{{ url_for('static',filename='sc.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static',filename='theme.css') }}"></head>
+<body><main class="main"><section class="card"><h1>StudentConnect</h1>
+<h2>{{ {'login':'Sign in','register':'Accept invitation','forgot':'Recover your account','reset':'Set a new password'}[mode] }}</h2>
+{% for notice in get_flashed_messages() %}<p role="status">{{ notice }}</p>{% endfor %}
+{% if message %}<p role="status">{{ message }}</p>{% endif %}
+<form method="post" class="page-form">{{ csrf() }}<div class="fields spaced">
+<label class="field">Email<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
+{% if mode == 'register' %}<label class="field">Full name<input name="name" maxlength="100" autocomplete="name" required></label>{% endif %}
+{% if mode in ['register','reset'] %}<label class="field">Emailed code<input name="code" type="password" minlength="43" maxlength="43" autocomplete="off" required></label>{% endif %}
+{% if mode != 'forgot' %}<label class="field">Password<input name="password" type="password" minlength="{{ 1 if mode=='login' else 12 }}" maxlength="128" autocomplete="{{ 'current-password' if mode=='login' else 'new-password' }}" required></label>{% endif %}
+{% if mode in ['register','reset'] %}<label class="field">Confirm password<input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label><p>Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
+</div><button class="btn p" type="submit">{{ 'Send recovery instructions' if mode=='forgot' else 'Continue' }}</button></form>
+<p><a href="{{ url_for('accounts.login') }}">Sign in</a> · <a href="{{ url_for('accounts.register') }}">Accept invitation</a> · <a href="{{ url_for('accounts.forgot') }}">Forgot password</a> · <a href="{{ url_for('accounts.reset') }}">Enter recovery code</a></p>
+<p>Registration is invitation-only. Your invitation verifies access to your email address.</p>
+</section></main></body></html>

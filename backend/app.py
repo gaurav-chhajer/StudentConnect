@@ -1,4 +1,4 @@
-"""Six-screen local StudentConnect application; external jobs run separately."""
+"""Authenticated StudentConnect application; external jobs run separately."""
 
 import hmac
 import json
@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import resumes, store
+from backend import accounts, hosting, resumes, store
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,9 +25,11 @@ def utc_now():
 
 
 def create_app(database_path=None, upload_dir=None):
+    origin, hosted, signing_key = hosting.application_settings()
     application = Flask(__name__, template_folder=str(ROOT / "frontend/templates"),
                         static_folder=str(ROOT / "frontend/static"))
-    application.config.update(SECRET_KEY=secrets.token_bytes(32), MAX_CONTENT_LENGTH=resumes.MAX_UPLOAD_BYTES + 65536,
+    application.config.update(SECRET_KEY=signing_key, SESSION_COOKIE_SECURE=hosted,
+                              MAX_CONTENT_LENGTH=resumes.MAX_UPLOAD_BYTES + 65536,
                               SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict")
     database = Path(database_path) if database_path is not None else ROOT / "data/jobs.db"
     uploads = Path(upload_dir) if upload_dir is not None else ROOT / "data/uploads"
@@ -46,7 +48,7 @@ def create_app(database_path=None, upload_dir=None):
             conn.close()
 
     def context():
-        user = store.profile(connection()) if database.is_file() else None
+        user = getattr(g, "user", None)
         return dict(user=user, settings=store.settings(connection(), user["id"]) if user else store.DEFAULT_SETTINGS,
                     navigation=NAVIGATION, active=request.endpoint, message=None, matches=[], companies=[],
                     digest=[], trend=[], metrics=None, page=1, pages=1, search="", company=0, min_score=0,
@@ -65,8 +67,21 @@ def create_app(database_path=None, upload_dir=None):
 
     @application.before_request
     def protect_local_actions():
-        if request.host.split(":")[0].lower() not in ("localhost", "127.0.0.1"):
-            return "This application is available only on localhost.", 403
+        allowed = (origin.removeprefix("https://"),) if hosted else ("localhost", "127.0.0.1")
+        if request.host.split(":")[0].lower() not in allowed:
+            return "This hostname is not configured for StudentConnect.", 403
+        g.user, g.account = None, None
+        user_id, version = session.get("user_id"), session.get("session_version")
+        if type(user_id) is int and type(version) is int and database.is_file():
+            account = connection().execute("SELECT a.* FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.session_version=? AND a.email_verified=1 AND u.active=1",(user_id,version)).fetchone()
+            if account:
+                g.account = dict(account)
+                g.user = dict(connection().execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone())
+        public = {"accounts.login", "accounts.register", "accounts.forgot", "accounts.reset", "static"}
+        if request.url_rule is not None and request.endpoint not in public and g.user is None:
+            if request.method == "GET":
+                return redirect(url_for("accounts.login"))
+            return "Sign in before making changes.", 401
         if request.endpoint == "settings_page":
             g.script_nonce = secrets.token_urlsafe(32)
         if request.method == "POST" and request.url_rule is not None:
@@ -79,6 +94,7 @@ def create_app(database_path=None, upload_dir=None):
     def protect_response(response):
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; style-src 'self' 'unsafe-inline'; "
             "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
@@ -211,6 +227,8 @@ def create_app(database_path=None, upload_dir=None):
             university = request.form.get("university", "").strip()
             if not name or len(name) > 100 or len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email) or len(university) > 200:
                 raise ValueError("Provide a name and valid email, within the field length limits")
+            if email.lower() != data["user"]["email"].lower():
+                raise ValueError("Your verified account email cannot be changed in Settings")
             year = request.form.get("graduation_year", "").strip()
             year = store.integer(year, 1950, 2100) if year else None
             cadence = request.form.get("cadence", "daily")
@@ -238,13 +256,10 @@ def create_app(database_path=None, upload_dir=None):
                 raise ValueError("Invalid employment preference")
             preferences["employment_types"] = types
             with conn:
-                if data["user"]:
-                    user_id = data["user"]["id"]
-                    conn.execute("UPDATE users SET name=?,email=?,preferences_json=? WHERE id=?", (name, email, json.dumps(preferences), user_id))
-                    if preferences != data["preferences"]:
-                        conn.execute("UPDATE scores SET is_stale=1 WHERE user_id=?", (user_id,))
-                else:
-                    user_id = conn.execute("INSERT INTO users(name,email,resume_text,preferences_json) VALUES(?,?,'',?)", (name, email, json.dumps(preferences))).lastrowid
+                user_id = data["user"]["id"]
+                conn.execute("UPDATE users SET name=?,preferences_json=? WHERE id=?", (name, json.dumps(preferences), user_id))
+                if preferences != data["preferences"]:
+                    conn.execute("UPDATE scores SET is_stale=1 WHERE user_id=?", (user_id,))
                 conn.execute("""INSERT INTO user_settings(user_id,university,graduation_year,cadence,send_time,timezone,min_score,include_gaps,subscriptions_configured)
                     VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(user_id) DO UPDATE SET
                     university=excluded.university,graduation_year=excluded.graduation_year,cadence=excluded.cadence,
@@ -334,6 +349,11 @@ def create_app(database_path=None, upload_dir=None):
             data["response_rate"] = round(100 * replies / applied, 1) if applied else None
         return render("analytics", data)
 
+    @application.context_processor
+    def account_navigation():
+        return dict(is_account_admin=bool(getattr(g,"account",None) and g.account["is_admin"]))
+
+    accounts.register_routes(application, connection, context, lambda: utc_now())
     return application
 
 

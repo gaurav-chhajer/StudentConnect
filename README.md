@@ -42,19 +42,58 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -B -m backend.app
 ```
 
-Open `http://127.0.0.1:5000`. The app is a local, unauthenticated workspace for
-exactly one active profile. It refuses to select between multiple active users
-and rejects non-local Host headers. It is **not ready for public multi-user
-hosting**: add authentication and authorization before opening access.
+Open `http://127.0.0.1:5000`. Sign-in is required for all six screens. Each account
+sees only its own profile, resume, matches, searches, applications and analytics.
+Without hosted configuration, the app rejects non-local Host headers.
 
 Forms require CSRF tokens and the app limits upload sizes. Session signing keys
 are generated in memory on startup, so a restart invalidates open forms; reload
 the page before submitting. These local session settings are not a production
-authentication solution.
+deployment configuration. Accounts expire after eight hours without cookie
+refresh. Sign-out and password reset revoke all existing sessions for that account.
+
+### Owner setup and invited accounts
+
+Back up the database before applying `003_accounts.sql` through the migration
+command above. This adds account/token tables and case-insensitive email uniqueness;
+it does not change existing resumes, scores or profiles. A case-insensitive email
+collision blocks migration and must be resolved deliberately. Do not edit applied
+migrations or delete the old database. Existing profiles cannot sign in until linked.
+
+Configure the existing Gmail environment variables, then explicitly request the
+first owner invitation:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.invite_owner
+```
+
+Enter the email already saved in your existing profile to retain its data and
+confirm `SEND` to send a real invitation. Open `/register`, enter the emailed
+43-character code, your email/name, and a new 12–128-character password. Ownership
+is verified by access to that email. Registration links the existing user ID
+without replacing profile data. The first owner can use **Invite testers** to
+send invitations; testers cannot invite others. Public registration is disabled.
+
+Invitations expire after 48 hours. Recovery is available from **Forgot password**;
+enter its code on **Enter recovery code** within 30 minutes. Codes work once, are
+stored only as SHA-256 hashes, and never appear in URLs or application logs.
+Passwords use Werkzeug PBKDF2-SHA256 with 600,000 iterations and random salts.
+Verified account emails cannot be changed in Settings. New users initially follow
+no companies; they must choose companies and upload their own resume.
+
+Five failed logins lock an account for 15 minutes. The local beta also limits all
+login/registration attempts to 50 and recovery/reset requests to 20 per five-minute
+window across accounts. Recovery mail has a five-minute per-account cooldown.
+Recovery responses deliberately do not reveal whether an email has an account;
+delivery errors are logged without private message contents. Uncertain invitation
+delivery retains the pending code; inspect Gmail before attempting another send.
+No invitation or recovery emails are automatically retried. An owner invitation
+cannot be issued while another unexpired owner invitation or any account exists.
 
 ## Connected flows
 
-1. Open **Settings** to create your profile, choose company boards, and save
+1. After accepting an invitation and signing in, open **Settings** to edit your
+   profile, choose company boards, and save
    role/location/type preferences. No companies selected means no new matching
    or email candidates. Existing profiles continue matching all companies until
    company choices are explicitly saved.
@@ -107,7 +146,7 @@ them. Dashboards and email selection exclude stale scores.
 Email preferences, including frequency, local send time/timezone, score threshold,
 and inclusion of gaps, are stored. Candidate selection honors company choices,
 thresholds, and Off; rendering honors the gap preference. The dashboard is only a candidate preview and does not mark
-jobs sent. A manual email command connects saved matches to Resend:
+jobs sent. A manual email command connects saved matches to Gmail SMTP:
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m scripts.run_local_email
@@ -115,25 +154,36 @@ jobs sent. A manual email command connects saved matches to Resend:
 ```
 
 The first command previews eligible counts without sending or logging personal
-content. `--send` sends a real HTML/plain-text digest to the sole active profile's
-saved email. Each run selects at most five active, current, unsent matches from
+content. `--send` sends a separate HTML/plain-text digest to each verified active
+account's saved email. Each run selects at most five active, current, unsent matches per user from
 chosen companies above the saved threshold; Off disables sending. Existing jobs
 can appear in the first digest. Groq evaluations include categories, component
 scores, eligibility blockers, and unknowns. Gap display follows the saved setting.
 No scores are generated by this command; run scoring separately first.
 
-Set `RESEND_API_KEY` and `DIGEST_FROM_EMAIL` in the system/process environment;
-the sender must be allowed by your Resend account/domain configuration. A missing
-or malformed sender is rejected. No credentials are required for count preview.
-Successful API acceptance marks the included jobs in `sent_log`; this does not
+Set `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` in the system/process environment.
+For this setup, the sender account is `improvingjobsearch@gmail.com`. Enable Google
+2-Step Verification and generate a 16-character App Password for that account;
+use it instead of the normal account password. Spaces between groups are accepted.
+Store the password locally through Windows **Edit environment variables for your
+account**, never in source code, chat, shell history, or Git. Open a new terminal
+after setting persistent variables. `.env.example` documents placeholders only;
+the application does not load that file. No credentials are required for preview.
+Delivery uses `smtp.gmail.com:465`, certificate-verified TLS, and a 15-second
+timeout per network operation, with the sender address also used for login.
+Successful SMTP acceptance marks the included jobs in `sent_log`; this does not
 prove inbox delivery. Failures return exit code 1 without marking jobs sent.
-The command serializes local sends with a SQLite write lock and uses a payload
-hash as Resend's idempotency key. Resend retains keys for 24 hours; uncertain
-timeouts or a crash after API acceptance need provider review before retrying,
-especially if the payload changes. There are no automatic retries.
+The command serializes each user's local send with a SQLite write lock. Earlier
+successful users remain recorded if a later user's send fails; the batch stops
+on that failure. Profiles not yet linked to verified accounts receive no digests.
+SMTP has no provider
+idempotency key: uncertain timeouts or a crash after acceptance can cause duplicate
+mail on a later manual send. Review Gmail Sent and local records before retrying.
+There are no automatic email retries. Resend credentials are no longer used.
 
 Manual sending honors Off but does not wait for a scheduled time.
-See [Resend idempotency documentation](https://resend.com/docs/dashboard/emails/idempotency-keys).
+See [Google App Password instructions](https://support.google.com/mail/answer/185833).
+Use this account for low-volume testing; Gmail sending limits still apply.
 
 ### Automatic email delivery on Windows
 
@@ -159,7 +209,7 @@ task. Preview installation without registering it:
 ```
 
 To activate real automatic emails, run the same command without `-WhatIf` and
-confirm its prompt. Store `RESEND_API_KEY` and `DIGEST_FROM_EMAIL` in persistent
+confirm its prompt. Store `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` in persistent
 Windows User/Machine environment variables first, then sign out/in so scheduled
 processes inherit changes. No credentials are stored in the task definition.
 Inspect or disable **StudentConnect Email Digests** in Windows Task Scheduler.
@@ -169,7 +219,7 @@ be run separately.
 
 Automatic sends create `data/email_schedule.paused` before attempting delivery.
 Success removes it; errors or crashes leave it to prevent automatic retries of
-uncertain sends. Review Resend and the local send log before clearing it. After
+uncertain sends. Review Gmail Sent and the local send log before clearing it. After
 confirming no accepted-but-unrecorded email exists, remove the marker to resume:
 
 ```powershell
@@ -197,7 +247,8 @@ automatic destructive rollback command.
 
 Read API credentials from process environment variables. `.env.example` lists
 placeholders; the application does not automatically load `.env` files. Keep
-credentials, resume files, and populated databases out of Git.
+credentials, resume files, and populated databases out of Git. The hosted WSGI
+entry point explicitly loads a private `.env`; local module commands do not.
 
 The default Groq model is `qwen/qwen3.8-27b` (the previous Llama model was unavailable).
 Explicit `GROQ_MODEL` environment overrides remain respected. Changing `GROQ_MODEL` requires
@@ -237,8 +288,8 @@ preserves existing data. Back up and run the migration before starting the app.
 No live scoring or email delivery happens when opening the dashboard; the scoring
 command sends your saved resume and full JD to Groq and can incur API charges.
 
-`RESEND_API_KEY` and `DIGEST_FROM_EMAIL` are needed for delivery from a
-verified sender. Storing email preferences alone does not schedule delivery.
+`GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` are needed for authenticated Gmail
+delivery. Storing email preferences alone does not schedule delivery.
 
 ## Verification
 
@@ -251,10 +302,93 @@ Tests use temporary databases and mock HTTP calls. No formatter, linter, or type
 checker is currently configured. `pip check` checks dependency consistency,
 not known vulnerabilities.
 
+## PythonAnywhere invited beta
+
+Target: `https://gauravchhajer.pythonanywhere.com/`. These steps prepare an invited
+beta, not an always-running job pipeline. Do not publish credentials or private
+data to GitHub. Windows environment variables do not transfer to the server.
+
+1. Push reviewed source changes yourself, then open a PythonAnywhere Bash console:
+
+   ```bash
+   git clone https://github.com/gaurav-chhajer/StudentConnect.git
+   cd StudentConnect
+   python3.12 -m venv .venv
+   .venv/bin/python -m pip install -r requirements.txt
+   ```
+
+   If already cloned, review local changes before updating; do not overwrite them.
+   Confirm your absolute project path using `pwd`.
+
+2. Decide whether to start fresh or retain local data. For retention, stop local
+   writers, take a SQLite backup, and upload that backup as `data/jobs.db` plus
+   `data/uploads/` through your private PythonAnywhere Files interface. Preserve
+   upload filenames and existing accounts. Never overwrite a populated hosted
+   database. For a fresh installation, the migration creates the database:
+
+   ```bash
+   .venv/bin/python -B -m backend.migrate
+   ```
+
+   Back up any existing database before running migrations.
+
+3. Create a private root `.env` using `.env.example` as the template. Set
+   `STUDENTCONNECT_BASE_URL=https://gauravchhajer.pythonanywhere.com`, your existing
+   Groq settings, `DIGEST_FROM_EMAIL=improvingjobsearch@gmail.com`, and the Gmail
+   app password. Set `STUDENTCONNECT_SECRET_KEY` once to a random 64-character
+   hexadecimal value. Generate it directly into the private file without printing:
+
+   ```bash
+   .venv/bin/python -c 'from dotenv import set_key; import secrets; set_key(".env", "STUDENTCONNECT_SECRET_KEY", secrets.token_hex(32))'
+   chmod 600 .env
+   ```
+
+   Run the generation command only during initial setup: replacing the key logs
+   everyone out. Existing process variables take precedence over `.env` values.
+   WSGI rejects missing hosted settings or email credentials before serving.
+
+4. In the **Web** tab, select manual configuration and Python 3.12. Set the virtual
+   environment to the absolute `.venv` path. Replace the provider WSGI file with
+   the following, correcting the project path to match `pwd`:
+
+   ```python
+   import sys
+   sys.path.insert(0, "/home/GauravChhajer/StudentConnect")
+   from wsgi import application
+   ```
+
+   Enable **Force HTTPS before Reload or inviting testers**. HTTPS redirection is
+   handled by PythonAnywhere; the app uses secure cookies and accepts only the
+   configured hostname. Do not map the repository, `.env`, `data/`, or uploads as
+   public static directories. Flask already serves `frontend/static/`.
+
+5. If there is no owner account or pending owner invitation, explicitly send the
+   first invitation from the console:
+
+   ```bash
+   .venv/bin/python -m dotenv -f .env run --no-override -- .venv/bin/python -B -m scripts.invite_owner
+   ```
+
+   This prompts for confirmation and sends a real email. Use the existing profile
+   email to retain its data. Register using the emailed code, then invite testers
+   from the owner's Invitations page. Each tester chooses their own companies and
+   uploads their own resume. Recovery emails include the hosted reset page URL.
+
+Verify HTTPS redirection, sign-in after a Web Reload, registration, password
+recovery, and isolation between two test accounts. Actual hosted Gmail and Groq
+connectivity still need testing. Free-tier outbound allowlists can block boards
+(especially Ashby), and new free accounts lack scheduled tasks. Run fetch, score,
+and email commands manually with the same dotenv prefix; preview email before
+adding `--send`. Web requests do not automatically fetch or score jobs. Arrange
+private backups and monitor storage limits and web-app expiry.
+
+Official setup: [Flask WSGI](https://help.pythonanywhere.com/pages/Flask/) and
+[Force HTTPS](https://help.pythonanywhere.com/pages/ForcingHTTPS/).
+
 ## Remaining work
 
-- Login, email verification, and authorization for public multi-user access.
-- PostgreSQL migration and a hosting/deployment plan.
+- Account lifecycle controls and verified hosted connectivity.
+- PostgreSQL migration for growth beyond the SQLite beta.
 - OCR for scanned resumes and broader support for complex document layouts.
 - Hosted scheduling, recovery of uncertain sends, and delivery/bounce tracking.
 - Email-open tracking and overall resume-quality scores shown in the mockups.

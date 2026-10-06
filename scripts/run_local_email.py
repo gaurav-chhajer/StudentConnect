@@ -1,4 +1,4 @@
-"""Preview saved match counts, or explicitly send a digest through Resend."""
+"""Preview saved match counts, or explicitly send a digest through Gmail SMTP."""
 
 import argparse
 import logging
@@ -8,9 +8,8 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import requests
 from backend import pipeline_skeleton as pipeline
-from backend.store import profile, settings
+from backend.store import settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,32 +46,39 @@ def schedule_due(conn, user_id, now):
 
 
 def send_digest(conn, send=False, scheduled=False, now=None):
-    """Send at most five matches for the sole active profile; preview by default."""
+    """Send at most five matches per verified active account; preview by default."""
     # Serialize selection/send/logging across local runs. The network wait is
     # bounded by delivery's timeout; this deliberately holds a SQLite write lock.
-    with conn:
-        if send:
-            conn.execute("BEGIN IMMEDIATE")
-        user = profile(conn)
-        if not user:
-            raise ValueError("Create an active profile in Settings first")
-        if scheduled and not schedule_due(conn, user["id"], now or datetime.now(timezone.utc)):
-            logger.info("Email schedule is not due; skipped")
-            return 0
-        matches = pipeline.get_unsent_top_matches(conn, user["id"])
-        if not matches:
-            logger.info("No eligible unsent matches; email skipped")
-            return 0
-        # Validate both templates during preview without printing personal data.
-        pipeline._render_email_html(user, matches)
-        pipeline._render_email_text(user, matches)
-        if not send:
-            logger.info("Preview: %d match(es) ready; no email sent", len(matches))
-            return len(matches)
-        pipeline.deliver_email(user, matches)
-        pipeline.mark_sent(conn, user["id"], [match["job_id"] for match in matches])
-        logger.info("Resend accepted one digest containing %d match(es)", len(matches))
-        return len(matches)
+    user_ids = conn.execute("SELECT u.id FROM users u JOIN accounts a ON a.user_id=u.id WHERE u.active=1 AND a.email_verified=1 ORDER BY u.id").fetchall()
+    if not user_ids:
+        raise ValueError("Create a verified account before sending job digests")
+    total = 0
+    for selected in user_ids:
+        with conn:
+            if send:
+                conn.execute("BEGIN IMMEDIATE")
+            # Recheck eligibility inside the send transaction.
+            user = conn.execute("SELECT u.* FROM users u JOIN accounts a ON a.user_id=u.id WHERE u.id=? AND u.active=1 AND a.email_verified=1",(selected[0],)).fetchone()
+            if user is None:
+                logger.info("Account no longer eligible (user_id=%s); skipped",selected[0])
+                continue
+            if scheduled and not schedule_due(conn,user["id"],now or datetime.now(timezone.utc)):
+                logger.info("Email schedule is not due (user_id=%s); skipped",user["id"])
+                continue
+            matches = pipeline.get_unsent_top_matches(conn,user["id"])
+            if not matches:
+                logger.info("No eligible unsent matches (user_id=%s); email skipped",user["id"])
+                continue
+            pipeline._render_email_html(user,matches)
+            pipeline._render_email_text(user,matches)
+            if not send:
+                logger.info("Preview: user_id=%s has %d match(es) ready; no email sent",user["id"],len(matches))
+            else:
+                pipeline.deliver_email(user,matches)
+                pipeline.mark_sent(conn,user["id"],[match["job_id"] for match in matches])
+                logger.info("Gmail SMTP accepted digest (user_id=%s) containing %d match(es)",user["id"],len(matches))
+            total += len(matches)
+    return total
 
 
 def main(argv=None):
@@ -101,7 +107,7 @@ def main(argv=None):
             send_digest(conn, send=args.send, scheduled=args.scheduled)
         if claimed:
             pause_path.unlink()
-    except (ValueError, RuntimeError, OSError, sqlite3.Error, requests.RequestException) as error:
+    except (ValueError, RuntimeError, OSError, sqlite3.Error) as error:
         logger.error("Email command failed (%s); inspect configuration and provider status before retrying", type(error).__name__)
         return 1
     return 0
