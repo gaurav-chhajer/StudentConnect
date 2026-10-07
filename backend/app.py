@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, hosting, resumes, store
+from backend import accounts, hosting, matching_tasks, resumes, store
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -255,6 +255,7 @@ def create_app(database_path=None, upload_dir=None):
             if any(value not in ("internship", "full-time", "part-time") for value in types):
                 raise ValueError("Invalid employment preference")
             preferences["employment_types"] = types
+            matching_changed = preferences != data["preferences"] or company_ids != data["subscriptions"]
             with conn:
                 user_id = data["user"]["id"]
                 conn.execute("UPDATE users SET name=?,preferences_json=? WHERE id=?", (name, json.dumps(preferences), user_id))
@@ -269,6 +270,8 @@ def create_app(database_path=None, upload_dir=None):
                 conn.execute("DELETE FROM company_subscriptions WHERE user_id=?", (user_id,))
                 conn.executemany("INSERT INTO company_subscriptions(user_id,company_id,subscribed_at) VALUES(?,?,?)",
                                  [(user_id, company_id, utc_now().isoformat()) for company_id in company_ids])
+                if matching_changed:
+                    matching_tasks.enqueue(conn, user_id, 'preferences' if preferences != data['preferences'] else 'companies', utc_now())
         except ValueError as error:
             data["message"] = str(error)
             return render("settings", data, 400)
@@ -351,7 +354,9 @@ def create_app(database_path=None, upload_dir=None):
 
     @application.context_processor
     def account_navigation():
-        return dict(is_account_admin=bool(getattr(g,"account",None) and g.account["is_admin"]))
+        user = getattr(g, 'user', None)
+        return dict(is_account_admin=bool(getattr(g,"account",None) and g.account["is_admin"]),
+                    matching_status=matching_tasks.status(connection(), user['id']) if user else None)
 
     accounts.register_routes(application, connection, context, lambda: utc_now())
     return application

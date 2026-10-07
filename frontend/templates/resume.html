@@ -6,14 +6,14 @@
 <form method="post" enctype="multipart/form-data" class="page-form spaced">{{ csrf() }}
 <label class="field">Upload a PDF, DOCX, or UTF-8 TXT resume (maximum 2 MB)<input aria-describedby="upload-help" name="resume_file" type="file" accept=".pdf,.docx,.txt"></label>
 <p class="sub" id="upload-help">PDFs must contain selectable text and at most 20 pages. Scanned PDFs and encrypted documents are not supported. DOCX paragraphs, tables, headers, and footers are extracted; text boxes, images, and tracked changes may not be included.</p>
-<p class="sub">After saving, review the extracted text below before running scoring. Complex layouts can change reading order; correct any missing or misplaced content in the editor.</p>
+<p class="sub">After saving, review the extracted text below. Complex layouts can change reading order; correct any missing or misplaced content before the next matching worker run.</p>
 <p class="sub">An uploaded file takes precedence over the editor.</p>
 <label class="field">Or edit resume text<textarea name="resume_text" rows="18" maxlength="100000">{{ user.resume_text }}</textarea></label>
-<label class="chk"><input type="checkbox" name="consent" required>I agree to local resume storage and its use in Groq requests when I run scoring.</label>
+<label class="chk"><input type="checkbox" name="consent" required>I agree to private resume storage and its use in Groq requests for automatic job matching.</label>
 <button class="btn p">Save new version</button></form>
-<p class="sub">Saving retains old versions and marks old scores stale. No AI request runs here.</p></section>
+<p class="sub">Saving retains old versions, marks old scores stale, and queues automatic matching. Groq requests run in the worker, after this page saves.</p></section>
 <section class="card"><h2>Recent versions</h2>{% for item in versions %}<div class="li"><span>{{ item.source_name }}</span><time>{{ item.created_at }}</time></div>{% else %}<p class="sub">No resume versions saved yet.</p>{% endfor %}
-<h3 class="spaced">Scoring status</h3><p>{{ stale_count }} stored scores need rescoring.</p><p class="sub">Run the scoring command after updating your resume.</p>
+<h3 class="spaced">Scoring status</h3><p>{{ stale_count }} stored scores need rescoring.</p><p class="sub">The matching worker processes pending work in batches. Check the matching status above after its next run.</p>
 <h3 class="spaced">Resume quality score</h3><p class="sub">An overall resume-quality score and predicted improvement points are not calculated yet.</p></section></div>
 <div class="two"><section class="card"><h2>Skills matched in jobs</h2><div class="chips spaced">{% for item in skills %}<span class="tag">{{ item.skill }} · {{ item.count }}</span>{% else %}<p class="sub">No current matching data yet.</p>{% endfor %}</div></section>
 <section class="card"><h2>Gaps to review</h2><p class="sub">Open each job match to review missing requirements in context.</p><a class="btn spaced" href="{{ url_for('jobs') }}">Review job matches</a></section></div>{% endif %}{% endblock %}

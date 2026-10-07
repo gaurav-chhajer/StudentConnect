@@ -14,6 +14,7 @@ from docx.text.paragraph import Paragraph
 from lxml.etree import XMLSyntaxError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
+from backend import matching_tasks
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_RESUME_CHARACTERS = 100000
@@ -149,6 +150,7 @@ def save_version(conn, user, text, source_name, now, upload_dir, content=None, s
                          (user["id"], text, source_name, file_name, timestamp))
             conn.execute("UPDATE users SET resume_text=?,resume_updated_at=? WHERE id=?", (text, timestamp, user["id"]))
             conn.execute("UPDATE scores SET is_stale=1 WHERE user_id=?", (user["id"],))
+            matching_tasks.enqueue(conn, user['id'], 'resume', now)
     except BaseException:
         # Remove only the newly created upload if its DB transaction did not succeed.
         if destination is not None:

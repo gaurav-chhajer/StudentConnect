@@ -338,6 +338,46 @@ budget. Existing bounded Groq 429 retries apply per evaluation, so this budget
 is not a strict HTTP-request or token limit. Pending work continues next cycle.
 Inputs are rechecked under a write transaction before saving a score.
 
+### Matching triggered by user changes
+
+The additive `004_matching_tasks.sql` migration adds one durable task per user
+and initializes tasks for existing active verified accounts. Back up the database
+before running `python -B -m backend.migrate`; applied migrations stay unchanged.
+Company selection/removal and matching-preference changes enqueue work in the
+same transaction as Settings. Resume changes enqueue work with the saved version.
+Unchanged saves and email-only preference changes do not enqueue new matching.
+New/changed posting snapshots discovered by the pipeline queue following users.
+
+Repeated changes coalesce into the existing task. A revision protects newer edits
+from completion of older work. Task statuses are shown only to the signed-in user:
+pending, in progress, complete or failed. Accounts without resumes remain pending
+until a resume is saved. Budget-limited work remains pending; interrupted running
+tasks are reclaimed on the next worker run under the existing process lock.
+Failed matching is retried on the next worker cycle with the existing limits.
+
+Process queued tasks without checking unrelated boards or sending emails:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_pipeline --run --matching-only
+```
+
+Omit `--run` to preview the number of ready tasks without external calls or writes.
+This mode checks current openings at each queued user's selected companies and
+then scores missing/stale eligible matches. It processes up to 100 ready user
+tasks per cycle, using the same scoring budgets as the full pipeline. Existing
+current scores are reused, including when following a company again. Empty
+company selections finish without scoring. Failed board refreshes retain old jobs
+and mark matching failed rather than claiming that all openings were checked.
+
+The matching-only worker needs Groq credentials but not Gmail; it can run while
+email delivery is paused, leaving the email pause marker untouched. The normal
+`--run` cycle also consumes these tasks, fetches new postings and sends due digests.
+User requests only save tasks; they do not launch an unowned thread or make Groq
+calls in a Flask request. Refresh a page after a worker run to see updated status.
+Use a supported scheduler for periodic matching-only cycles and full cycles;
+the worker exits after each batch, so it need not run continuously. Without a
+scheduler or an explicit worker invocation, pending tasks will not process.
+
 Emails use the existing daily/weekly cadence, timezone, minimum score, selected
 companies and unsent-job rules, with up to five matches per digest. A successful
 empty board closes its old jobs. Malformed response shapes are rejected rather

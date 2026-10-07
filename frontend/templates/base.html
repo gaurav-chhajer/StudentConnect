@@ -17,6 +17,13 @@
 </aside><main class="main" id="main" tabindex="-1">
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
+{% if matching_status %}<p class="notice" role="status">
+{% if not user.resume_text|trim %}<strong>Matching pending.</strong> Add a resume to start matching.
+{% elif matching_status.status == 'pending' %}<strong>Matching pending.</strong> Your current openings will be checked on the next worker run.
+{% elif matching_status.status == 'running' %}<strong>Matching in progress.</strong> Refresh this page to see updated results.
+{% elif matching_status.status == 'failed' %}<strong>Matching needs another attempt.</strong> Some openings could not be checked. Saved matches remain available; the worker will try again on its next run.
+{% else %}<strong>Matching complete.</strong> All currently eligible openings have been checked. Email delivery follows your saved schedule.
+{% endif %}</p>{% endif %}
 {% if not user and active != 'settings_page' %}<p><a class="btn p" href="{{ url_for('settings_page') }}">Set up your profile</a></p>{% endif %}
 {% block content %}{% endblock %}
 <p class="sub">Fit scores estimate resume compatibility, not hiring probability. This workspace is local to your computer.</p>

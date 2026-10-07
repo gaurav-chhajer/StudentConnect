@@ -26,7 +26,7 @@
 <small id="location-status" role="status" aria-live="polite"></small>
 <noscript><small>JavaScript is disabled. Existing selections are retained; enter additional locations separated by commas and save the form.</small></noscript></div>
 <label class="field">Minimum stipend (INR)<input name="min_stipend" type="number" min="0" max="1000000" value="{{ preferences.get('min_stipend') or '' }}"></label></div>
-<p class="sub">Leave these fields empty to skip their filters. Changing job preferences marks old scores stale; run scoring again. Compensation matching remains approximate.</p>
+<p class="sub">Leave these fields empty to skip their filters. Changing job preferences queues matching and marks old scores stale. Selecting a company queues a check of its current openings. Matching runs when the worker processes your task. Compensation matching remains approximate.</p>
 {% for kind in ['internship','full-time','part-time'] %}<label class="chk"><input type="checkbox" name="employment_types" value="{{ kind }}" {% if kind in preferences.get('employment_types',[]) %}checked{% endif %}>{{ kind|title }}</label>{% endfor %}
 <p class="sub">No types selected means any type. Specific types require structured ATS data.</p></section>
 <div class="form-footer"><button class="btn p">{{ 'Save changes' if user else 'Create profile' }}</button></div></form>
