@@ -70,6 +70,23 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(self.login().status_code,302)
         self.assertEqual(self.client.get("/").status_code,200)
 
+    def test_account_pages_load_local_assets_with_restricted_script_nonce(self):
+        for route in ("/login", "/register", "/forgot-password", "/reset-password"):
+            with self.subTest(route=route):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200)
+                nonce = re.search(rb'<script defer nonce="([^"]+)"', response.data).group(1).decode()
+                self.assertIn("script-src 'nonce-" + nonce + "'", response.headers["Content-Security-Policy"])
+                self.assertIn("script-src-attr 'none'", response.headers["Content-Security-Policy"])
+                self.assertIn(b'name="csrf_token"', response.data)
+                self.assertNotIn(b"fonts.googleapis.com", response.data)
+                assets = re.findall(rb'(?:href|src)="(/static/[^"]+)"', response.data)
+                self.assertTrue(assets)
+                for asset in assets:
+                    with self.client.get(asset.decode()) as static_response:
+                        self.assertEqual(static_response.status_code, 200)
+        self.assertEqual(self.client.post("/login", data=dict(email="tester@example.test", password=TEST_PASSWORD)).status_code, 403)
+
     def test_registration_requires_matching_unexpired_invitation(self):
         code=self.invitation()
         for form in (self.form("other@example.test",code),self.form("tester@example.test","a"*43),

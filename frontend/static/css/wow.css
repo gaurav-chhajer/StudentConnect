@@ -1,0 +1,52 @@
+/* StudentConnect wow layer. Load after sc.css, app.css, theme.css and auth.css. */
+@keyframes aur{to{transform:translate3d(-2%,3%,0) scale(1.1)}}
+@keyframes floaty{50%{transform:translateY(-9px)}}
+@keyframes sparkdraw{to{stroke-dashoffset:0}}
+.app{position:relative}
+.app::before{content:"";position:fixed;inset:-10%;z-index:0;pointer-events:none;background:radial-gradient(620px 420px at 82% 0%,rgba(46,75,232,.2),transparent 62%),radial-gradient(520px 380px at 38% 100%,rgba(255,122,89,.16),transparent 62%),radial-gradient(440px 340px at 100% 58%,rgba(124,92,255,.14),transparent 62%);animation:aur 18s ease-in-out infinite alternate}
+.app .side{position:relative;z-index:2}.app .main{position:relative;z-index:1}
+.app .card{position:relative;background:rgba(255,255,255,.82);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);border-color:rgba(255,255,255,.85);box-shadow:0 10px 30px rgba(14,21,48,.06)}
+.app .kc,.app .jc{position:relative}
+.app .card::after,.app .kc::after,.app .jc::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;transition:opacity .3s;background:radial-gradient(260px circle at var(--mx,50%) var(--my,50%),rgba(46,75,232,.12),transparent 65%)}
+.app .card:hover::after,.app .kc:hover::after,.app .jc:hover::after{opacity:1}
+.app .list .jc,.app .kc{animation-fill-mode:backwards}
+.app .nav a .ic{transition:transform .25s}.app .nav a:hover .ic{transform:scale(1.18) rotate(-6deg)}
+.app .nav a.on,.app .nav a.on:hover{box-shadow:0 10px 26px rgba(46,75,232,.5)}
+.app .btn.p{position:relative;overflow:hidden}
+.app .btn.p::after{content:"";position:absolute;top:0;left:-70%;width:40%;height:100%;background:rgba(255,255,255,.35);transform:skewX(-20deg);transition:left .7s}
+.app .btn.p:hover::after{left:140%}
+.app .btn.ghost{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.28);color:#fff}
+.cursor-glow{position:fixed;left:0;top:0;width:360px;height:360px;margin:-180px 0 0 -180px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(closest-side,rgba(46,75,232,.16),transparent);opacity:0;transition:opacity .4s;will-change:transform}
+.cursor-glow.on{opacity:1}
+.logo-tile{grid-row:1/3;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#fff;font:700 18px 'Bricolage Grotesque',sans-serif;box-shadow:0 6px 14px rgba(14,21,48,.2)}
+.with-logo{display:grid;grid-template-columns:40px minmax(0,1fr);column-gap:12px;align-items:center}
+.spark{position:absolute;right:16px;bottom:16px;width:96px;height:29px;overflow:visible}
+.spark path{fill:none;stroke:var(--acc);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:1;stroke-dashoffset:1;animation:sparkdraw 1.6s ease .7s forwards}
+.hero-banner{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);align-items:center;gap:24px;padding:32px;border-radius:24px;background:var(--side);color:#fff}
+.hero-banner::before{content:"";position:absolute;width:320px;height:320px;border-radius:50%;background:var(--acc);filter:blur(80px);opacity:.5;top:-120px;right:-60px;pointer-events:none}
+.hero-banner>*{position:relative;z-index:1}
+.hero-banner>.scene,.auth-hero>.scene{position:absolute;inset:0;width:100%;height:100%;z-index:0;animation:fadein 1.6s ease both}
+.hero-banner h2{font-size:clamp(24px,3vw,36px);line-height:1.1;margin:10px 0 8px;color:#fff}
+.hero-banner p{color:#B8C1DF;margin:0 0 20px;max-width:46ch}
+.hero-banner .eyebrow{margin:0;color:var(--pop);font-weight:600;font-size:13px;letter-spacing:.08em;text-transform:uppercase}
+.hero-banner .art{width:100%;max-width:300px;justify-self:end}
+.f1,.f2,.f3{animation:floaty 5s ease-in-out infinite}.f2{animation-delay:-1.6s}.f3{animation-delay:-3.2s}
+@media (max-width:760px){.hero-banner{grid-template-columns:1fr;padding:24px}.hero-banner .art{display:none}}
+@media (prefers-reduced-motion:reduce){.app::before,.hero-banner *,.spark path{animation:none!important}.spark path{stroke-dashoffset:0}.cursor-glow{display:none}}
+.auth-app{grid-template-columns:minmax(320px,1fr) minmax(380px,1fr)}
+.auth-app .auth-hero{padding:clamp(24px,5vw,64px);gap:32px;justify-content:center;overflow:hidden}
+.auth-hero>*{position:relative;z-index:1}.auth-hero .logo{padding:0}
+.auth-hero .eyebrow{color:var(--pop);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+.auth-hero .hero-title{font-size:clamp(32px,4vw,52px);line-height:1.1;margin:12px 0 20px;color:#fff}
+.auth-hero .mark{color:var(--pop)}.auth-hero .hero-text,.hero-points{color:#B8C1DF;line-height:1.6}
+.hero-points{padding-left:20px;margin:0}.hero-points li+li{margin-top:8px}
+.match-card{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:24px;max-width:400px}
+.new-chip{display:inline-block;color:var(--pop);font-weight:600;margin-bottom:16px}
+.match-top{display:flex;gap:20px;align-items:center;margin-bottom:20px}.match-card .role{color:#fff}.match-card .co{color:#B8C1DF}
+.ring-wrap{position:relative;width:96px;height:96px;flex:none;display:grid;place-items:center}.ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:7}.ring-bg{stroke:rgba(255,255,255,.15)}.ring-fg{stroke:var(--pop);stroke-linecap:round}.ring-wrap b{font-size:24px;color:#fff}
+.match-card .bars{display:grid;gap:12px}.match-card .bl{color:#B8C1DF}.match-card .tr{background:rgba(255,255,255,.12)}.w90{width:90%}.w85{width:85%}.w98{width:98%}
+.auth-app .auth-main{display:flex;justify-content:center;align-items:center;padding:clamp(20px,4vw,56px);min-width:0}
+.auth-card{width:100%;max-width:520px}.auth-card h1{margin-top:16px}.auth-card .fields{grid-template-columns:1fr}.auth-card .page-form>.actions .btn{width:100%;justify-content:center}
+.auth-links{margin-top:24px;font-size:13px}.auth-links [aria-current=page]{font-weight:700;text-decoration:underline}
+@media(max-width:860px){.auth-app{grid-template-columns:1fr}.auth-app .auth-hero{display:flex;flex-direction:column;align-items:stretch}.auth-hero .match-card,.auth-hero .hero-points{display:none}.auth-hero .hero-title{font-size:32px}.auth-app .auth-main{padding:24px 16px}}

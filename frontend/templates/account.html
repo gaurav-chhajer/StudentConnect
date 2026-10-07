@@ -1,18 +1,44 @@
 {% from 'macros.html' import csrf %}
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Account · StudentConnect</title><link rel="stylesheet" href="{{ url_for('static',filename='sc.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='app.css') }}">
-<link rel="stylesheet" href="{{ url_for('static',filename='theme.css') }}"></head>
-<body><main class="main"><section class="card"><h1>StudentConnect</h1>
-<h2>{{ {'login':'Sign in','register':'Accept invitation','forgot':'Recover your account','reset':'Set a new password'}[mode] }}</h2>
-{% for notice in get_flashed_messages() %}<p role="status">{{ notice }}</p>{% endfor %}
-{% if message %}<p role="status">{{ message }}</p>{% endif %}
+<title>Account · StudentConnect</title>
+<link rel="stylesheet" href="{{ url_for('static',filename='css/sc.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static',filename='css/theme.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/wow.css') }}">
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static',filename='js/wow.js') }}"></script></head>
+<body><a class="skip-link" href="#content">Skip to content</a>
+<div class="app auth-app">
+<aside class="side auth-hero">
+<a class="logo" href="{{ url_for('accounts.login') }}"><i></i>StudentConnect</a>
+<div class="hero-copy">
+<p class="eyebrow">Built for students</p>
+<h2 class="hero-title">Find work that fits your <span class="mark">resume</span>.</h2>
+<p class="hero-text">Choose the companies you care about. We score every opening against your resume and email you the best matches.</p>
+</div>
+<div class="match-card" aria-hidden="true">
+<span class="new-chip">New match</span>
+<div class="match-top">
+<div class="ring-wrap"><svg class="ring" viewBox="0 0 100 100"><circle class="ring-bg" cx="50" cy="50" r="42"/><circle class="ring-fg" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="21"/></svg><b>92%</b></div>
+<div><div class="role">Resume match</div><div class="co">Sample preview</div></div>
+</div>
+<div class="bars">
+<div><div class="bl"><span>Skills</span><span>90%</span></div><div class="tr"><b class="w90"></b></div></div>
+<div><div class="bl"><span>Experience</span><span>85%</span></div><div class="tr"><b class="w85"></b></div></div>
+<div><div class="bl"><span>Education</span><span>98%</span></div><div class="tr"><b class="w98"></b></div></div>
+</div>
+</div>
+<ul class="hero-points"><li>Choose your target companies</li><li>See a match score for every job</li><li>Get new matches by email</li></ul>
+</aside>
+<main class="main auth-main" id="content"><section class="card auth-card">
+<span class="tag">Invitation-only access</span>
+<h1>{{ {'login':'Sign in','register':'Accept invitation','forgot':'Recover your account','reset':'Set a new password'}[mode] }}</h1>
+<p class="sub">Registration is invitation-only. Your invitation verifies access to your email address.</p>
+{% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
+{% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
 <form method="post" class="page-form">{{ csrf() }}<div class="fields spaced">
 <label class="field">Email<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
 {% if mode == 'register' %}<label class="field">Full name<input name="name" maxlength="100" autocomplete="name" required></label>{% endif %}
 {% if mode in ['register','reset'] %}<label class="field">Emailed code<input name="code" type="password" minlength="43" maxlength="43" autocomplete="off" required></label>{% endif %}
 {% if mode != 'forgot' %}<label class="field">Password<input name="password" type="password" minlength="{{ 1 if mode=='login' else 12 }}" maxlength="128" autocomplete="{{ 'current-password' if mode=='login' else 'new-password' }}" required></label>{% endif %}
-{% if mode in ['register','reset'] %}<label class="field">Confirm password<input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label><p>Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
-</div><button class="btn p" type="submit">{{ 'Send recovery instructions' if mode=='forgot' else 'Continue' }}</button></form>
-<p><a href="{{ url_for('accounts.login') }}">Sign in</a> · <a href="{{ url_for('accounts.register') }}">Accept invitation</a> · <a href="{{ url_for('accounts.forgot') }}">Forgot password</a> · <a href="{{ url_for('accounts.reset') }}">Enter recovery code</a></p>
-<p>Registration is invitation-only. Your invitation verifies access to your email address.</p>
-</section></main></body></html>
+{% if mode in ['register','reset'] %}<label class="field">Confirm password<input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label><p class="sub">Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
+</div><div class="actions"><button class="btn p" type="submit"><span>{{ 'Send recovery instructions' if mode=='forgot' else 'Continue' }}</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div></form>
+<nav class="actions auth-links" aria-label="Account links"><a href="{{ url_for('accounts.login') }}"{% if mode=='login' %} aria-current="page"{% endif %}>Sign in</a><a href="{{ url_for('accounts.register') }}"{% if mode=='register' %} aria-current="page"{% endif %}>Accept invitation</a><a href="{{ url_for('accounts.forgot') }}"{% if mode=='forgot' %} aria-current="page"{% endif %}>Forgot password</a><a href="{{ url_for('accounts.reset') }}"{% if mode=='reset' %} aria-current="page"{% endif %}>Enter recovery code</a></nav>
+</section></main></div></body></html>

@@ -5,7 +5,7 @@ using Groq, and prepares match-score email digests. The local Flask application
 connects six screens: Dashboard, Job matches, My resume, Applications,
 Analytics, and Settings.
 
-The live pages adapt the updated root-level `*-html` design references with a
+The live pages adapt the references in `frontend/designs/updated/` with a
 shared navy sidebar, blue/coral theme, navigation icons, and reduced-motion
 support. Dashboard and Analytics charts use saved scores and counts; unsupported
 mockup metrics remain identified as unavailable. Fonts use local system fallbacks
@@ -17,19 +17,28 @@ so the interface does not request external font services.
 backend/             Flask routes, SQLite queries, resume storage, matching pipeline
 backend/migrations/  Versioned additive SQL migrations
 frontend/templates/  Jinja pages and shared navigation
-frontend/static/     Shared styles adapted from the design exports
-frontend/designs/    Original six design exports and their unmodified runtimes
+frontend/static/css/ Shared styles and account-page effects
+frontend/static/js/  Location picker and account-page effects
+frontend/designs/original/ Preserved earlier exports and unmodified runtimes
+frontend/designs/updated/  Preserved newer six *-html design references
 scripts/             Explicit fetch, score, test-profile, and board-discovery commands
 tests/               Offline unittest suites
 data/boards/         Company-board CSV files
 data/jobs.db         Local SQLite database (ignored by Git)
 data/backups/        Database backups (ignored by Git)
 data/uploads/        Private original resume files (ignored by Git)
+wsgi.py              Hosted application entry point
+requirements.txt     Pinned Python dependencies
+.env.example         Configuration placeholders; never real credentials
 ```
 
 The old root-level scripts have moved. Run the module commands below from the
 repository root. Paths to the database and CSVs are anchored to the project,
 not the shell's working directory. Do not serve the repository as a static site.
+Design exports are reference files, not live templates. Edit `frontend/templates/`
+and `frontend/static/` for application changes. Both design collections retain
+their original contents. Existing backend, script, test and private-data paths
+are unchanged; module commands still run from the repository root.
 
 ## Install and run locally
 

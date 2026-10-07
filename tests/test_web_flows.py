@@ -132,14 +132,14 @@ class WebFlowTests(unittest.TestCase):
             with self.subTest(route=route):
                 response = self.client.get(route)
                 self.assertEqual(response.status_code, 200)
-                self.assertIn(b'href="/static/theme.css"', response.data)
+                self.assertIn(b'href="/static/css/theme.css"', response.data)
                 self.assertIn(b'href="#main">Skip to content', response.data)
                 self.assertIn(b'aria-current="page"', response.data)
                 self.assertIn(b'aria-hidden="true"', response.data)
                 self.assertNotIn(b"fonts.googleapis.com", response.data)
                 if route == "/settings":
                     self.assertEqual(response.data.count(b"<script"), 1)
-                    self.assertIn(b'src="/static/locations.js"', response.data)
+                    self.assertIn(b'src="/static/js/locations.js"', response.data)
                 else:
                     self.assertNotIn(b"<script", response.data)
                     self.assertNotIn("script-src", response.headers["Content-Security-Policy"])
@@ -171,7 +171,7 @@ class WebFlowTests(unittest.TestCase):
         nonces = []
         for _ in range(2):
             page = self.client.get("/settings")
-            nonce = re.search(rb'<script src="/static/locations.js" nonce="([^"]+)" defer>', page.data)
+            nonce = re.search(rb'<script src="/static/js/locations.js" nonce="([^"]+)" defer>', page.data)
             self.assertIsNotNone(nonce)
             value = nonce.group(1).decode()
             nonces.append(value)
@@ -183,7 +183,7 @@ class WebFlowTests(unittest.TestCase):
             self.assertNotIn("script-src 'self'", policy)
             self.assertNotIn("script-src 'unsafe-inline'", policy)
         self.assertNotEqual(nonces[0], nonces[1])
-        script = self.client.get("/static/locations.js")
+        script = self.client.get("/static/js/locations.js")
         self.addCleanup(script.close)
         self.assertEqual(script.status_code, 200)
         self.assertNotIn("script-src", script.headers["Content-Security-Policy"])
@@ -287,7 +287,7 @@ class WebFlowTests(unittest.TestCase):
 
     def test_all_populated_screens_render_and_static_styles_are_available(self):
         self.seed_user()
-        for route in ("/", "/jobs", "/settings", "/analytics", "/applications", "/resume", "/static/sc.css", "/static/theme.css", "/static/app.css"):
+        for route in ("/", "/jobs", "/settings", "/analytics", "/applications", "/resume", "/static/css/sc.css", "/static/css/theme.css", "/static/css/app.css"):
             with self.subTest(route=route):
                 response = self.client.get(route)
                 self.addCleanup(response.close)

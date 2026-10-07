@@ -29,4 +29,4 @@
 {% for kind in ['internship','full-time','part-time'] %}<label class="chk"><input type="checkbox" name="employment_types" value="{{ kind }}" {% if kind in preferences.get('employment_types',[]) %}checked{% endif %}>{{ kind|title }}</label>{% endfor %}
 <p class="sub">No types selected means any type. Specific types require structured ATS data.</p></section>
 <div class="form-footer"><button class="btn p">{{ 'Save changes' if user else 'Create profile' }}</button></div></form>
-<script src="{{ url_for('static', filename='locations.js') }}" nonce="{{ script_nonce }}" defer></script>{% endblock %}
+<script src="{{ url_for('static', filename='js/locations.js') }}" nonce="{{ script_nonce }}" defer></script>{% endblock %}

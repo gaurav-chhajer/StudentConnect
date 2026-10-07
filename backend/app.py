@@ -82,7 +82,7 @@ def create_app(database_path=None, upload_dir=None):
             if request.method == "GET":
                 return redirect(url_for("accounts.login"))
             return "Sign in before making changes.", 401
-        if request.endpoint == "settings_page":
+        if request.endpoint in {"settings_page", "accounts.login", "accounts.register", "accounts.forgot", "accounts.reset"}:
             g.script_nonce = secrets.token_urlsafe(32)
         if request.method == "POST" and request.url_rule is not None:
             token = request.form.get("csrf_token", "")
