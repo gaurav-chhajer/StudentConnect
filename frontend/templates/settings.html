@@ -1,5 +1,6 @@
-{% extends 'base.html' %}{% from 'macros.html' import csrf %}{% block title %}Settings · StudentConnect{% endblock %}
+{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner %}{% block title %}Settings · StudentConnect{% endblock %}
 {% block content %}<div class="top2"><div><h1>Settings</h1><p class="sub">Your profile, job preferences, and company choices.</p></div><button class="btn p" type="submit" form="settings-form">{{ 'Save changes' if user else 'Create profile' }}</button></div>
+{{ page_banner('Your preferences','Make your matches work for you','Choose your target companies, job preferences, and digest settings in one place.',url_for('dashboard'),'Back to dashboard',url_for('resume'),'My resume','settings') }}
 <form method="post" class="page-form" id="settings-form">{{ csrf() }}
 <section class="card"><h2>Profile</h2><div class="fields spaced">
 <label class="field">Full name<input name="name" maxlength="100" value="{{ user.name if user else '' }}" required></label>

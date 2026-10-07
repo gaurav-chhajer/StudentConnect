@@ -5,11 +5,13 @@ using Groq, and prepares match-score email digests. The local Flask application
 connects six screens: Dashboard, Job matches, My resume, Applications,
 Analytics, and Settings.
 
-The live pages adapt the references in `frontend/designs/updated/` with a
-shared navy sidebar, blue/coral theme, navigation icons, and reduced-motion
-support. Dashboard and Analytics charts use saved scores and counts; unsupported
-mockup metrics remain identified as unavailable. Fonts use local system fallbacks
-so the interface does not request external font services.
+The live pages adapt the latest references in `frontend/designs/animated/` with a
+shared navy sidebar, blue/coral theme, glass cards, illustrated page banners,
+company initial tiles, and reduced-motion support. Dashboard and Analytics
+sparklines use saved weekly scores and counts; unsupported mockup metrics remain
+identified as unavailable. The live effects use server-rendered SVG and CSS;
+the reference React/Three.js runtimes are not loaded by the application. Fonts
+use local system fallbacks so the interface does not request external font services.
 
 ## Project layout
 
@@ -21,6 +23,7 @@ frontend/static/css/ Shared styles and account-page effects
 frontend/static/js/  Location picker and account-page effects
 frontend/designs/original/ Preserved earlier exports and unmodified runtimes
 frontend/designs/updated/  Preserved newer six *-html design references
+frontend/designs/animated/ Latest six *-html exports, including original CSS/JS/vendor files
 scripts/             Explicit fetch, score, test-profile, and board-discovery commands
 tests/               Offline unittest suites
 data/boards/         Company-board CSV files
@@ -36,8 +39,9 @@ The old root-level scripts have moved. Run the module commands below from the
 repository root. Paths to the database and CSVs are anchored to the project,
 not the shell's working directory. Do not serve the repository as a static site.
 Design exports are reference files, not live templates. Edit `frontend/templates/`
-and `frontend/static/` for application changes. Both design collections retain
-their original contents. Existing backend, script, test and private-data paths
+and `frontend/static/` for application changes. All design collections retain
+their original contents; root-level exports are also retained as supplied.
+Existing backend, script, test and private-data paths
 are unchanged; module commands still run from the repository root.
 
 ## Install and run locally
@@ -130,7 +134,7 @@ cannot be issued while another unexpired owner invitation or any account exists.
    archives are limited to 1,000 entries and nested tables to 10 levels.
    Old `.doc` files are not supported. Consent is required. Original
    uploads are stored privately with generated filenames. Versions are retained.
-3. Fetch postings and run scoring explicitly:
+3. Fetch postings and run scoring explicitly, or schedule the unified pipeline below:
 
 ```powershell
 .\.venv\Scripts\python.exe -m scripts.run_local_fetch
@@ -195,6 +199,13 @@ See [Google App Password instructions](https://support.google.com/mail/answer/18
 Use this account for low-volume testing; Gmail sending limits still apply.
 
 ### Automatic email delivery on Windows
+
+Starting the Flask app or deploying it to PythonAnywhere does not schedule
+fetching, scoring, or digests. `scripts.run_local_fetch` seeds the company list
+from the verified board CSVs and fetches active boards only when explicitly run;
+`scripts.run_local_score` is also a separate manual command. The optional Windows
+task below sends existing saved matches only and does not update jobs or scores.
+No PythonAnywhere scheduled task is installed by this repository.
 
 Preview whether a digest is due without sending:
 
@@ -299,6 +310,64 @@ command sends your saved resume and full JD to Groq and can incur API charges.
 
 `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` are needed for authenticated Gmail
 delivery. Storing email preferences alone does not schedule delivery.
+
+## Unified fetch, score, and email pipeline
+
+`scripts.run_pipeline` is one complete cycle for a scheduler on the **same machine
+and database as the website**. It does not start a background thread in Flask.
+Initialize/migrate the database and configure Groq and Gmail before enabling it.
+
+Preview existing due matches without fetching, scoring, writing data, or sending:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_pipeline
+```
+
+Execute a real cycle (makes external requests and sends due emails):
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_pipeline --run
+```
+
+The cycle seeds known boards, fetches active boards, then scores only verified
+active accounts with a nonempty saved resume. Company subscriptions and existing
+role/location/type filters apply. Current scores are skipped. Accounts least
+recently scored run first, with up to five evaluations per account and twenty
+total per cycle; `--max-scores 1` through `--max-scores 100` changes the total
+budget. Existing bounded Groq 429 retries apply per evaluation, so this budget
+is not a strict HTTP-request or token limit. Pending work continues next cycle.
+Inputs are rechecked under a write transaction before saving a score.
+
+Emails use the existing daily/weekly cadence, timezone, minimum score, selected
+companies and unsent-job rules, with up to five matches per digest. A successful
+empty board closes its old jobs. Malformed response shapes are rejected rather
+than treated as empty boards. Failed boards retain old data and are excluded
+from scoring and email for that cycle; successful boards continue. All-board
+failures skip scoring/email. Groq failures retain completed scores; valid current
+scores may still be emailed. Partial failures return exit code 1 for monitoring.
+
+`data/pipeline.lock` prevents simultaneous unified cycles and automatically releases
+its OS lock on exit/crash. The file remains. Run only one pipeline scheduler and
+avoid running standalone fetch/score commands concurrently. Existing
+`data/email_schedule.paused` protection also applies: uncertain delivery leaves
+the marker and prevents future cycles until the owner reviews Gmail Sent and
+send records. Do not automatically remove that marker or retry uncertain sends.
+
+For **paid PythonAnywhere scheduling**, configure an hourly task with this Bash
+command (adjust the home path if needed):
+
+```bash
+cd /home/GauravChhajer/StudentConnect && .venv/bin/python -m dotenv -f .env run --no-override -- .venv/bin/python -B -m scripts.run_pipeline --run
+```
+
+This loads the hosted private configuration before importing the pipeline. An
+hourly scheduler delivers on the first run after each user's chosen time, not
+necessarily at that exact minute. Its next cycles also pick up new accounts,
+resumes, preferences and jobs. Check task logs for errors and backups/storage.
+The current free PythonAnywhere plan has no scheduled tasks; this code alone
+cannot activate hosted automation. Windows scheduling against the local database
+does not process accounts stored in the separate hosted database. The existing
+Windows email-only installer remains unchanged and does not fetch or score.
 
 ## Verification
 

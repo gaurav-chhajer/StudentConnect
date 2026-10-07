@@ -133,6 +133,8 @@ class WebFlowTests(unittest.TestCase):
                 response = self.client.get(route)
                 self.assertEqual(response.status_code, 200)
                 self.assertIn(b'href="/static/css/theme.css"', response.data)
+                self.assertIn(b'href="/static/css/wow.css"', response.data)
+                self.assertIn(b'class="hero-banner"', response.data)
                 self.assertIn(b'href="#main">Skip to content', response.data)
                 self.assertIn(b'aria-current="page"', response.data)
                 self.assertIn(b'aria-hidden="true"', response.data)
@@ -146,6 +148,68 @@ class WebFlowTests(unittest.TestCase):
                 self.assertNotIn(b"Scheduled sending is not connected yet", response.data)
                 self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(before, self.database.read_bytes())
+
+    def test_banner_counts_use_saved_data_and_do_not_include_mockup_claims(self):
+        self.seed_user()
+        self.assertIn(b"2 current matches for your resume", self.client.get("/").data)
+        self.assertIn(b"0 applications tracked", self.client.get("/applications").data)
+        self.assertEqual(self.post("/applications", dict(job_id="1", status="interview")).status_code, 302)
+        applications = self.client.get("/applications").data
+        self.assertIn(b"1 application tracked", applications)
+        self.assertIn(b"1 interview and 0 offers recorded", applications)
+        for route in ("/", "/jobs", "/resume", "/settings", "/analytics", "/applications"):
+            with self.subTest(route=route):
+                page = self.client.get(route).data
+                for claim in (b"Northwind Labs", b"82 out of 100", b"up to 10 points", b"61% to 78%", b"apply in one click"):
+                    self.assertNotIn(claim, page)
+                self.assertNotIn(b"cdnjs.cloudflare.com", page)
+                self.assertNotIn(b"text/x-dc", page)
+
+    def test_animated_screens_render_without_matches_or_application_history(self):
+        self.seed_user()
+        self.conn.execute("UPDATE scores SET is_stale=1")
+        self.conn.commit()
+        for route in ("/", "/jobs", "/resume", "/settings", "/analytics", "/applications"):
+            with self.subTest(route=route):
+                page = self.client.get(route)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'class="hero-banner"', page.data)
+                self.assertNotIn(b'class="spark"', page.data)
+        self.assertIn(b"0 current matches for your resume", self.client.get("/").data)
+
+    def test_company_tiles_escape_untrusted_titles_and_company_names(self):
+        self.seed_user()
+        self.conn.execute("UPDATE companies SET name='<script>company</script>' WHERE id=1")
+        self.conn.execute("UPDATE jobs SET title='<script>role</script>' WHERE id=1")
+        self.conn.commit()
+        self.assertEqual(self.post("/applications", dict(job_id="1", status="saved")).status_code, 302)
+        for route in ("/", "/jobs", "/applications"):
+            with self.subTest(route=route):
+                page = self.client.get(route).data
+                self.assertIn(b'class="logo-tile" aria-hidden="true">&lt;', page)
+                self.assertIn(b"&lt;script&gt;company&lt;/script&gt;", page)
+                self.assertIn(b"&lt;script&gt;role&lt;/script&gt;", page)
+                self.assertNotIn(b"<script>company", page)
+                self.assertNotIn(b"<script>role", page)
+
+    def test_sparklines_use_saved_weekly_values_and_handle_flat_or_single_series(self):
+        self.seed_user()
+        self.conn.execute("UPDATE scores SET scored_at='2026-09-28T00:00:00+00:00',fit_score=50 WHERE job_id=1")
+        self.conn.execute("UPDATE scores SET scored_at='2026-10-05T00:00:00+00:00',fit_score=50 WHERE job_id=2")
+        self.conn.commit()
+        with patch("backend.app.utc_now", return_value=datetime(2026,10,7,tzinfo=timezone.utc)):
+            for route in ("/", "/analytics"):
+                page = self.client.get(route)
+                self.assertEqual(page.status_code, 200)
+                sparks = re.findall(rb'<svg class="spark".*?</svg>', page.data, re.DOTALL)
+                self.assertTrue(sparks)
+                for spark in sparks:
+                    element = ET.fromstring(spark.decode())
+                    self.assertEqual(element.find("path").attrib["d"].strip(), "M0.0 28.0 L100.0 28.0")
+            self.conn.execute("UPDATE scores SET scored_at='2026-10-05T00:00:00+00:00'")
+            self.conn.commit()
+            for route in ("/", "/analytics"):
+                self.assertNotIn(b'class="spark"', self.client.get(route).data)
 
     def test_location_picker_has_one_input_and_preserves_escaped_selections(self):
         self.seed_user()
@@ -287,7 +351,7 @@ class WebFlowTests(unittest.TestCase):
 
     def test_all_populated_screens_render_and_static_styles_are_available(self):
         self.seed_user()
-        for route in ("/", "/jobs", "/settings", "/analytics", "/applications", "/resume", "/static/css/sc.css", "/static/css/theme.css", "/static/css/app.css"):
+        for route in ("/", "/jobs", "/settings", "/analytics", "/applications", "/resume", "/static/css/sc.css", "/static/css/theme.css", "/static/css/app.css", "/static/css/wow.css"):
             with self.subTest(route=route):
                 response = self.client.get(route)
                 self.addCleanup(response.close)

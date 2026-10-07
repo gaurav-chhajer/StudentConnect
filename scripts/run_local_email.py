@@ -45,7 +45,7 @@ def schedule_due(conn, user_id, now):
     return elapsed_dates >= (7 if cadence == "weekly" else 1)
 
 
-def send_digest(conn, send=False, scheduled=False, now=None):
+def send_digest(conn, send=False, scheduled=False, now=None, company_ids=None):
     """Send at most five matches per verified active account; preview by default."""
     # Serialize selection/send/logging across local runs. The network wait is
     # bounded by delivery's timeout; this deliberately holds a SQLite write lock.
@@ -65,7 +65,7 @@ def send_digest(conn, send=False, scheduled=False, now=None):
             if scheduled and not schedule_due(conn,user["id"],now or datetime.now(timezone.utc)):
                 logger.info("Email schedule is not due (user_id=%s); skipped",user["id"])
                 continue
-            matches = pipeline.get_unsent_top_matches(conn,user["id"])
+            matches = pipeline.get_unsent_top_matches(conn,user["id"],company_ids=company_ids)
             if not matches:
                 logger.info("No eligible unsent matches (user_id=%s); email skipped",user["id"])
                 continue

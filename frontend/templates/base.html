@@ -4,7 +4,8 @@
 <title>{% block title %}StudentConnect{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}"></head>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wow.css') }}"></head>
 <body><a class="skip-link" href="#main">Skip to content</a><div class="app"><aside class="side"><a class="logo" href="{{ url_for('dashboard') }}"><i aria-hidden="true"></i>StudentConnect</a>
 <nav class="nav" aria-label="Main"><div class="cap">Menu</div>
 {% for endpoint,label in navigation %}<a href="{{ url_for(endpoint) }}" {% if active == endpoint %}class="on" aria-current="page"{% endif %}>{{ icon(endpoint) }}{{ label }}</a>

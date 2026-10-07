@@ -1,7 +1,9 @@
-{% extends 'base.html' %}{% block title %}Analytics · StudentConnect{% endblock %}{% block content %}
+{% extends 'base.html' %}{% from 'macros.html' import page_banner,sparkline %}{% block title %}Analytics · StudentConnect{% endblock %}{% block content %}
 <div class="top2"><div><h1>Analytics</h1><p class="sub">Your saved matching and application activity.</p></div><nav class="seg" aria-label="Analytics period">{% for value,label in [(4,'4W'),(8,'8W'),(26,'6M')] %}<a class="btn" {% if weeks is defined and weeks == value %}aria-current="true"{% endif %} href="{{ url_for('analytics',weeks=value) }}">{{ label }}</a>{% endfor %}</nav></div>
-{% if user and metrics %}<section class="kpis"><div class="card k"><div class="l">Recorded response rate</div><div class="v">{{ response_rate|string ~ '%' if response_rate is not none else '—' }}</div><p class="sub">Interview, offer, or rejection among tracked applications.</p></div>
-<div class="card k"><div class="l">Average open match</div><div class="v">{{ metrics.average|string ~ '%' if metrics.average is not none else '—' }}</div></div>
+{% if user and metrics %}
+{{ page_banner('Your progress','See how your search is progressing','Explore your saved match scores and the application stages you have recorded.',url_for('jobs'),'View job matches',url_for('resume'),'Improve my resume','analytics') }}
+<section class="kpis"><div class="card k"><div class="l">Recorded response rate</div><div class="v">{{ response_rate|string ~ '%' if response_rate is not none else '—' }}</div><p class="sub">Interview, offer, or rejection among tracked applications.</p></div>
+<div class="card k spark-card"><div class="l">Average open match</div><div class="v">{{ metrics.average|string ~ '%' if metrics.average is not none else '—' }}</div>{{ sparkline(trend,'average') }}</div>
 <div class="card k"><div class="l">Email open rate</div><div class="v">—</div><p class="sub">Open tracking is not connected.</p></div>
 <div class="card k"><div class="l">Company with most matches</div><div class="v small">{{ by_company[0].name if by_company else '—' }}</div></div></section>
 <div class="row"><section class="card"><h2>Matches scored per week</h2>

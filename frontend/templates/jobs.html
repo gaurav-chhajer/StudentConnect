@@ -1,14 +1,15 @@
-{% extends 'base.html' %}{% from 'macros.html' import csrf,badge,filter_form,pagination with context %}
+{% extends 'base.html' %}{% from 'macros.html' import csrf,badge,filter_form,pagination,page_banner,company_heading with context %}
 {% block title %}Job matches · StudentConnect{% endblock %}{% block content %}
 <div class="top2"><div><h1>Job matches</h1><p class="sub">Your saved matches, ranked by resume fit.</p></div><div class="actions"><a class="btn" href="{{ url_for('settings_page') }}#companies">Choose companies</a><a class="btn p" href="#save-search">Save search</a></div></div>
 {% if user %}
+{{ page_banner('Job matches','Find the roles that fit you','Filter your saved matches by company, location, job type, and score. Review the evidence before applying.',url_for('jobs') ~ '#match-list','Review matches',url_for('resume'),'Improve my resume','matches') }}
 {{ filter_form('jobs') }}<p class="sub">Job-type filtering uses fields supplied by the ATS. Postings without that field cannot match a specific type.</p>
 <details class="card" id="save-search"><summary>Save this search</summary><form method="post" action="{{ url_for('save_search') }}" class="fields">{{ csrf() }}
 <label class="field">Search name<input name="name" maxlength="80" required></label>
 {% for name,value in [('q',search),('company',company),('min_score',min_score),('location',location),('job_type',job_type),('days',days),('sort',sort)] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<button class="btn p">Save search</button></form>
 <div class="chips">{% for item in saved_searches %}<a class="btn" href="{{ item.link }}">{{ item.name }}</a>{% endfor %}</div></details>
-<div class="split"><div class="list">{% for item in matches %}
-<a {% if selected and selected.job_id == item.job_id %}aria-current="true"{% endif %} class="jc {{ 'sel' if selected and selected.job_id == item.job_id else '' }}" href="{{ url_for('jobs',job=item.job_id,page=page,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}"><div><div class="role">{{ item.title }}</div><div class="co">{{ item.company_name }} · {{ item.location or 'Not specified' }}</div></div>{{ badge(item.fit_score) }}</a>
+<div class="split" id="match-list"><div class="list">{% for item in matches %}
+<a {% if selected and selected.job_id == item.job_id %}aria-current="true"{% endif %} class="jc {{ 'sel' if selected and selected.job_id == item.job_id else '' }}" href="{{ url_for('jobs',job=item.job_id,page=page,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}">{{ company_heading(item.title,item.company_name,item.location or 'Not specified') }}{{ badge(item.fit_score) }}</a>
 {% else %}<div class="card">No current matches for these filters. Save your resume and run the scoring command to populate them.</div>{% endfor %}{{ pagination('jobs') }}</div>
 <div class="card detail-card">{% if selected %}<div class="hd"><div><h2>{{ selected.title }}</h2><p class="sub">{{ selected.company_name }} · {{ selected.location or 'Not specified' }}</p></div>{{ badge(selected.fit_score) }}</div>
 <p>{{ selected.reasoning }}</p>

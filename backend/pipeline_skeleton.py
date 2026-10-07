@@ -112,8 +112,11 @@ def _fetch_greenhouse(slug):
     url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
     resp = requests.get(url, timeout=15)
     resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+        raise ValueError("Greenhouse returned an invalid jobs snapshot")
     jobs = []
-    for j in resp.json().get("jobs", []):
+    for j in payload["jobs"]:
         jobs.append({
             "external_id": str(j["id"]),
             "title": j.get("title", ""),
@@ -129,8 +132,11 @@ def _fetch_lever(slug):
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
     resp = requests.get(url, timeout=15)
     resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, list):
+        raise ValueError("Lever returned an invalid jobs snapshot")
     jobs = []
-    for j in resp.json():
+    for j in payload:
         jobs.append({
             "external_id": j["id"],
             "title": j.get("text", ""),
@@ -146,8 +152,11 @@ def _fetch_ashby(slug):
     url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
     resp = requests.get(url, timeout=15)
     resp.raise_for_status()
+    payload = resp.json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+        raise ValueError("Ashby returned an invalid jobs snapshot")
     jobs = []
-    for j in resp.json().get("jobs", []):
+    for j in payload["jobs"]:
         jobs.append({
             "external_id": j["id"],
             "title": j.get("title", ""),
@@ -661,7 +670,17 @@ def store_score(conn, job_id, user_id, result):
 # Stage 4: Select what to send (dedupe against sent_log)
 # ---------------------------------------------------------------------------
 
-def get_unsent_top_matches(conn, user_id, min_score=None, limit=5, channel="email"):
+def get_unsent_top_matches(conn, user_id, min_score=None, limit=5, channel="email", company_ids=None):
+    company_clause = ""
+    company_parameters = ()
+    if company_ids is not None:
+        company_parameters = tuple(company_ids)
+        if not company_parameters:
+            return []
+        if any(type(value) is not int or value <= 0 for value in company_parameters):
+            raise ValueError("Company IDs must be positive integers")
+        company_parameters = tuple(sorted(company_parameters))
+        company_clause = " AND j.company_id IN (" + ",".join("?" for _ in company_parameters) + ")"
     settings = conn.execute("SELECT cadence,min_score FROM user_settings WHERE user_id=?", (user_id,)).fetchone()
     if channel == "email" and settings:
         if settings[0] == "off":
@@ -679,10 +698,11 @@ def get_unsent_top_matches(conn, user_id, min_score=None, limit=5, channel="emai
         AND (NOT EXISTS (SELECT 1 FROM user_settings WHERE user_id=? AND subscriptions_configured=1)
              OR EXISTS (SELECT 1 FROM company_subscriptions WHERE user_id=? AND company_id=j.company_id))
         AND j.id NOT IN (SELECT job_id FROM sent_log WHERE user_id = ? AND channel = ?)
+        """ + company_clause + """
         ORDER BY s.fit_score DESC
         LIMIT ?
         """,
-        (user_id, min_score, user_id, user_id, user_id, channel, limit),
+        (user_id, min_score, user_id, user_id, user_id, channel) + company_parameters + (limit,),
     )
     return cur.fetchall()
 
