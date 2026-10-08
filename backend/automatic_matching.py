@@ -6,6 +6,7 @@ import threading
 import time
 from contextlib import closing
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from backend import matching_tasks, pipeline_skeleton as pipeline
@@ -16,17 +17,37 @@ POLL_SECONDS = 30
 REFRESH_SECONDS = 900
 _services = {}
 _services_lock = threading.Lock()
+_logging_lock = threading.Lock()
+
+
+def configure_logging(database):
+    """Keep service and pipeline progress visible even under WSGI logging."""
+    log_path = str(Path(database).resolve().parent / "matching.log")
+    with _logging_lock:
+        for target in (logger, run_pipeline.logger):
+            target.setLevel(logging.INFO)
+            if any(isinstance(handler, RotatingFileHandler) and handler.baseFilename == log_path
+                   for handler in target.handlers):
+                continue
+            handler = RotatingFileHandler(log_path, maxBytes=2 * 1024 * 1024,
+                                          backupCount=3, encoding="utf-8")
+            handler.setLevel(logging.INFO)
+            handler.setFormatter(logging.Formatter(
+                "%(asctime)s %(levelname)s %(name)s: %(message)s"))
+            target.addHandler(handler)
 
 
 class MatchingService:
     def __init__(self, database):
         self.database = Path(database).resolve()
+        configure_logging(self.database)
         self.wake = threading.Event()
         self.stop = threading.Event()
         self.next_refresh = 0
         self.thread = threading.Thread(target=self.run, name="automatic-matching", daemon=True)
 
     def cycle(self):
+        logger.info("Automatic matching cycle started; database=%s", self.database)
         # Use the same OS lock as CLI workers for refresh scheduling, too.
         if time.monotonic() >= self.next_refresh:
             with run_pipeline.exclusive_cycle(self.database.parent / "pipeline.lock"):
@@ -39,15 +60,18 @@ class MatchingService:
                         for user in users:
                             matching_tasks.enqueue(conn, user[0], 'postings', datetime.now(timezone.utc))
             self.next_refresh = time.monotonic() + REFRESH_SECONDS
-        return run_pipeline.main(['--run', '--matching-only'], database_path=self.database)
+        result = run_pipeline.main(['--run', '--matching-only'], database_path=self.database)
+        logger.info("Automatic matching cycle finished; result_code=%s", result)
+        return result
 
     def run(self):
         while not self.stop.is_set():
             self.wake.clear()
             try:
                 self.cycle()
-            except (sqlite3.Error, OSError, RuntimeError, ValueError) as error:
-                logger.error("Automatic matching cycle stopped (%s); retrying later", type(error).__name__)
+            except Exception as error:
+                logger.exception("Automatic matching cycle stopped (%s): %.200s; retrying later",
+                                 type(error).__name__, str(error))
             # Continue budget-limited and failed work without another web request.
             self.wake.wait(POLL_SECONDS)
 
