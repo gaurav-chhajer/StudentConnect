@@ -25,6 +25,7 @@ from contextlib import closing
 from html import escape, unescape
 from html.parser import HTMLParser
 from datetime import datetime, timezone
+from backend import matching_tasks
 from backend.evaluation import validate_evaluation, RUBRIC_VERSION
 
 DB_PATH = str(Path(__file__).resolve().parents[1] / "data" / "jobs.db")
@@ -188,36 +189,44 @@ def fetch_jobs_for_company(company_row):
 
 
 def upsert_jobs(conn, company_id, fetched_jobs):
-    now = datetime.now(timezone.utc).isoformat()
-    seen_external_ids = []
-    for job in fetched_jobs:
-        seen_external_ids.append(job["external_id"])
-        previous = conn.execute(
-            "SELECT id,raw_json FROM jobs WHERE company_id=? AND external_id=?",
-            (company_id, job["external_id"]),
-        ).fetchone()
-        raw_json = json.dumps(job.get("raw_json", {}))
-        if previous and previous[1] != raw_json:
-            conn.execute("UPDATE scores SET is_stale=1 WHERE job_id=?", (previous[0],))
-        conn.execute(
-            """
-            INSERT INTO jobs (company_id, external_id, title, location, department, url, raw_json, first_seen_at, last_seen_at, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-            ON CONFLICT(company_id, external_id) DO UPDATE SET
-                title=excluded.title, location=excluded.location, department=excluded.department,
-                url=excluded.url, raw_json=excluded.raw_json, last_seen_at=excluded.last_seen_at, is_active=1
-            """,
-            (company_id, job["external_id"], job["title"], job.get("location"), job.get("department"),
-             job.get("url"), raw_json, now, now),
-        )
-    # mark anything not in this fetch as inactive (role closed/removed)
-    if seen_external_ids:
-        placeholders = ",".join("?" * len(seen_external_ids))
-        conn.execute(
-            f"UPDATE jobs SET is_active=0 WHERE company_id=? AND external_id NOT IN ({placeholders})",
-            (company_id, *seen_external_ids),
-        )
-    conn.commit()
+    with conn:
+        now = datetime.now(timezone.utc).isoformat()
+        previous_snapshot = {row[0]: row[1] for row in conn.execute(
+            "SELECT external_id,raw_json FROM jobs WHERE company_id=? AND is_active=1", (company_id,))}
+        seen_external_ids = []
+        for job in fetched_jobs:
+            seen_external_ids.append(job["external_id"])
+            previous = conn.execute(
+                "SELECT id,raw_json FROM jobs WHERE company_id=? AND external_id=?",
+                (company_id, job["external_id"]),
+            ).fetchone()
+            raw_json = json.dumps(job.get("raw_json", {}))
+            if previous and previous[1] != raw_json:
+                conn.execute("UPDATE scores SET is_stale=1 WHERE job_id=?", (previous[0],))
+            conn.execute(
+                """
+                INSERT INTO jobs (company_id, external_id, title, location, department, url, raw_json, first_seen_at, last_seen_at, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(company_id, external_id) DO UPDATE SET
+                    title=excluded.title, location=excluded.location, department=excluded.department,
+                    url=excluded.url, raw_json=excluded.raw_json, last_seen_at=excluded.last_seen_at, is_active=1
+                """,
+                (company_id, job["external_id"], job["title"], job.get("location"), job.get("department"),
+                 job.get("url"), raw_json, now, now),
+            )
+        # mark anything not in this fetch as inactive (role closed/removed)
+        if seen_external_ids:
+            placeholders = ",".join("?" * len(seen_external_ids))
+            conn.execute(
+                f"UPDATE jobs SET is_active=0 WHERE company_id=? AND external_id NOT IN ({placeholders})",
+                (company_id, *seen_external_ids),
+            )
+        else:
+            conn.execute("UPDATE jobs SET is_active=0 WHERE company_id=?", (company_id,))
+        snapshot = {job["external_id"]: json.dumps(job.get("raw_json", {})) for job in fetched_jobs}
+        if snapshot != previous_snapshot:
+            matching_tasks.enqueue_company(conn, company_id, datetime.now(timezone.utc))
+
 
 
 # ---------------------------------------------------------------------------
