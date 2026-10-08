@@ -106,7 +106,10 @@ def score_cycle(conn, company_ids, max_scores, user_ids=None):
             try:
                 result = run_local_score.score_with_rate_limit_retries(user, job, names[job["company_id"]])
             except requests.RequestException as error:
-                logger.error("Scoring service stopped (%s); valid saved scores retained", type(error).__name__)
+                response = error.response
+                logger.error("Scoring service stopped (%s): user_id=%s job_id=%s http_status=%s; valid saved scores retained",
+                             type(error).__name__, user["id"], job["id"],
+                             response.status_code if response is not None else "unavailable")
                 return 1
             except ValueError:
                 logger.error("Evaluation rejected: user_id=%s job_id=%s; no score saved", user["id"], job["id"])
