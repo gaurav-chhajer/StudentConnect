@@ -157,7 +157,7 @@ def finish_tasks(conn, tasks, companies, score_status):
         matching_tasks.finish(conn, task, state, datetime.now(timezone.utc), error)
 
 
-def main(argv=None):
+def main(argv=None, database_path=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="Fetch, score and send real scheduled digests")
     parser.add_argument("--matching-only", action="store_true", help="Process queued matching work only; no email sending")
@@ -166,7 +166,7 @@ def main(argv=None):
     if not 1 <= args.max_scores <= MAX_SCORES_PER_CYCLE:
         parser.error("--max-scores must be between 1 and 100")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    database = Path(pipeline.DB_PATH)
+    database = Path(database_path if database_path is not None else pipeline.DB_PATH).resolve()
     pause = database.parent / "email_schedule.paused"
     try:
         if args.run:
@@ -209,6 +209,7 @@ def main(argv=None):
                 if not args.matching_only:
                     enqueue_backlog(conn)
                 tasks = matching_tasks.claim(conn)
+                logger.info("Matching tasks claimed: %s", len(tasks))
                 if not companies:
                     finish_tasks(conn, tasks, companies, 0)
                     if args.matching_only and not requested:
