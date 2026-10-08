@@ -404,10 +404,96 @@ This loads the hosted private configuration before importing the pipeline. An
 hourly scheduler delivers on the first run after each user's chosen time, not
 necessarily at that exact minute. Its next cycles also pick up new accounts,
 resumes, preferences and jobs. Check task logs for errors and backups/storage.
-The current free PythonAnywhere plan has no scheduled tasks; this code alone
-cannot activate hosted automation. Windows scheduling against the local database
+New free PythonAnywhere accounts have no scheduled tasks. The free GitHub worker
+below can automate the hosted site instead. Windows scheduling against the local database
 does not process accounts stored in the separate hosted database. The existing
 Windows email-only installer remains unchanged and does not fetch or score.
+
+### Free daily cloud automation
+
+`.github/workflows/daily-automation.yml` runs on GitHub-hosted Linux runners,
+even when your PC is off. It targets fetching/scoring at **06:30 Asia/Kolkata**
+(01:00 UTC), fetching only at **18:30 Asia/Kolkata** (13:00 UTC), and emails at
+**08:00 Asia/Kolkata** (02:30 UTC). Evening openings are scored during the next
+morning run; the evening worker never scores or sends mail. GitHub schedules
+can be delayed or missed; these are target times, not delivery guarantees.
+The three jobs have 40-minute, 10-minute and 10-minute limits, including dependency
+setup: 31 scheduled triples use at most **1,860 job minutes**, leaving 140 of the
+2,000-minute allowance. Other workflows, reruns
+and other repositories using the same account consume the remaining allowance.
+Do not add frequent runs or automatic workflow retries. Configure a zero-spend
+GitHub Actions budget that stops usage at the free allowance, and monitor billing
+usage. Public scheduled workflows can be disabled after 60 days of inactivity.
+See [GitHub usage allowances](https://docs.github.com/en/billing/reference/product-usage-included)
+and [scheduled workflow limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+
+The website keeps its SQLite database and uploaded resume files. The worker
+uses a separate authenticated API to fetch board definitions, save complete
+snapshots, read pending resume text/job data, and save validated evaluations.
+Resume text passes through GitHub's temporary runner and Groq; it is not written
+to artifacts, caches, or logs by this worker. Restrict repository access and do
+not enable verbose HTTP debugging. Gmail credentials remain on PythonAnywhere.
+Browser login and CSRF protection remain required for browser actions; the worker
+API instead requires its separate bearer credential and rejects session cookies.
+Blank worker credentials disable API access. Invalid credentials fail startup.
+
+The worker processes up to five missing/stale evaluations per account and 100
+evaluations total per morning cycle. Its own 35-minute matching, 7-minute evening
+fetch and 7-minute email budgets leave room within the job limits. The evening
+fetch needs neither Groq nor Gmail credentials on GitHub. Reaching a limit reports
+failure and defers unfinished work to another scheduled run. Transfers are limited to 2 MB;
+oversized snapshots/batches fail explicitly without replacing stored snapshots.
+Up to 1,000 companies/accounts and 5,000 jobs per snapshot are supported.
+Failed boards retain previous jobs and are skipped for scoring. Email selection
+requires jobs refreshed on the current India date, current scores, saved minimum
+scores, subscriptions and unsent-job eligibility. Email time is fixed at 08:00
+India time; weekly cadence and Off remain honored. Saved local send-time/timezone
+values are retained for local commands. The Settings page explains the fixed
+cloud schedule when configured. No qualifying matches means no email.
+
+Writes share `pipeline.lock` with CLI cycles. Input fingerprints and current
+account/subscription checks reject evaluations made stale by edits. When the
+worker key is configured, web requests no longer start the local matching thread;
+new work waits for the daily GitHub run. Configure only one automation scheduler.
+Email requests handle one account each with the existing SMTP/send-log protection.
+Gmail acceptance is not proof of inbox delivery. Timeout, interruption, or uncertain
+SMTP acceptance leaves `data/email_schedule.paused`; inspect Gmail Sent, bounce
+messages, hosted logs and `sent_log` before reconciling and clearing the marker.
+Never blindly rerun uncertain sends. Matching still runs when emails are paused.
+
+Activation (no paid PythonAnywhere task or database migration is needed):
+
+1. Review and publish this code to the GitHub repository's default branch, then
+   deploy the same source to the existing PythonAnywhere checkout. Do not replace
+   its `.env`, database, uploads, or backups. The workflow is schedule-only.
+2. In the hosted private `.env`, add a separate `STUDENTCONNECT_WORKER_KEY`:
+   64 random hexadecimal characters. Generate it into that file without printing
+   it, using the hosted Bash console from the project directory:
+
+   ```bash
+   .venv/bin/python -c 'from dotenv import set_key; import secrets; set_key(".env", "STUDENTCONNECT_WORKER_KEY", secrets.token_hex(32))'
+   chmod 600 .env
+   ```
+
+   Generate once; rotation requires updating the GitHub secret too. Keep the
+   existing Gmail settings, signing key and HTTPS site origin. Reload the Web app
+   and keep Force HTTPS enabled. Ensure company boards are already seeded using
+   the documented setup; the cloud worker reads existing active boards.
+3. In GitHub **Settings → Secrets and variables → Actions**, add repository
+   secrets `STUDENTCONNECT_WORKER_KEY` (same private value) and `GROQ_API_KEY`.
+   Copy the worker key through the private provider interfaces only; never paste
+   it into chat, source, logs, screenshots or workflow YAML. Add repository variable
+   `STUDENTCONNECT_BASE_URL=https://gauravchhajer.pythonanywhere.com` (adjust only
+   if your deployed hostname differs). The matching workflow uses the documented
+   default Groq model/context; update both together if changing models.
+4. Enable Actions, set the spending stop, and enable workflow failure notifications.
+   Check all three runs daily initially. Confirm fetched postings, scores, Gmail Sent
+   and hosted send records after the next scheduled morning runs. Actual provider
+   connectivity and inbox delivery must be verified after activation.
+
+The 1,860-minute cap covers this schedule, not all account activity. Quotas,
+provider outages, hosted storage/CPU limits, web-app expiry and GitHub scheduling
+can interrupt service. Keep private backups and monitor the PythonAnywhere app.
 
 ## Verification
 

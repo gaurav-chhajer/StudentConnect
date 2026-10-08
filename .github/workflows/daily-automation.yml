@@ -1,0 +1,76 @@
+name: Daily StudentConnect automation
+
+on:
+  schedule:
+    # UTC: 01:00 = 06:30 IST; 02:30 = 08:00 IST; 13:00 = 18:30 IST.
+    - cron: '0 1 * * *'
+    - cron: '30 2 * * *'
+    - cron: '0 13 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studentconnect-daily-automation
+  cancel-in-progress: false
+
+jobs:
+  matching:
+    if: github.event.schedule == '0 1 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Fetch jobs and score matches
+        env:
+          STUDENTCONNECT_BASE_URL: ${{ vars.STUDENTCONNECT_BASE_URL }}
+          STUDENTCONNECT_WORKER_KEY: ${{ secrets.STUDENTCONNECT_WORKER_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: qwen/qwen3.8-27b
+          GROQ_CONTEXT_TOKENS: '131072'
+        run: python -B -m scripts.run_cloud_worker matching
+
+  evening-fetch:
+    if: github.event.schedule == '0 13 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Fetch evening openings
+        env:
+          STUDENTCONNECT_BASE_URL: ${{ vars.STUDENTCONNECT_BASE_URL }}
+          STUDENTCONNECT_WORKER_KEY: ${{ secrets.STUDENTCONNECT_WORKER_KEY }}
+        run: python -B -m scripts.run_cloud_worker fetch
+
+  email:
+    if: github.event.schedule == '30 2 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: '3.12'
+      - name: Install project dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Send due digests through hosted Gmail
+        env:
+          STUDENTCONNECT_BASE_URL: ${{ vars.STUDENTCONNECT_BASE_URL }}
+          STUDENTCONNECT_WORKER_KEY: ${{ secrets.STUDENTCONNECT_WORKER_KEY }}
+        run: python -B -m scripts.run_cloud_worker email

@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, hosting, matching_tasks, resumes, store
+from backend import accounts, automatic_matching, cloud_worker, hosting, matching_tasks, resumes, store
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +71,12 @@ def create_app(database_path=None, upload_dir=None):
         if request.host.split(":")[0].lower() not in allowed:
             return "This hostname is not configured for StudentConnect.", 403
         g.user, g.account = None, None
+        if request.blueprint == "worker":
+            if not cloud_worker.authenticate():
+                return {"error": "Worker authentication required"}, 401
+            if request.content_length is not None and request.content_length > cloud_worker.MAX_BODY_BYTES:
+                return {"error": "Worker request too large"}, 413
+            return None
         user_id, version = session.get("user_id"), session.get("session_version")
         if type(user_id) is int and type(version) is int and database.is_file():
             account = connection().execute("SELECT a.* FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.session_version=? AND a.email_verified=1 AND u.active=1",(user_id,version)).fetchone()
@@ -358,9 +364,11 @@ def create_app(database_path=None, upload_dir=None):
     def account_navigation():
         user = getattr(g, 'user', None)
         return dict(is_account_admin=bool(getattr(g,"account",None) and g.account["is_admin"]),
+                    cloud_schedule=bool(cloud_worker.worker_key()),
                     matching_status=matching_tasks.status(connection(), user['id']) if user else None)
 
     accounts.register_routes(application, connection, context, lambda: utc_now())
+    cloud_worker.register_routes(application, connection, database)
     return application
 
 

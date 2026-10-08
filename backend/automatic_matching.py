@@ -77,6 +77,11 @@ class MatchingService:
 
 
 def ensure_started(database, notify=False):
+    # The external worker owns hosted matching when its credential is configured.
+    # PythonAnywhere web workers cannot own a durable background thread.
+    from backend.cloud_worker import worker_key
+    if worker_key():
+        return
     if not pipeline.GROQ_API_KEY.strip() or not Path(database).is_file():
         return
     key = str(Path(database).resolve())
