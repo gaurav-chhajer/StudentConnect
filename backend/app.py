@@ -1,4 +1,4 @@
-"""Authenticated StudentConnect application; external jobs run separately."""
+"""Authenticated StudentConnect application with automatic background matching."""
 
 import hmac
 import json
@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, hosting, matching_tasks, resumes, store
+from backend import accounts, automatic_matching, hosting, matching_tasks, resumes, store
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +92,8 @@ def create_app(database_path=None, upload_dir=None):
 
     @application.after_request
     def protect_response(response):
+        if not application.testing and getattr(g, "user", None) and response.status_code < 400:
+            automatic_matching.ensure_started(database, notify=request.method == "POST")
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
