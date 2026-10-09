@@ -206,6 +206,27 @@ class CloudEndpointTests(unittest.TestCase):
 
 
 class CloudRunnerTests(unittest.TestCase):
+    def test_board_diagnostics_identify_failure_without_private_payload(self):
+        client = MagicMock()
+        companies = [dict(id=number, name="Synthetic", ats_type="lever", board_slug="synthetic", fingerprint="0" * 64)
+                     for number in (1, 2, 3)]
+        response = requests.Response()
+        response.status_code = 404
+        error = requests.HTTPError("private response and credentials", response=response)
+        client.call.side_effect = [dict(companies=companies), ValueError("private snapshot"), dict(saved=0), dict(items=[], next=None)]
+        with patch.object(pipeline, "GROQ_API_KEY", "synthetic"), \
+                patch.object(pipeline, "fetch_jobs_for_company", side_effect=[error, [], []]), \
+                patch.object(runner.time, "monotonic", return_value=0), \
+                self.assertLogs(runner.logger, level="INFO") as logs:
+            self.assertEqual(runner.fetch_and_score(client, 2100), 1)
+        output = " ".join(logs.output)
+        self.assertIn("company_id=1 stage=fetch error=HTTPError http_status=404", output)
+        self.assertIn("company_id=2 stage=snapshot error=ValueError", output)
+        self.assertIn("boards_succeeded=1 boards_total=3 partial_failure=True", output)
+        self.assertIn("eligible_accounts=0 evaluations_attempted=0", output)
+        self.assertNotIn("private", output)
+        self.assertNotIn("credentials", output)
+
     def test_evening_fetch_needs_no_groq_and_never_scores_or_emails(self):
         client = MagicMock()
         companies = [dict(id=1, name="Synthetic", ats_type="lever", board_slug="synthetic", fingerprint="0" * 64)]

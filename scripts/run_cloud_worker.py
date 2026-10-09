@@ -79,6 +79,7 @@ def fetch_and_score(client, deadline, fetch_only=False):
         if time.monotonic() >= deadline - 120:
             logger.error("Fetching time budget reached; unfinished work waits until the next scheduled run")
             return 1
+        stage = "configuration"
         try:
             if (not isinstance(company, dict) or type(company.get("id")) is not int or
                     company.get("ats_type") not in ("greenhouse", "lever", "ashby") or
@@ -87,18 +88,26 @@ def fetch_and_score(client, deadline, fetch_only=False):
                     not all(character.isascii() and (character.isalnum() or character in "-_")
                             for character in company["board_slug"])):
                 raise ValueError("Invalid board configuration")
+            stage = "fetch"
             jobs = pipeline.fetch_jobs_for_company(company)
+            stage = "snapshot"
             client.call("snapshot", dict(company_id=company["id"], fingerprint=company["fingerprint"], jobs=jobs))
             successful.add(company["id"])
             logger.info("Fetched company_id=%s jobs=%s", company["id"], len(jobs))
         except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:
-            logger.error("Board operation failed (%s); previous jobs retained if snapshot was not accepted", type(error).__name__)
+            response = error.response if isinstance(error, requests.RequestException) else None
+            company_id = company.get("id") if isinstance(company, dict) else None
+            logger.error("Board operation failed: company_id=%s stage=%s error=%s http_status=%s; previous jobs retained if snapshot was not accepted",
+                         company_id if type(company_id) is int else "invalid", stage, type(error).__name__,
+                         response.status_code if response is not None else "unavailable")
             failed = True
+    logger.info("Fetch summary: boards_succeeded=%s boards_total=%s partial_failure=%s",
+                len(successful), len(companies), failed)
     if not successful:
         raise RuntimeError("No boards fetched successfully")
     if fetch_only:
         return int(failed)
-    after, scores = 0, 0
+    after, scores, accounts, skipped = 0, 0, 0, 0
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 120:
             logger.error("Matching time budget reached; remaining scores deferred")
@@ -113,8 +122,11 @@ def fetch_and_score(client, deadline, fetch_only=False):
         if next_id is None:
             if items:
                 raise ValueError("Work without an account cursor")
+            logger.info("Scoring summary: eligible_accounts=%s evaluations_attempted=%s candidates_skipped_failed_boards=%s",
+                        accounts, scores, skipped)
             return int(failed)
         after = next_id
+        accounts += 1
         for item in items:
             if scores >= MAX_SCORES or time.monotonic() >= deadline - 120:
                 logger.error("Scoring budget reached; remaining scores deferred")
@@ -127,6 +139,7 @@ def fetch_and_score(client, deadline, fetch_only=False):
                     not isinstance(item.get("fingerprint"), str) or len(item["fingerprint"]) != 64):
                 raise ValueError("Invalid scoring work item")
             if item["job"]["company_id"] not in successful:
+                skipped += 1
                 continue
             scores += 1
             try:
