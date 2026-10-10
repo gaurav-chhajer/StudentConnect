@@ -12,6 +12,7 @@ import time
 import requests
 
 from backend import hosting, pipeline_skeleton as pipeline
+from backend import career_sources
 from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, worker_key
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,11 @@ def fetch_and_score(client, deadline, fetch_only=False):
                             for character in company["board_slug"])):
                 raise ValueError("Invalid board configuration")
             stage = "fetch"
-            jobs = pipeline.fetch_jobs_for_company(company)
+            source = company.get('career_source')
+            if source is not None and source not in career_sources.SOURCES:
+                raise ValueError('Unknown career source')
+            jobs = (career_sources.fetch(source, deadline - 120) if source else
+                    pipeline.fetch_jobs_for_company(company))
             stage = "snapshot"
             client.call("snapshot", dict(company_id=company["id"], fingerprint=company["fingerprint"], jobs=jobs))
             successful.add(company["id"])
@@ -108,11 +113,12 @@ def fetch_and_score(client, deadline, fetch_only=False):
     if fetch_only:
         return int(failed)
     after, scores, accounts, skipped = 0, 0, 0, 0
+    company_query = "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 120:
             logger.error("Matching time budget reached; remaining scores deferred")
             return 1
-        payload = client.call("work?after=" + str(after))
+        payload = client.call("work?after=" + str(after) + company_query)
         if "next" not in payload:
             raise ValueError("Missing work cursor")
         next_id = cursor(payload["next"], after)
@@ -143,6 +149,27 @@ def fetch_and_score(client, deadline, fetch_only=False):
                 continue
             scores += 1
             try:
+                prepared = career_sources.prepare_job(item['job'], deadline - 120)
+            except (requests.RequestException, ValueError, KeyError, TypeError) as error:
+                logger.error('Career description failed: user_id=%s job_id=%s error=%s; candidate deferred',
+                             after, item['job']['id'], type(error).__name__)
+                failed = True
+                continue
+            try:
+                if prepared != item['job']:
+                    raw = json.loads(prepared['raw_json'])
+                    detail = client.call('description', dict(user_id=after, job_id=prepared['id'],
+                        fingerprint=item['fingerprint'], description=raw['descriptionHtml'],
+                        title=prepared['title'], location=prepared.get('location'), employment_type=raw.get('employmentType')))
+                    if type(detail.get('eligible')) is not bool or not isinstance(detail.get('job'), dict):
+                        raise ValueError('Invalid description response')
+                    if (detail['job'].get('id') != prepared['id'] or
+                            detail['job'].get('company_id') != prepared['company_id'] or
+                            not isinstance(detail.get('fingerprint'), str) or len(detail['fingerprint']) != 64):
+                        raise ValueError('Description response identity changed')
+                    if not detail['eligible']:
+                        continue
+                    item = dict(item, job=detail['job'], fingerprint=detail['fingerprint'])
                 # One bounded request; a rejected/failed evaluation waits for the next daily run.
                 result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"])
                 client.call("score", dict(user_id=item["user"]["id"], job_id=item["job"]["id"],

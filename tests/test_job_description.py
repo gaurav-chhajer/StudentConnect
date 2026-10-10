@@ -33,6 +33,34 @@ class JobDescriptionTests(unittest.TestCase):
             "descriptionPlain": "Opening\nBody", "additionalPlain": "More",
         }), "Opening\n\nBody\n\nMore")
 
+    def test_lever_fetch_removes_only_unused_html_and_preserves_description(self):
+        for plain in ("Complete plain requirements", "", "  ", None):
+            raw = dict(id="job-1", text="Engineer", categories=dict(commitment="Full-time"),
+                       descriptionPlain=plain, description="<p>HTML requirements</p>",
+                       openingPlain="Opening", opening="<p>Opening</p>",
+                       descriptionBodyPlain="Body", descriptionBody="<p>Body</p>",
+                       additionalPlain="Apply here", additional="<p>Apply here</p>",
+                       lists=[dict(text="Requirements", content="<ul><li>Final requirement</li></ul>")])
+            with self.subTest(plain=plain), patch.object(pipeline.requests, "get") as get:
+                get.return_value.json.return_value = [raw]
+                fetched = pipeline._fetch_lever("paytm")[0]["raw_json"]
+            self.assertEqual(self.extract(fetched), self.extract(raw))
+            self.assertEqual(fetched["categories"], raw["categories"])
+            self.assertEqual(fetched["lists"], raw["lists"])
+            self.assertEqual("description" in fetched, not bool(plain and plain.strip()))
+            self.assertNotIn("opening", fetched)
+            self.assertNotIn("descriptionBody", fetched)
+            self.assertNotIn("additional", fetched)
+            self.assertIn("description", raw)  # The source payload is not mutated.
+
+    def test_lever_fetch_keeps_html_only_sections(self):
+        raw = dict(id="job-1", text="Engineer", descriptionPlain="",
+                   description="<p>Full requirements</p>", additional="<p>Final instructions</p>")
+        with patch.object(pipeline.requests, "get") as get:
+            get.return_value.json.return_value = [raw]
+            fetched = pipeline._fetch_lever("paytm")[0]["raw_json"]
+        self.assertEqual(self.extract(fetched), "Full requirements\n\nFinal instructions")
+
     def test_ashby_prefers_plain_and_falls_back_to_html(self):
         self.assertEqual(self.extract({"descriptionPlain": "Plain", "descriptionHtml": "<p>HTML</p>"}), "Plain")
         self.assertEqual(self.extract({"descriptionHtml": "<h2>Requirements</h2><p>Python</p>"}), "Requirements\nPython")

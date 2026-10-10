@@ -157,7 +157,7 @@ def create_app(database_path=None, upload_dir=None):
         populate(data)
         if data["user"]:
             data["matches"], data["pages"] = store.matches(connection(), data["user"]["id"], data, utc_now())
-            data["target_companies"] = connection().execute("""SELECT c.id,c.name,c.ats_type FROM company_subscriptions sub
+            data["target_companies"] = connection().execute("""SELECT c.id,c.name,CASE WHEN c.career_source IS NOT NULL THEN 'career site' ELSE c.ats_type END AS ats_type FROM company_subscriptions sub
                 JOIN companies c ON c.id=sub.company_id WHERE sub.user_id=? ORDER BY c.name,c.id LIMIT 1000""", (data["user"]["id"],)).fetchall()
         return render("dashboard", data)
 
@@ -220,7 +220,7 @@ def create_app(database_path=None, upload_dir=None):
     def settings_page():
         data = context()
         conn = connection() if database.is_file() else None
-        data["available_companies"] = conn.execute("SELECT id,name,ats_type,board_slug FROM companies WHERE active=1 ORDER BY name,id LIMIT 1000").fetchall() if conn else []
+        data["available_companies"] = conn.execute("SELECT id,name,ats_type,board_slug,career_source,active FROM companies ORDER BY name,id LIMIT 1000").fetchall() if conn else []
         data["subscriptions"] = {row[0] for row in conn.execute("SELECT company_id FROM company_subscriptions WHERE user_id=?", (data["user"]["id"],))} if data["user"] else set()
         data["preferences"] = json.loads(data["user"]["preferences_json"] or "{}") if data["user"] else {}
         data["location_suggestions"] = store.location_suggestions(conn) if conn else []
@@ -246,7 +246,7 @@ def create_app(database_path=None, upload_dir=None):
                 raise ValueError("Invalid email schedule preference")
             minimum = store.integer(request.form.get("min_score", "60"), 0, 100)
             company_ids = {store.integer(value, 1, 2147483647) for value in request.form.getlist("companies")}
-            if not company_ids.issubset({row["id"] for row in data["available_companies"]}):
+            if not company_ids.issubset({row["id"] for row in data["available_companies"] if row['active']}):
                 raise ValueError("Select companies from the available list")
             preferences = {}
             for key in ("roles", "locations"):

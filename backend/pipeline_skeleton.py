@@ -138,13 +138,22 @@ def _fetch_lever(slug):
         raise ValueError("Lever returned an invalid jobs snapshot")
     jobs = []
     for j in payload:
+        # Matching already prefers usable plain text; avoid transferring its
+        # duplicate HTML representation without truncating any JD section.
+        raw = dict(j)
+        for plain, html in (("descriptionPlain", "description"),
+                            ("descriptionBodyPlain", "descriptionBody"),
+                            ("openingPlain", "opening"),
+                            ("additionalPlain", "additional")):
+            if _clean_description(raw.get(plain)):
+                raw.pop(html, None)
         jobs.append({
             "external_id": j["id"],
             "title": j.get("text", ""),
             "location": (j.get("categories") or {}).get("location"),
             "department": (j.get("categories") or {}).get("team"),
             "url": j.get("hostedUrl"),
-            "raw_json": j,
+            "raw_json": raw,
         })
     return jobs
 
@@ -182,6 +191,11 @@ def fetch_jobs_for_company(company_row):
     Returns a list of dicts: {external_id, title, location, department, url, raw_json}
     Raises requests.HTTPError on a bad response (caller should catch and skip/log).
     """
+    from backend.career_sources import SOURCES, fetch
+    if "career_source" in company_row.keys() and company_row["career_source"]:
+        return fetch(company_row["career_source"])
+    if company_row['board_slug'] in {'career-site-' + key for key in SOURCES}:
+        raise ValueError('Career source metadata is missing; deploy the matching hosted code')
     fetcher = _FETCHERS.get(company_row["ats_type"])
     if fetcher is None:
         raise ValueError(f"Unknown ats_type: {company_row['ats_type']}")
@@ -200,7 +214,24 @@ def upsert_jobs(conn, company_id, fetched_jobs):
                 "SELECT id,raw_json FROM jobs WHERE company_id=? AND external_id=?",
                 (company_id, job["external_id"]),
             ).fetchone()
-            raw_json = json.dumps(job.get("raw_json", {}))
+            incoming = dict(job.get("raw_json", {}))
+            if previous and incoming.get("career_source"):
+                saved = json.loads(previous[1] or '{}')
+                description = saved.pop('descriptionHtml', None)
+                title = saved.pop('resolved_title', None)
+                location = saved.pop('resolved_location', None)
+                employment = saved.get('employmentType')
+                if 'employmentType' not in incoming:
+                    saved.pop('employmentType', None)
+                if saved == incoming and description:
+                    incoming['descriptionHtml'] = description
+                    if employment:
+                        incoming['employmentType'] = employment
+                    if title:
+                        incoming['resolved_title'], incoming['resolved_location'] = title, location
+                        job['title'], job['location'] = title, location
+                    job['raw_json'] = incoming
+            raw_json = json.dumps(incoming)
             if previous and previous[1] != raw_json:
                 conn.execute("UPDATE scores SET is_stale=1 WHERE job_id=?", (previous[0],))
             conn.execute(
@@ -429,7 +460,7 @@ def _clean_description(value, html=False):
 
 
 def extract_job_description(job_row):
-    """Extract complete JD sections from stored Greenhouse, Lever, or Ashby data."""
+    """Extract complete JD sections from stored ATS and career-source data."""
     try:
         raw = json.loads(job_row["raw_json"] or "{}")
     except (TypeError, json.JSONDecodeError) as exc:
@@ -582,6 +613,8 @@ def score_job_for_user(user_row, job_row, company_name):
     if not user_row["resume_text"].strip():
         raise ValueError("Save a nonempty resume before scoring jobs")
 
+    from backend.career_sources import prepare_job
+    job_row = prepare_job(job_row)
     description = extract_job_description(job_row)
     jd_lines = {index: line for index, line in enumerate(description.splitlines(), start=1) if line.strip()}
     resume_lines = {index: line for index, line in enumerate(user_row["resume_text"].splitlines(), start=1) if line.strip()}

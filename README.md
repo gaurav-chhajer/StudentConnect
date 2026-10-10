@@ -444,8 +444,13 @@ fetch needs neither Groq nor Gmail credentials on GitHub. Reaching a limit repor
 failure and defers unfinished work to another scheduled run. Transfers are limited to 2 MB;
 oversized snapshots/batches fail explicitly without replacing stored snapshots.
 Up to 1,000 companies/accounts and 5,000 jobs per snapshot are supported.
-Failed boards retain previous jobs and are skipped for scoring. Email selection
-requires jobs refreshed on the current India date, current scores, saved minimum
+Failed boards retain previous jobs and are skipped for scoring.
+Scoring candidate batches exclude failed boards
+before the per-account limit, so retained jobs cannot crowd out refreshed boards.
+The runner supplies successful company IDs through the optional `company_id`
+query parameters on the internal work endpoint; omitted parameters preserve its
+existing selection behavior. Deploy the hosted endpoint before the updated runner.
+Email selection requires jobs refreshed on the current India date, current scores, saved minimum
 scores, subscriptions and unsent-job eligibility. Email time is fixed at 08:00
 India time; weekly cadence and Off remain honored. Saved local send-time/timezone
 values are retained for local commands. The Settings page explains the fixed
@@ -461,7 +466,85 @@ SMTP acceptance leaves `data/email_schedule.paused`; inspect Gmail Sent, bounce
 messages, hosted logs and `sent_log` before reconciling and clearing the marker.
 Never blindly rerun uncertain sends. Matching still runs when emails are paused.
 
-Activation (no paid PythonAnywhere task or database migration is needed):
+### Additional target companies
+
+The catalog adds ICICI Bank, Wipro, IDFC FIRST Bank, Futures First, Publicis
+Sapient, JioHotstar (through JioStar), DP World, Bank of America, JPMorgan Chase,
+Morgan Stanley, Apollo.io, Barclays, Nomura, Arcesium, Cvent and ZS, without duplicate entries.
+Apollo.io and Arcesium use their verified Greenhouse boards. The enterprise
+connectors use allowlisted official public sources; they do not guess ATS slugs.
+`005_career_sources.sql` adds a nullable source selector and unique index. The
+existing required ATS fields are compatibility metadata when that selector is
+present, and are ignored by fetching and displayed as "Official career site".
+Company IDs, subscriptions, users, jobs and scores are retained.
+
+Postman now uses its official Workday board. The import updates the existing
+Postman company's source in place, preserving its ID and subscriptions.
+`006_extended_career_sources.sql` extends the allowed sources without modifying
+migration 005: its original column and unique index are retained as legacy
+metadata, and the current column has the extended validation and unique index.
+Cvent and ZS use their official public iCIMS listing and description feeds.
+Lever snapshots omit duplicate HTML fields only when usable plain versions
+exist; complete descriptions, requirement lists and employment metadata remain.
+This brings the verified Paytm snapshot below the existing 2 MiB transfer limit.
+
+ICICI's encoded API response does not yet have a verified decoder. Futures
+First's listing feed is reachable, but its listings have empty descriptions and
+the inspected application page did not expose a usable full description. They appear as "Automatic fetching
+unavailable" and cannot be subscribed to or fetched until a verified connector
+is available. Their presence in the catalog is not a claim of working automation.
+Morgan Stanley's connector covers its public student/graduate feed; Nomura's
+connector covers its official India listings. JioHotstar uses the shared JioStar
+career board, which includes roles for other JioStar businesses. Other new feeds
+currently cover worldwide listings; saved user location preferences still apply.
+
+Enterprise listing snapshots apply the existing senior-title exclusion before
+transfer. Full descriptions are loaded for eligible scoring candidates and
+validated/stored through the authenticated worker before evaluating. Description
+failures never become fabricated summaries. Saved descriptions are retained while
+listing metadata is unchanged; a description-only edit that does not change that
+metadata is not detected by the listing fetch. Employment-type preferences still
+require structured source data; leave those filters empty for sources without it.
+
+Full live checks passed for Postman, Cvent, ZS, JioStar, Publicis Sapient, DP World,
+IDFC FIRST Bank, Bank of America, Morgan Stanley, Barclays and Nomura during
+development. Wipro's latest check rejected a changing listing count; JPMorgan's
+latest complete pagination returned duplicate job identifiers and its snapshot
+was withheld. Those connectors have offline tests, but complete live snapshots
+remain unverified. Newly imported Wipro and JPMorgan entries are inactive and
+appear as "Automatic fetching unavailable" until verified. Existing company
+activation choices are preserved by the import. The adapters remain accessible
+through the explicit read-only check command. A source failure
+is logged and retains prior jobs; it is not reported as a successful empty board.
+
+Snapshots are withheld on incomplete/duplicate pagination, source errors, or
+exhausted time budgets. The 6:30 AM / 6:30 PM fetch and 8:00 AM email schedules,
+runner-minute caps, authentication and email safeguards are unchanged. Large
+worldwide feeds may not finish within the evening budget and wait for the morning
+cycle; two scheduled fetch runs do not guarantee two complete refreshes of every
+board. The 1,860-minute scheduled maximum excludes reruns and other workflows.
+
+After publishing the reviewed changes and pulling them into PythonAnywhere, run
+the offline import **before reloading the web app**:
+
+```bash
+cd ~/StudentConnect
+python -B -m scripts.seed_companies
+```
+
+Use the same Python environment as the hosted app. This command creates a new,
+uniquely named SQLite backup, checks it, applies migrations, and imports the
+catalog without calling any career site, Groq, or email service. Existing backups
+are not overwritten. Check that the import succeeded, reload the PythonAnywhere
+web app, then select available companies in Settings and save.
+
+For an explicitly authorized **read-only live** source check on a machine with
+network access, run `python -B -m scripts.check_career_sources hotstar dpworld`
+(or supply other registry keys from `backend/career_sources.py`). This checks
+complete snapshots, transfer size, and one description; it does not write SQLite
+or call Groq/email. Offline tests never run this command or contact real services.
+
+Activation (no paid PythonAnywhere task is needed; apply catalog migrations first):
 
 1. Review and publish this code to the GitHub repository's default branch, then
    deploy the same source to the existing PythonAnywhere checkout. Do not replace

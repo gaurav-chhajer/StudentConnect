@@ -8,3 +8,5 @@ Glance,greenhouse,glance,49,https://boards-api.greenhouse.io/v1/boards/glance/jo
 Scaler,ashby,scaler,0,https://api.ashbyhq.com/posting-api/job-board/scaler
 Newton School,greenhouse,newton,1,https://boards-api.greenhouse.io/v1/boards/newton/jobs
 Newton School,lever,newton,3,https://api.lever.co/v0/postings/newton?mode=json
+Arcesium,greenhouse,arcesiumllc,50,https://boards-api.greenhouse.io/v1/boards/arcesiumllc/jobs
+Apollo.io,greenhouse,apolloio,,https://boards-api.greenhouse.io/v1/boards/apolloio/jobs

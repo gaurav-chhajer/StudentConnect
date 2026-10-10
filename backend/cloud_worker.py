@@ -109,7 +109,7 @@ def register_routes(application, connection, database):
 
     @routes.get("/companies")
     def companies():
-        rows = connection().execute("""SELECT id,name,ats_type,board_slug FROM companies
+        rows = connection().execute("""SELECT id,name,ats_type,board_slug,career_source FROM companies
             WHERE active=1 ORDER BY id LIMIT ?""", (MAX_COMPANIES + 1,)).fetchall()
         if len(rows) > MAX_COMPANIES:
             raise ValueError("Too many companies for one daily cycle")
@@ -142,7 +142,7 @@ def register_routes(application, connection, database):
         conn = connection()
         with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
             conn.execute("BEGIN IMMEDIATE")
-            company = conn.execute("SELECT id,name,ats_type,board_slug FROM companies WHERE id=? AND active=1",
+            company = conn.execute("SELECT id,name,ats_type,board_slug,career_source FROM companies WHERE id=? AND active=1",
                                    (company_id,)).fetchone()
             if company is None or data.get("fingerprint") != fingerprint(dict(company)):
                 return {"error": "Company changed; fetch again"}, 409
@@ -152,6 +152,10 @@ def register_routes(application, connection, database):
     @routes.get("/work")
     def work():
         after = store.integer(request.args.get("after", "0"), 0, 2147483647)
+        company_values = request.args.getlist("company_id")
+        if len(company_values) > MAX_COMPANIES:
+            raise ValueError("Too many candidate companies")
+        company_ids = {store.integer(value, 1, 2147483647) for value in company_values}
         conn = connection()
         user = conn.execute("""SELECT u.id,u.resume_text,u.preferences_json FROM users u
             JOIN accounts a ON a.user_id=u.id WHERE u.id>? AND u.active=1
@@ -159,7 +163,11 @@ def register_routes(application, connection, database):
         if user is None:
             return {"items": [], "next": None}
         items = []
-        for job in pipeline.filter_candidate_jobs(conn, user)[:MAX_WORK_ITEMS]:
+        candidates = pipeline.filter_candidate_jobs(conn, user)
+        if company_values:
+            # Failed boards must not consume the bounded batch's candidate slots.
+            candidates = [job for job in candidates if job["company_id"] in company_ids]
+        for job in candidates[:MAX_WORK_ITEMS]:
             company = conn.execute("SELECT name FROM companies WHERE id=?", (job["company_id"],)).fetchone()
             items.append(dict(user=dict(user), job=dict(job), company_name=company[0],
                               fingerprint=fingerprint(work_identity(user, job))))
@@ -192,6 +200,46 @@ def register_routes(application, connection, database):
                 conn.execute("""UPDATE matching_tasks SET status='complete',last_error=NULL
                     WHERE user_id=? AND revision=?""", (user_id, task[0]))
         return {"saved": True}
+
+    @routes.post("/description")
+    def description():
+        from backend.career_sources import MAX_DESCRIPTION, SOURCES
+        data = body()
+        user_id, job_id = positive_id(data.get('user_id')), positive_id(data.get('job_id'))
+        text, title, location = data.get('description'), data.get('title'), data.get('location')
+        employment = data.get('employment_type')
+        if (not isinstance(text, str) or not text.strip() or len(text) > MAX_DESCRIPTION or
+                not isinstance(title, str) or not title.strip() or len(title) > 1000 or
+                location is not None and (not isinstance(location, str) or len(location) > 4000) or
+                employment is not None and (not isinstance(employment, str) or len(employment) > 200)):
+            raise ValueError('Invalid career description')
+        conn = connection()
+        with run_pipeline.exclusive_cycle(Path(database).parent / 'pipeline.lock'), conn:
+            conn.execute('BEGIN IMMEDIATE')
+            user = eligible_user(conn, user_id)
+            job = conn.execute('SELECT * FROM jobs WHERE id=? AND is_active=1', (job_id,)).fetchone()
+            if user is None or job is None or data.get('fingerprint') != fingerprint(work_identity(user, job)):
+                return {'error': 'Inputs changed; description discarded'}, 409
+            if job['company_id'] not in matching_tasks.companies_for_user(conn, user_id):
+                return {'error': 'Subscription changed; description discarded'}, 409
+            company = conn.execute('SELECT career_source,active FROM companies WHERE id=?', (job['company_id'],)).fetchone()
+            raw = json.loads(job['raw_json'])
+            key = raw.get('career_source')
+            if not company['active'] or key not in SOURCES or key != company['career_source'] or SOURCES[key][1] == 'blocked':
+                raise ValueError('Description does not belong to a supported career source')
+            raw['descriptionHtml'] = text
+            raw['resolved_title'], raw['resolved_location'] = title, location
+            if employment:
+                raw['employmentType'] = employment
+            prepared = dict(job, raw_json=json.dumps(raw), title=title, location=location)
+            pipeline.extract_job_description(prepared)
+            if prepared != dict(job):
+                conn.execute('UPDATE jobs SET raw_json=?,title=?,location=? WHERE id=?',
+                             (prepared['raw_json'], title, location, job_id))
+                conn.execute('UPDATE scores SET is_stale=1 WHERE job_id=?', (job_id,))
+                matching_tasks.enqueue_company(conn, job['company_id'], datetime.now(timezone.utc))
+            eligible = any(candidate['id'] == job_id for candidate in pipeline.filter_candidate_jobs(conn, user))
+            return {'eligible': eligible, 'job': prepared, 'fingerprint': fingerprint(work_identity(user, prepared))}
 
     @routes.post("/email")
     def email():
