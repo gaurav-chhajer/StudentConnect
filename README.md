@@ -445,6 +445,13 @@ failure and defers unfinished work to another scheduled run. Transfers are limit
 oversized snapshots/batches fail explicitly without replacing stored snapshots.
 Up to 1,000 companies/accounts and 5,000 jobs per snapshot are supported.
 Failed boards retain previous jobs and are skipped for scoring.
+Invalid evaluations and scoring HTTP 400/413/422 rejections defer that candidate
+and continue with the remaining candidates. Authentication, rate-limit, network,
+other HTTP failures, and hosted description/save failures stop the batch;
+uncertain writes are not retried. Completed scores are retained. Any failure
+still returns exit code 1. Logs include safe user/job IDs, operation stage and
+HTTP status, without response bodies or credentials; the completed scoring
+summary includes saved and failed candidate counts.
 Scoring candidate batches exclude failed boards
 before the per-account limit, so retained jobs cannot crowd out refreshed boards.
 The runner supplies successful company IDs through the optional `company_id`

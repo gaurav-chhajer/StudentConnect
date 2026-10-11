@@ -319,6 +319,84 @@ class CloudEndpointTests(unittest.TestCase):
 
 
 class CloudRunnerTests(unittest.TestCase):
+    def test_scoring_failures_continue_only_for_candidate_rejections(self):
+        cases = [(status, status in runner.CANDIDATE_HTTP_STATUSES)
+                 for status in (400, 413, 422, 401, 403, 404, 429, 500, 503)]
+        cases.extend((error, isinstance(error, (ValueError, KeyError, TypeError))) for error in (
+            ValueError('private evaluation'), KeyError('private field'), TypeError('private type'),
+            RuntimeError('private configuration'), requests.Timeout('private timeout'),
+            requests.ConnectionError('private network'), requests.HTTPError('private missing response')))
+        for failure, continues in cases:
+            with self.subTest(failure=type(failure).__name__ if isinstance(failure, Exception) else failure):
+                error = failure
+                if isinstance(failure, int):
+                    response = requests.Response()
+                    response.status_code = failure
+                    response._content = b'private response body'
+                    response.headers['Retry-After'] = 'private header'
+                    error = requests.HTTPError('private credentials', response=response)
+                company = dict(id=1, name='Synthetic', ats_type='lever', board_slug='synthetic', fingerprint='0' * 64)
+                items = [dict(user=dict(id=user_id, resume_text='private resume'),
+                              job=dict(id=number, company_id=1, raw_json='{}'),
+                              company_name='Synthetic', fingerprint='0' * 64)
+                         for number, user_id in ((1, 1), (2, 1), (3, 1), (4, 2))]
+                saved = []
+                client = MagicMock()
+                def hosted_call(route, data=None):
+                    if route == 'companies':
+                        return dict(companies=[company])
+                    if route == 'snapshot':
+                        return dict(saved=0)
+                    if route.startswith('work?after=0&'):
+                        return dict(next=1, items=items[:3])
+                    if route.startswith('work?after=1&'):
+                        return dict(next=2, items=items[3:])
+                    if route.startswith('work?after=2&'):
+                        return dict(next=None, items=[])
+                    if route == 'score':
+                        saved.append(data['job_id'])
+                        return dict(saved=True)
+                    self.fail('Unexpected hosted operation')
+                client.call.side_effect = hosted_call
+                with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
+                        patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
+                        patch.object(pipeline, 'score_job_for_user', side_effect=[{}, error, {}, {}]) as score, \
+                        patch.object(runner.time, 'monotonic', return_value=0), \
+                        self.assertLogs(runner.logger, level='INFO') as logs:
+                    self.assertEqual(runner.fetch_and_score(client, 2100), 1)
+                self.assertEqual(score.call_count, 4 if continues else 2)
+                self.assertEqual(saved, [1, 3, 4] if continues else [1])
+                output = ' '.join(logs.output)
+                self.assertIn('user_id=1 job_id=2 stage=evaluation error=' + type(error).__name__, output)
+                self.assertIn('http_status=' + (str(failure) if isinstance(failure, int) else 'unavailable'), output)
+                self.assertIn('candidate deferred; continuing' if continues else 'remaining work deferred', output)
+                if continues:
+                    self.assertIn('scores_saved=3 candidates_failed=1 partial_failure=True', output)
+                self.assertNotIn('private', output)
+
+    def test_uncertain_score_save_stops_without_retry_or_further_evaluation(self):
+        for error in (requests.Timeout('private write'), ValueError('private response'),
+                      runner.HostedOperationError(503)):
+            with self.subTest(error=type(error).__name__):
+                company = dict(id=1, name='Synthetic', ats_type='lever', board_slug='synthetic', fingerprint='0' * 64)
+                items = [dict(user=dict(id=1, resume_text='Python'),
+                              job=dict(id=number, company_id=1, raw_json='{}'),
+                              company_name='Synthetic', fingerprint='0' * 64) for number in (1, 2)]
+                client = MagicMock()
+                client.call.side_effect = [dict(companies=[company]), dict(saved=0), dict(next=1, items=items), error]
+                with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
+                        patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
+                        patch.object(pipeline, 'score_job_for_user', return_value={}) as score, \
+                        patch.object(runner.time, 'monotonic', return_value=0), \
+                        self.assertLogs(runner.logger, level='ERROR') as logs:
+                    self.assertEqual(runner.fetch_and_score(client, 2100), 1)
+                score.assert_called_once()
+                self.assertEqual(client.call.call_count, 4)
+                self.assertIn('user_id=1 job_id=1 stage=save', ' '.join(logs.output))
+                if isinstance(error, runner.HostedOperationError):
+                    self.assertIn('http_status=503', ' '.join(logs.output))
+                self.assertNotIn('private', ' '.join(logs.output))
+
     def test_23_boards_score_only_successful_snapshots_and_preserve_failure_status(self):
         for failed_ids in (set(), {1, 2}, set(range(1, 24))):
             with self.subTest(failed_ids=failed_ids):
@@ -557,8 +635,9 @@ class CloudRunnerTests(unittest.TestCase):
             self.assertEqual(client.call("email", {"after": 0}), {"next": None})
             self.assertFalse(session.return_value.request.call_args.kwargs["allow_redirects"])
             response.status_code = 302
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(runner.HostedOperationError) as error:
                 client.call("companies")
+            self.assertEqual(error.exception.status, 302)
             response.status_code = 200
             response.iter_content.return_value = [b"x" * (cloud_worker.MAX_BODY_BYTES + 1)]
             with self.assertRaises(ValueError):

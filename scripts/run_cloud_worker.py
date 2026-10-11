@@ -21,6 +21,13 @@ FETCH_SECONDS = 7 * 60
 EMAIL_SECONDS = 7 * 60
 MAX_SCORES = 100
 MAX_ACCOUNTS = 1000
+CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
+
+
+class HostedOperationError(RuntimeError):
+    def __init__(self, status):
+        self.status = status
+        super().__init__("Hosted operation failed (HTTP %s)" % status)
 
 
 class HostedClient:
@@ -47,7 +54,7 @@ class HostedClient:
             if response.status_code == 409:
                 raise ValueError("Hosted inputs changed; work deferred")
             if response.status_code != 200:
-                raise RuntimeError("Hosted operation failed (HTTP %s)" % response.status_code)
+                raise HostedOperationError(response.status_code)
             chunks, size = [], 0
             for chunk in response.iter_content(65536):
                 size += len(chunk)
@@ -113,6 +120,7 @@ def fetch_and_score(client, deadline, fetch_only=False):
     if fetch_only:
         return int(failed)
     after, scores, accounts, skipped = 0, 0, 0, 0
+    saved, candidate_failures = 0, 0
     company_query = "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 120:
@@ -128,8 +136,8 @@ def fetch_and_score(client, deadline, fetch_only=False):
         if next_id is None:
             if items:
                 raise ValueError("Work without an account cursor")
-            logger.info("Scoring summary: eligible_accounts=%s evaluations_attempted=%s candidates_skipped_failed_boards=%s",
-                        accounts, scores, skipped)
+            logger.info("Scoring summary: eligible_accounts=%s evaluations_attempted=%s candidates_skipped_failed_boards=%s scores_saved=%s candidates_failed=%s partial_failure=%s",
+                        accounts, scores, skipped, saved, candidate_failures, failed)
             return int(failed)
         after = next_id
         accounts += 1
@@ -151,10 +159,14 @@ def fetch_and_score(client, deadline, fetch_only=False):
             try:
                 prepared = career_sources.prepare_job(item['job'], deadline - 120)
             except (requests.RequestException, ValueError, KeyError, TypeError) as error:
-                logger.error('Career description failed: user_id=%s job_id=%s error=%s; candidate deferred',
-                             after, item['job']['id'], type(error).__name__)
+                response = error.response if isinstance(error, requests.RequestException) else None
+                logger.error('Career description failed: user_id=%s job_id=%s error=%s http_status=%s; candidate deferred',
+                             after, item['job']['id'], type(error).__name__,
+                             response.status_code if response is not None else 'unavailable')
                 failed = True
+                candidate_failures += 1
                 continue
+            stage = "description"
             try:
                 if prepared != item['job']:
                     raw = json.loads(prepared['raw_json'])
@@ -171,12 +183,30 @@ def fetch_and_score(client, deadline, fetch_only=False):
                         continue
                     item = dict(item, job=detail['job'], fingerprint=detail['fingerprint'])
                 # One bounded request; a rejected/failed evaluation waits for the next daily run.
+                stage = "evaluation"
                 result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"])
+                stage = "save"
                 client.call("score", dict(user_id=item["user"]["id"], job_id=item["job"]["id"],
                                           fingerprint=item["fingerprint"], result=result))
+                saved += 1
                 logger.info("Saved score user_id=%s job_id=%s", item["user"]["id"], item["job"]["id"])
             except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:
-                logger.error("Scoring operation failed (%s); remaining work deferred", type(error).__name__)
+                response = error.response if isinstance(error, requests.RequestException) else None
+                status = (response.status_code if response is not None else
+                          error.status if isinstance(error, HostedOperationError) else None)
+                # Only known evaluation rejections are local to this candidate.
+                # Hosted writes and service availability failures remain stop conditions.
+                candidate_failure = stage == "evaluation" and (
+                    isinstance(error, (ValueError, KeyError, TypeError)) or
+                    (isinstance(error, requests.HTTPError) and status in CANDIDATE_HTTP_STATUSES))
+                logger.error("Scoring operation failed: user_id=%s job_id=%s stage=%s error=%s http_status=%s; %s",
+                             after, item["job"]["id"], stage, type(error).__name__,
+                             status if status is not None else "unavailable",
+                             "candidate deferred; continuing" if candidate_failure else "remaining work deferred")
+                if candidate_failure:
+                    failed = True
+                    candidate_failures += 1
+                    continue
                 return 1
     logger.error("Account budget reached; remaining work deferred")
     return 1
