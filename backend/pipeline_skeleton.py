@@ -203,6 +203,13 @@ def fetch_jobs_for_company(company_row):
 
 
 def upsert_jobs(conn, company_id, fetched_jobs):
+    from backend.job_ingestion import deduplicate, mode_for_source
+    company = conn.execute('SELECT career_source FROM companies WHERE id=?', (company_id,)).fetchone()
+    if company is None:
+        raise ValueError('Unknown company')
+    mode = mode_for_source(company[0])
+    fetched_jobs = deduplicate(fetched_jobs, mode)
+    changed = []
     with conn:
         now = datetime.now(timezone.utc).isoformat()
         previous_snapshot = {row[0]: row[1] for row in conn.execute(
@@ -211,7 +218,7 @@ def upsert_jobs(conn, company_id, fetched_jobs):
         for job in fetched_jobs:
             seen_external_ids.append(job["external_id"])
             previous = conn.execute(
-                "SELECT id,raw_json FROM jobs WHERE company_id=? AND external_id=?",
+                "SELECT id,raw_json,is_active,title,location,department,url FROM jobs WHERE company_id=? AND external_id=?",
                 (company_id, job["external_id"]),
             ).fetchone()
             incoming = dict(job.get("raw_json", {}))
@@ -232,7 +239,11 @@ def upsert_jobs(conn, company_id, fetched_jobs):
                         job['title'], job['location'] = title, location
                     job['raw_json'] = incoming
             raw_json = json.dumps(incoming)
-            if previous and previous[1] != raw_json:
+            listing_changed = (previous is None or not previous[2] or previous[1] != raw_json or
+                               tuple(previous[3:]) != (job['title'], job.get('location'), job.get('department'), job.get('url')))
+            if listing_changed:
+                changed.append(job['external_id'])
+            if previous and listing_changed:
                 conn.execute("UPDATE scores SET is_stale=1 WHERE job_id=?", (previous[0],))
             conn.execute(
                 """
@@ -246,17 +257,18 @@ def upsert_jobs(conn, company_id, fetched_jobs):
                  job.get("url"), raw_json, now, now),
             )
         # mark anything not in this fetch as inactive (role closed/removed)
-        if seen_external_ids:
+        if mode == 'snapshot' and seen_external_ids:
             placeholders = ",".join("?" * len(seen_external_ids))
             conn.execute(
                 f"UPDATE jobs SET is_active=0 WHERE company_id=? AND external_id NOT IN ({placeholders})",
                 (company_id, *seen_external_ids),
             )
-        else:
+        elif mode == 'snapshot':
             conn.execute("UPDATE jobs SET is_active=0 WHERE company_id=?", (company_id,))
         snapshot = {job["external_id"]: json.dumps(job.get("raw_json", {})) for job in fetched_jobs}
-        if snapshot != previous_snapshot:
+        if changed or mode == 'snapshot' and snapshot != previous_snapshot:
             matching_tasks.enqueue_company(conn, company_id, datetime.now(timezone.utc))
+    return changed
 
 
 

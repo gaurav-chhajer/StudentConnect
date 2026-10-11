@@ -98,6 +98,25 @@ class PipelineTests(unittest.TestCase):
         score.assert_not_called()
         self.mail.assert_not_called()
 
+    def test_observed_partial_empty_repeat_and_conflict_preserve_jobs(self):
+        self.prepare()
+        self.conn.execute("UPDATE companies SET career_source='wipro' WHERE id=1")
+        self.conn.commit()
+        posting = self.fetched(dict(id=1))[0]
+        with patch.object(pipeline.matching_tasks, 'enqueue_company') as enqueue:
+            self.assertEqual(pipeline.upsert_jobs(self.conn, 1, [posting, dict(posting)]), ['1'])
+            self.assertEqual(enqueue.call_count, 1)
+            self.assertEqual(pipeline.upsert_jobs(self.conn, 1, [posting]), [])
+            self.assertEqual(pipeline.upsert_jobs(self.conn, 1, []), [])
+            self.assertEqual(enqueue.call_count, 1)
+            with self.assertLogs('backend.job_ingestion', level='WARNING'):
+                self.assertEqual(pipeline.upsert_jobs(self.conn, 1, [posting, dict(posting, title='Other role')]), [])
+            self.assertEqual(enqueue.call_count, 1)
+        self.assertEqual(self.conn.execute('SELECT is_active FROM jobs WHERE id=1').fetchone()[0], 1)
+        with patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]):
+            runner.fetch_cycle(self.conn, {1})
+        self.assertEqual(self.conn.execute('SELECT is_active FROM jobs WHERE id=1').fetchone()[0], 1)
+
     def test_budget_defers_remaining_scores_until_next_cycle(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \

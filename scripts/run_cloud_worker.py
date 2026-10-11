@@ -13,7 +13,8 @@ import requests
 
 from backend import hosting, pipeline_skeleton as pipeline
 from backend import career_sources
-from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, worker_key
+from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, MAX_JOBS, worker_key
+from backend.job_ingestion import deduplicate, mode_for_source, observation_batches
 
 logger = logging.getLogger(__name__)
 MATCHING_SECONDS = 35 * 60
@@ -103,7 +104,15 @@ def fetch_and_score(client, deadline, fetch_only=False):
             jobs = (career_sources.fetch(source, deadline - 120) if source else
                     pipeline.fetch_jobs_for_company(company))
             stage = "snapshot"
-            client.call("snapshot", dict(company_id=company["id"], fingerprint=company["fingerprint"], jobs=jobs))
+            mode = mode_for_source(source)
+            jobs = deduplicate(jobs, mode)
+            envelope = dict(company_id=company['id'], fingerprint=company['fingerprint'], mode=mode)
+            batches = (observation_batches(envelope, jobs, MAX_JOBS, MAX_BODY_BYTES)
+                       if mode == 'observed' else [dict(envelope, jobs=jobs)])
+            for batch in batches:
+                if time.monotonic() >= deadline:
+                    raise ValueError('Observation transfer time budget exhausted')
+                client.call('snapshot', batch)
             successful.add(company["id"])
             logger.info("Fetched company_id=%s jobs=%s", company["id"], len(jobs))
         except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:

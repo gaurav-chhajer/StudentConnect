@@ -43,8 +43,11 @@ class CareerSourceTests(unittest.TestCase):
                       [dict(totalCount=1, jobs=[dict(data=dict(item, slug='../123'))])],
                       [dict(totalCount=1, jobs=[dict(data=dict(item, language='other'))])]):
             with self.subTest(pages=pages), patch.object(sources.Feed, 'json', side_effect=pages):
-                with self.assertRaises(ValueError):
-                    sources.fetch('cvent')
+                if len(pages) > 1:
+                    self.assertEqual(len(sources.fetch('cvent')), 1)
+                else:
+                    with self.assertRaises(ValueError):
+                        sources.fetch('cvent')
         with patch.object(sources.Feed, 'json', return_value=dict(totalCount=0, jobs=[])):
             self.assertEqual(sources.fetch('zs'), [])
 
@@ -83,8 +86,7 @@ class CareerSourceTests(unittest.TestCase):
                       [dict(total=2, jobPostings=[item]), dict(total=2, jobPostings=[item])],
                       [dict(total=2, jobPostings=[item]), dict(total=3, jobPostings=[item])]):
             with self.subTest(pages=pages), patch.object(sources.Feed, 'json', side_effect=pages):
-                with self.assertRaises(ValueError):
-                    sources.fetch('hotstar')
+                self.assertEqual(len(sources.fetch('hotstar')), 1)
         with patch.object(sources.Feed, 'json', return_value=dict(total=0, jobPostings=[])):
             self.assertEqual(sources.fetch('hotstar'), [])
 

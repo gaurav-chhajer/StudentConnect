@@ -205,25 +205,39 @@ def structured_job(text):
 
 
 def fetch(key, deadline=None):
+    import logging
+    from backend.job_ingestion import deduplicate, mode_for_source
+    mode = mode_for_source(key)
     feed = Feed(key, deadline if deadline is not None else time.monotonic() + 300)
     try:
-        rows = _listings(feed)
-        if len(rows) > MAX_LISTINGS or len({row['external_id'] for row in rows}) != len(rows):
+        rows = []
+        try:
+            _listings(feed, rows)
+        except (requests.RequestException, ValueError, KeyError, TypeError) as error:
+            if mode != 'observed' or not rows:
+                raise
+            logging.getLogger(__name__).warning(
+                'Incomplete observations retained: source=%s rows=%s error=%s', key, len(rows), type(error).__name__)
+        if len(rows) > MAX_LISTINGS or mode == 'snapshot' and len({row['external_id'] for row in rows}) != len(rows):
             raise ValueError('Career snapshot is oversized or contains duplicate jobs')
+        if mode == 'observed' and len({row['external_id'] for row in rows}) != len(rows):
+            logging.getLogger(__name__).warning('Repeated paginated observations: source=%s rows=%s', key, len(rows))
+        rows = deduplicate(rows, mode)
         # The same senior-title rule already governs eligibility in the pipeline.
         # Apply it before transfer to keep large enterprise snapshots bounded.
         from backend.pipeline_skeleton import SENIOR_TITLE_KEYWORDS
         rows = [row for row in rows if not any(word in row['title'].lower() for word in SENIOR_TITLE_KEYWORDS)]
-        if len(rows) > 5000:
+        if mode == 'snapshot' and len(rows) > 5000:
             raise ValueError('Eligible career snapshot exceeds the hosted job limit')
         return rows
     finally:
         feed.close()
 
 
-def _listings(feed):
+def _listings(feed, rows=None):
     key, kind, origin = feed.key, SOURCES[feed.key][1], feed.origin
-    rows, expected = [], None
+    rows = [] if rows is None else rows
+    expected = None
     if kind == 'morgan':
         # The verified public result-set feed serves students and graduates.
         for opportunity in ('sg',):
@@ -294,7 +308,7 @@ def _listings(feed):
                          version=item.get('PostedDate'), employment=item.get('JobSchedule')) for item in items]
         elif kind == 'sap':
             payload = feed.json('/services/recruiting/v1/jobs', data=dict(
-                keywords='', locale='en_US', location='', pageNumber=page_number, sortBy='recent'))
+                keywords='', locale='en_US', location='', pageNumber=page_number, sortBy='date'))
             count, items = total(payload['totalJobs']), payload['jobSearchResult']
             batch = []
             for record in items:

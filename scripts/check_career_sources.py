@@ -8,7 +8,8 @@ import time
 import requests
 
 from backend import career_sources
-from backend.cloud_worker import MAX_BODY_BYTES
+from backend.cloud_worker import MAX_BODY_BYTES, MAX_JOBS
+from backend.job_ingestion import mode_for_source, observation_batches
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,11 @@ def main():
         logger.info('Checking career source=%s', key)
         try:
             jobs = career_sources.fetch(key, started + 300)
-            size = len(json.dumps(dict(company_id=1, fingerprint='0' * 64, jobs=jobs)).encode())
+            mode = mode_for_source(key)
+            envelope = dict(company_id=1, fingerprint='0' * 64, mode=mode)
+            batches = (observation_batches(envelope, jobs, MAX_JOBS, MAX_BODY_BYTES)
+                       if mode == 'observed' else [dict(envelope, jobs=jobs)])
+            size = max(len(json.dumps(batch).encode()) for batch in batches)
             if size > MAX_BODY_BYTES:
                 raise ValueError('Snapshot exceeds the hosted transfer limit')
             if jobs:
@@ -32,8 +37,8 @@ def main():
                 prepared = career_sources.prepare_job(candidate)
                 from backend.pipeline_skeleton import extract_job_description
                 extract_job_description(prepared)
-            logger.info('Verified career source=%s jobs=%s snapshot_bytes=%s seconds=%.1f',
-                        key, len(jobs), size, time.monotonic() - started)
+            logger.info('Checked career source=%s mode=%s jobs=%s largest_batch_bytes=%s seconds=%.1f',
+                        key, mode, len(jobs), size, time.monotonic() - started)
         except (requests.RequestException, ValueError, KeyError, TypeError, IndexError) as error:
             response = error.response if isinstance(error, requests.RequestException) else None
             logger.error('Verification failed source=%s error=%s http_status=%s seconds=%.1f', key,

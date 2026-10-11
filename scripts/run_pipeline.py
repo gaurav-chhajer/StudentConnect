@@ -55,15 +55,13 @@ def exclusive_cycle(path):
 
 
 def fetch_cycle(conn, company_ids=None):
-    """Failed snapshots leave previous jobs intact; successful empty ones close jobs."""
+    """Ingestion owns closure policy; paginated observations retain unseen jobs."""
     run_local_fetch.seed_companies(conn)
     successful = set()
     failed = False
     for company in conn.execute("SELECT * FROM companies WHERE active=1 ORDER BY id").fetchall():
         if company_ids is not None and company['id'] not in company_ids:
             continue
-        previous = {row['external_id']: row['raw_json'] for row in conn.execute(
-            "SELECT external_id,raw_json FROM jobs WHERE company_id=? AND is_active=1", (company['id'],))}
         try:
             jobs = pipeline.fetch_jobs_for_company(company)
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
@@ -73,13 +71,6 @@ def fetch_cycle(conn, company_ids=None):
             continue
         # Database failures propagate: never continue after a partial write.
         pipeline.upsert_jobs(conn, company["id"], jobs)
-        if not jobs:
-            with conn:
-                conn.execute("UPDATE jobs SET is_active=0 WHERE company_id=?", (company["id"],))
-        snapshot = {job['external_id']: json.dumps(job.get('raw_json', {})) for job in jobs}
-        if snapshot != previous:
-            with conn:
-                matching_tasks.enqueue_company(conn, company['id'], datetime.now(timezone.utc))
         successful.add(company["id"])
         logger.info("Fetched company_id=%s jobs=%s", company["id"], len(jobs))
     return successful, failed

@@ -136,8 +136,8 @@ def register_routes(application, connection, database):
                     raise ValueError("Invalid optional job text")
             if job.get("url") and store.safe_url(job["url"]) is None:
                 raise ValueError("Invalid application URL")
-            if not isinstance(job.get("raw_json"), dict) or job["external_id"] in seen:
-                raise ValueError("Invalid or duplicate job")
+            if not isinstance(job.get("raw_json"), dict):
+                raise ValueError("Invalid job metadata")
             seen.add(job["external_id"])
         conn = connection()
         with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
@@ -146,6 +146,13 @@ def register_routes(application, connection, database):
                                    (company_id,)).fetchone()
             if company is None or data.get("fingerprint") != fingerprint(dict(company)):
                 return {"error": "Company changed; fetch again"}, 409
+            from backend.job_ingestion import deduplicate, mode_for_source
+            mode = mode_for_source(company['career_source'])
+            if data.get('mode', mode) != mode:
+                raise ValueError('Ingestion mode does not match company configuration')
+            if mode == 'snapshot' and len(seen) != len(jobs):
+                raise ValueError('Duplicate snapshot jobs')
+            jobs = deduplicate(jobs, mode)
             pipeline.upsert_jobs(conn, company_id, jobs)
         return {"saved": len(jobs)}
 

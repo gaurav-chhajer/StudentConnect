@@ -118,6 +118,21 @@ class CloudEndpointTests(unittest.TestCase):
         self.conn.commit()
         self.assertEqual(self.call("snapshot", data).status_code, 409)
 
+    def test_observed_mode_is_server_owned_and_empty_does_not_close(self):
+        self.conn.execute("UPDATE companies SET career_source='wipro' WHERE id=1")
+        self.conn.commit()
+        company = self.call('companies').json['companies'][0]
+        data = dict(company_id=1, fingerprint=company['fingerprint'], jobs=[])
+        self.assertEqual(self.call('snapshot', dict(data, mode='snapshot')).status_code, 400)
+        self.assertEqual(self.call('snapshot', dict(data, mode='observed')).json, {'saved': 0})
+        self.assertEqual(self.call('snapshot', data).status_code, 200)
+        self.assertEqual(self.conn.execute('SELECT is_active FROM jobs WHERE id=1').fetchone()[0], 1)
+        posting = dict(external_id='observed', title='Engineer', url='https://example.test/apply', raw_json={})
+        self.assertEqual(self.call('snapshot', dict(data, jobs=[posting, posting])).json, {'saved': 1})
+        with self.assertLogs('backend.job_ingestion', level='WARNING'):
+            self.assertEqual(self.call('snapshot', dict(data, jobs=[posting, dict(posting, title='Other')])).json, {'saved': 0})
+        self.assertEqual(self.conn.execute("SELECT title FROM jobs WHERE external_id='observed'").fetchone()[0], 'Engineer')
+
     def test_bounded_and_invalid_input(self):
         for data in ({"after": True}, {"after": -1}, {"after": "0"}):
             self.assertEqual(self.call("email", data).status_code, 400)
@@ -552,6 +567,26 @@ class CloudRunnerTests(unittest.TestCase):
         score.assert_not_called()
         emails.assert_not_called()
         client.close.assert_called_once()
+
+    def test_observed_worker_chunks_after_deduplication_and_reports_failed_transfer(self):
+        company = dict(id=1, name='Synthetic', ats_type='lever', board_slug='synthetic',
+                       career_source='wipro', fingerprint='0' * 64)
+        jobs = [dict(external_id=str(number), title='Engineer', raw_json={}) for number in range(3)]
+        for fail_last in (False, True):
+            client = MagicMock()
+            client.call.side_effect = ([dict(companies=[company]), dict(saved=2), requests.Timeout()]
+                                       if fail_last else [dict(companies=[company]), dict(saved=2), dict(saved=1)])
+            with patch.object(runner.career_sources, 'fetch', return_value=jobs + [jobs[0]]), \
+                    patch.object(runner, 'MAX_JOBS', 2), \
+                    patch.object(runner.time, 'monotonic', return_value=0):
+                if fail_last:
+                    with self.assertLogs(runner.logger, level='ERROR'), self.assertRaises(RuntimeError):
+                        runner.fetch_and_score(client, 420, fetch_only=True)
+                else:
+                    self.assertEqual(runner.fetch_and_score(client, 420, fetch_only=True), 0)
+            batches = [call.args[1] for call in client.call.call_args_list if call.args[0] == 'snapshot']
+            self.assertEqual([len(batch['jobs']) for batch in batches], [2, 1])
+            self.assertTrue(all(batch['mode'] == 'observed' for batch in batches))
 
     def test_evening_partial_failure_reports_failure_without_scoring(self):
         client = MagicMock()

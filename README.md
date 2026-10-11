@@ -524,8 +524,25 @@ activation choices are preserved by the import. The adapters remain accessible
 through the explicit read-only check command. A source failure
 is logged and retains prior jobs; it is not reported as a successful empty board.
 
-Snapshots are withheld on incomplete/duplicate pagination, source errors, or
-exhausted time budgets. The 6:30 AM / 6:30 PM fetch and 8:00 AM email schedules,
+Paginated career feeds use additive observations rather than complete snapshots.
+Validated pages collected before a timeout or pagination failure are retained with
+a warning; a failure before any validated page still fails the fetch. Identical
+IDs are collapsed, and conflicting IDs are withheld for that run. Missing jobs
+and empty observations never close stored jobs. Only new, changed or reactivated
+observations enqueue matching. The server derives this policy from company
+configuration and rejects conflicting worker modes. Cloud observations are split
+within the existing job-count and 2 MiB transfer limits; accepted batches remain
+saved if a later transfer fails. Batching happens after collection and deduplication,
+so a process crash during collection cannot save those pages.
+
+Greenhouse, Lever, Ashby, Morgan Stanley and Publicis Sapient retain complete-feed
+snapshot behavior, including closure on successful empty results. Wipro uses the
+site's date sort. Paginated sources can retain closed jobs until closure is confirmed
+independently; absence from a crawl is not proof of closure. Automatic detail-page
+closure is deferred until removed-job responses are verified. Existing activation
+choices, including inactive Wipro/JPMorgan imports, remain unchanged.
+
+The 6:30 AM / 6:30 PM fetch and 8:00 AM email schedules,
 runner-minute caps, authentication and email safeguards are unchanged. Large
 worldwide feeds may not finish within the evening budget and wait for the morning
 cycle; two scheduled fetch runs do not guarantee two complete refreshes of every
