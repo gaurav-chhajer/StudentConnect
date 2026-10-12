@@ -430,7 +430,8 @@ and [scheduled workflow limitations](https://docs.github.com/en/actions/referenc
 The website keeps its SQLite database and uploaded resume files. The worker
 uses a separate authenticated API to fetch board definitions, save complete
 snapshots, read pending resume text/job data, and save validated evaluations.
-Resume text passes through GitHub's temporary runner and Groq; it is not written
+Resume text passes through GitHub's temporary runner and Groq, and also Gemini
+when the optional fallback is configured and Groq returns HTTP 429; it is not written
 to artifacts, caches, or logs by this worker. Restrict repository access and do
 not enable verbose HTTP debugging. Gmail credentials remain on PythonAnywhere.
 Browser login and CSRF protection remain required for browser actions; the worker
@@ -438,7 +439,14 @@ API instead requires its separate bearer credential and rejects session cookies.
 Blank worker credentials disable API access. Invalid credentials fail startup.
 
 The worker processes up to five missing/stale evaluations per account and 100
-evaluations total per morning cycle. Its own 35-minute matching, 7-minute evening
+evaluations total per morning cycle. After existing preference/subscription filters,
+Python ranks candidates by distinct resume keyword overlap with title/department
+(weight 3) and the stored description (weight 1), ignoring common connecting words.
+Repeated keywords do not add points; ties use ascending job ID. Missing descriptions
+are logged and ranked using metadata until their selected posting is resolved.
+This ranking only prioritizes the five candidates: it does not assign a final fit
+score or permanently exclude lower-ranked jobs. It uses no external calls.
+Its own 35-minute matching, 7-minute evening
 fetch and 7-minute email budgets leave room within the job limits. The evening
 fetch needs neither Groq nor Gmail credentials on GitHub. Reaching a limit reports
 failure and defers unfinished work to another scheduled run. Transfers are limited to 2 MB;
@@ -446,7 +454,13 @@ oversized snapshots/batches fail explicitly without replacing stored snapshots.
 Up to 1,000 companies/accounts and 5,000 jobs per snapshot are supported.
 Failed boards retain previous jobs and are skipped for scoring.
 Invalid evaluations and scoring HTTP 400/413/422 rejections defer that candidate
-and continue with the remaining candidates. Authentication, rate-limit, network,
+and continue with the remaining candidates. When `GEMINI_API_KEY` is configured,
+a Groq HTTP 429 switches that candidate and the rest of the cloud matching run to
+Gemini. There is one request per provider for that candidate, no wait/retry loop,
+and no switch for invalid evaluations, authentication errors or uncertain failures.
+Both providers use the same complete resume/JD, rubric and evidence validation;
+the saved evaluation records its provider and model. A recovered Groq 429 alone
+does not mark the run failed. Gemini rate limits, authentication, network,
 other HTTP failures, and hosted description/save failures stop the batch;
 uncertain writes are not retried. Completed scores are retained. Any failure
 still returns exit code 1. Logs include safe user/job IDs, operation stage and
@@ -588,6 +602,16 @@ Activation (no paid PythonAnywhere task is needed; apply catalog migrations firs
    the documented setup; the cloud worker reads existing active boards.
 3. In GitHub **Settings → Secrets and variables → Actions**, add repository
    secrets `STUDENTCONNECT_WORKER_KEY` (same private value) and `GROQ_API_KEY`.
+   For the optional fallback, add secret `GEMINI_API_KEY`. This authorizes sending
+   the full resume/job description to Google when Groq is rate limited; review your
+   Gemini account's data-use and billing settings before enabling it. The default
+   is `gemini-3.8-flash` with a conservative budget based on its documented
+   1,048,576-token input limit. Repository variables `GEMINI_MODEL` and
+   `GEMINI_CONTEXT_TOKENS` can override these; update both together for another model.
+   See [Gemini model limits](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)
+   and [Gemini REST API](https://ai.google.dev/api/generate-content).
+   Without a Gemini key, Groq 429 retains the existing stop/defer behavior.
+   Local scoring commands remain Groq-only; fallback selection belongs to the cloud worker.
    Copy the worker key through the private provider interfaces only; never paste
    it into chat, source, logs, screenshots or workflow YAML. Add repository variable
    `STUDENTCONNECT_BASE_URL=https://gauravchhajer.pythonanywhere.com` (adjust only

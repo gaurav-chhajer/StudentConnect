@@ -35,6 +35,9 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_MODEL: qwen/qwen3.8-27b
           GROQ_CONTEXT_TOKENS: '131072'
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.8-flash' }}
+          GEMINI_CONTEXT_TOKENS: ${{ vars.GEMINI_CONTEXT_TOKENS || '1048576' }}
         run: python -B -m scripts.run_cloud_worker matching
 
   evening-fetch:

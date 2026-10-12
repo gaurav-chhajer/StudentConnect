@@ -24,6 +24,30 @@ MAX_COMPANIES = 1000
 MAX_JOBS = 5000
 MAX_WORK_ITEMS = 5
 INDIA = timezone(timedelta(hours=5, minutes=30))
+RANKING_TITLE_WEIGHT = 3
+RANKING_STOP_WORDS = frozenset("a an and are as at be by for from in is it of on or that the this to with you your".split())
+
+
+def rank_candidates(candidates, user):
+    """Prioritize distinct lexical overlap; this is not a fit or eligibility score."""
+    def terms(text):
+        return set(re.findall(r"[a-z][a-z0-9]*(?:\+\+|#)?", text.casefold())) - RANKING_STOP_WORDS
+
+    resume_terms = terms(user["resume_text"])
+
+    def priority(job):
+        title_terms = terms(job["title"] + " " + (job["department"] or ""))
+        try:
+            description_terms = terms(pipeline.extract_job_description(job))
+        except ValueError:
+            # Career-source observations may not have a full description until selected.
+            # Keep them eligible and make the reduced ranking information explicit.
+            current_app.logger.warning("Ranking uses metadata only: job_id=%s; description unavailable", job["id"])
+            description_terms = set()
+        overlap = RANKING_TITLE_WEIGHT * len(resume_terms & title_terms) + len(resume_terms & description_terms)
+        return (-overlap, job["id"])
+
+    return sorted(candidates, key=priority)
 
 
 def worker_key():
@@ -174,7 +198,7 @@ def register_routes(application, connection, database):
         if company_values:
             # Failed boards must not consume the bounded batch's candidate slots.
             candidates = [job for job in candidates if job["company_id"] in company_ids]
-        for job in candidates[:MAX_WORK_ITEMS]:
+        for job in rank_candidates(candidates, user)[:MAX_WORK_ITEMS]:
             company = conn.execute("SELECT name FROM companies WHERE id=?", (job["company_id"],)).fetchone()
             items.append(dict(user=dict(user), job=dict(job), company_name=company[0],
                               fingerprint=fingerprint(work_identity(user, job))))

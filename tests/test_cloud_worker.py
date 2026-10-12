@@ -281,7 +281,8 @@ class CloudEndpointTests(unittest.TestCase):
         self.conn.execute("UPDATE companies SET career_source='hotstar' WHERE id=1")
         self.conn.execute('UPDATE jobs SET raw_json=? WHERE id=1', (json.dumps(raw),))
         self.conn.commit()
-        item = self.item()
+        # Ranking can put a described job ahead of this unresolved career posting.
+        item = next(item for item in self.call('work').json['items'] if item['job']['id'] == 1)
         data = dict(user_id=1, job_id=item['job']['id'], fingerprint=item['fingerprint'],
                     description='<p>Python and SQL; complete JD tail.</p>',
                     title=item['job']['title'], location=item['job']['location'])

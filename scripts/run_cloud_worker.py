@@ -130,6 +130,7 @@ def fetch_and_score(client, deadline, fetch_only=False):
         return int(failed)
     after, scores, accounts, skipped = 0, 0, 0, 0
     saved, candidate_failures = 0, 0
+    scoring_provider = "groq"
     company_query = "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 120:
@@ -191,9 +192,26 @@ def fetch_and_score(client, deadline, fetch_only=False):
                     if not detail['eligible']:
                         continue
                     item = dict(item, job=detail['job'], fingerprint=detail['fingerprint'])
-                # One bounded request; a rejected/failed evaluation waits for the next daily run.
+                # Only an explicit Groq rate-limit rejection permits another provider call.
                 stage = "evaluation"
-                result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"])
+                if scoring_provider == "groq":
+                    try:
+                        result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"])
+                    except requests.HTTPError as error:
+                        if (error.response is None or error.response.status_code != 429 or
+                                not pipeline.GEMINI_API_KEY.strip()):
+                            raise
+                        scoring_provider = "gemini"
+                        logger.warning("Groq rate limit: switching to Gemini for this run; user_id=%s job_id=%s",
+                                       after, item["job"]["id"])
+                        if time.monotonic() >= deadline - 120:
+                            logger.error("Matching time budget reached before fallback; remaining scores deferred")
+                            return 1
+                        result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
+                                                             provider="gemini")
+                else:
+                    result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
+                                                         provider="gemini")
                 stage = "save"
                 client.call("score", dict(user_id=item["user"]["id"], job_id=item["job"]["id"],
                                           fingerprint=item["fingerprint"], result=result))
