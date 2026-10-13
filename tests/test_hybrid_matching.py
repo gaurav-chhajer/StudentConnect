@@ -53,7 +53,7 @@ class GeminiEvaluationTests(unittest.TestCase):
         request = post.call_args
         self.assertNotIn('synthetic', request.args[0])
         self.assertEqual(request.kwargs['headers']['x-goog-api-key'], 'synthetic')
-        self.assertEqual(request.kwargs['timeout'], 30)
+        self.assertEqual(request.kwargs['timeout'], (10, 90))
         self.assertFalse(request.kwargs['allow_redirects'])
         body = request.kwargs['json']
         self.assertEqual(body['systemInstruction']['parts'][0]['text'], pipeline.SCORING_PROMPT)
@@ -84,7 +84,7 @@ class GeminiEvaluationTests(unittest.TestCase):
                     self.evaluate()
                 post.assert_called_once()
                 post.return_value.close.assert_called_once()
-        with patch.object(pipeline.requests, 'post', side_effect=requests.Timeout()) as post:
+        with patch.object(pipeline.requests, 'post', side_effect=requests.ReadTimeout()) as post:
             with self.assertRaises(requests.Timeout):
                 self.evaluate()
             post.assert_called_once()
@@ -149,7 +149,7 @@ class HybridEndpointTests(unittest.TestCase):
             self.assertEqual(cloud_worker.rank_candidates([], user), [])
             self.assertEqual([job['id'] for job in cloud_worker.rank_candidates(jobs[:2], dict(resume_text=''))], [1, 2])
 
-    def run_matching(self, score, key='synthetic'):
+    def run_matching(self, score, key='synthetic', clock=None):
         client = MagicMock()
         def hosted_call(route, data=None):
             response = self.call(route, data)
@@ -159,7 +159,7 @@ class HybridEndpointTests(unittest.TestCase):
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
                 patch.object(pipeline, 'GEMINI_API_KEY', key), \
                 patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
-                patch.object(runner.time, 'monotonic', return_value=0), \
+                patch.object(runner.time, 'monotonic', return_value=0, side_effect=clock), \
                 patch.object(pipeline, 'score_job_for_user', side_effect=score) as evaluate:
             # Empty snapshots would deactivate jobs: mock only snapshot transfer in this fixture.
             original_call = client.call.side_effect
@@ -187,6 +187,37 @@ class HybridEndpointTests(unittest.TestCase):
         pending = pipeline.filter_candidate_jobs(self.conn, dict(id=1, preferences_json='{}'))
         self.assertEqual(len(pending), 1)
         self.assertNotEqual(pending[0]['id'], saved_job)
+
+    def test_gemini_timeout_preserves_saved_score_without_retry(self):
+        status, evaluate = self.run_matching([
+            test_evaluation.sample_result(), http_error(429), requests.ReadTimeout()])
+        self.assertEqual(status, 1)
+        self.assertEqual(evaluate.call_count, 3)
+        self.assertEqual(evaluate.call_args.kwargs, {'provider': 'gemini'})
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 1)
+
+    def test_deadline_prevents_initial_and_subsequent_gemini_requests(self):
+        for remaining in (runner.GEMINI_EVALUATION_RESERVE, runner.GEMINI_EVALUATION_RESERVE - 1):
+            with self.subTest(remaining=remaining):
+                clock = {'now': 0}
+                def limited(*args, **kwargs):
+                    clock['now'] = 2100 - remaining
+                    raise http_error(429)
+                status, evaluate = self.run_matching(limited, clock=lambda: clock['now'])
+                self.assertEqual(status, 1)
+                evaluate.assert_called_once()
+                self.assertEqual(evaluate.call_args.kwargs, {})
+        # First fallback succeeds; the next candidate must also reserve save time.
+        clock = {'now': 0}
+        def scored_then_deadline(*args, **kwargs):
+            if kwargs.get('provider') != 'gemini':
+                raise http_error(429)
+            clock['now'] = 2100 - runner.GEMINI_EVALUATION_RESERVE
+            return test_evaluation.sample_result()
+        status, evaluate = self.run_matching(scored_then_deadline, clock=lambda: clock['now'])
+        self.assertEqual(status, 1)
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 1)
 
     def test_no_fallback_for_other_failures_or_missing_key(self):
         for error, key in ((http_error(401), 'synthetic'), (requests.Timeout(), 'synthetic'), (http_error(429), '')):

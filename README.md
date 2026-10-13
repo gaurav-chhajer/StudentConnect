@@ -458,6 +458,12 @@ and continue with the remaining candidates. When `GEMINI_API_KEY` is configured,
 a Groq HTTP 429 switches that candidate and the rest of the cloud matching run to
 Gemini. There is one request per provider for that candidate, no wait/retry loop,
 and no switch for invalid evaluations, authentication errors or uncertain failures.
+Gemini uses a 10-second connection timeout and a 90-second read timeout; Groq
+retains its 30-second timeout. Before every Gemini evaluation, the worker requires
+more than 210 seconds remaining for the evaluation, hosted save and headroom.
+These are network inactivity limits, not a guaranteed total request duration.
+A Gemini read timeout stops the batch without retrying the uncertain request;
+the candidate stays pending and previously saved scores remain available.
 Both providers use the same complete resume/JD, rubric and evidence validation;
 the saved evaluation records its provider and model. A recovered Groq 429 alone
 does not mark the run failed. Gemini rate limits, authentication, network,

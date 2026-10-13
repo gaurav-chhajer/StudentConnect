@@ -529,6 +529,8 @@ def extract_job_description(job_row):
 _MODEL_CONTEXT_TOKENS = {"llama-3.3-70b-versatile": 131072, "qwen/qwen3.8-27b": 131072}
 _GEMINI_CONTEXT_TOKENS = {"gemini-3.8-flash": 1048576}
 SCORING_OUTPUT_TOKENS = 4000
+# Gemini generation can exceed Groq's 30-second wait; keep connection setup bounded.
+GEMINI_REQUEST_TIMEOUT = (10, 90)
 
 
 def _check_scoring_budget(prompt, provider="groq"):
@@ -660,7 +662,7 @@ def score_job_for_user(user_row, job_row, company_name, *, provider="groq"):
                   "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                   "generationConfig": {"temperature": 0.2, "maxOutputTokens": SCORING_OUTPUT_TOKENS,
                                        "responseMimeType": "application/json"}},
-            timeout=30, allow_redirects=False,
+            timeout=GEMINI_REQUEST_TIMEOUT, allow_redirects=False,
         )
         try:
             response.raise_for_status()

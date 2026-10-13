@@ -23,6 +23,8 @@ EMAIL_SECONDS = 7 * 60
 MAX_SCORES = 100
 MAX_ACCOUNTS = 1000
 CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
+# Allow Gemini's connect/read waits plus the hosted save's 10/90 waits and headroom.
+GEMINI_EVALUATION_RESERVE = sum(pipeline.GEMINI_REQUEST_TIMEOUT) + 110
 
 
 class HostedOperationError(RuntimeError):
@@ -204,12 +206,10 @@ def fetch_and_score(client, deadline, fetch_only=False):
                         scoring_provider = "gemini"
                         logger.warning("Groq rate limit: switching to Gemini for this run; user_id=%s job_id=%s",
                                        after, item["job"]["id"])
-                        if time.monotonic() >= deadline - 120:
-                            logger.error("Matching time budget reached before fallback; remaining scores deferred")
-                            return 1
-                        result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
-                                                             provider="gemini")
-                else:
+                if scoring_provider == "gemini":
+                    if time.monotonic() >= deadline - GEMINI_EVALUATION_RESERVE:
+                        logger.error("Matching time budget reached before Gemini evaluation; remaining scores deferred")
+                        return 1
                     result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
                                                          provider="gemini")
                 stage = "save"
