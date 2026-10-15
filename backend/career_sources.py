@@ -34,12 +34,19 @@ SOURCES = {
     'morganstanley': ('Morgan Stanley', 'morgan', 'https://www.morganstanley.com'),
     'barclays': ('Barclays', 'talentbrew', 'https://search.jobs.barclays'),
     'nomura': ('Nomura', 'saphtml', 'https://careers.nomura.com'),
+    'pwc': ('PwC', 'workday', 'https://pwc.wd3.myworkdayjobs.com'),
+    'google': ('Google', 'google', 'https://www.google.com'),
+    'amazon': ('Amazon (India)', 'amazon', 'https://www.amazon.jobs'),
+    'apple': ('Apple (India)', 'apple', 'https://jobs.apple.com'),
+    'netflix': ('Netflix', 'eightfold', 'https://explore.jobs.netflix.net'),
+    'microsoft': ('Microsoft', 'blocked', 'https://apply.careers.microsoft.com'),
+    'meta': ('Meta', 'blocked', 'https://www.metacareers.com'),
 }
 WORKDAY = {'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
-           'postman': ('postman', 'careers')}
+           'postman': ('postman', 'careers'), 'pwc': ('pwc', 'Global_Experienced_Careers')}
 ORACLE = {'dpworld': 'CX_1', 'jpmorgan': 'CX_1001'}
 # Keep the adapters available for explicit read-only verification, but do not
-# enable new subscriptions until a complete live snapshot has passed checks.
+# enable new subscriptions until live listing and full-description checks pass.
 UNVERIFIED_SOURCES = frozenset(('wipro', 'jpmorgan'))
 
 
@@ -204,6 +211,90 @@ def structured_job(text):
     raise ValueError('Full structured job description is unavailable')
 
 
+class GoogleResultCards(HTMLParser):
+    """Capture result cards or the selected description, preserving nested HTML."""
+    def __init__(self, text, detail=False):
+        super().__init__(convert_charrefs=False)
+        self.target_tag, self.target_class = ('div', 'DkhPwc') if detail else ('li', 'lLd3Je')
+        self.fragments, self.parts, self.depth = [], [], 0
+        self.feed(text)
+        if self.depth:
+            raise ValueError('Google result card is incomplete')
+
+    def handle_starttag(self, tag, attrs):
+        if not self.depth and not (tag == self.target_tag and self.target_class in dict(attrs).get('class', '').split()):
+            return
+        self.parts.append(self.get_starttag_text())
+        if tag not in ('area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'):
+            self.depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        if self.depth:
+            self.parts.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        if self.depth:
+            self.parts.append('</' + tag + '>')
+            self.depth -= 1
+            if not self.depth:
+                self.fragments.append(''.join(self.parts))
+                self.parts = []
+
+    def handle_data(self, data):
+        if self.depth:
+            self.parts.append(data)
+
+    def handle_entityref(self, name):
+        if self.depth:
+            self.parts.append('&' + name + ';')
+
+    def handle_charref(self, name):
+        if self.depth:
+            self.parts.append('&#' + name + ';')
+
+
+def google_cards(text):
+    cards = []
+    for html in GoogleResultCards(text).fragments:
+        links = [urlsplit(attrs['href']).path for attrs, _ in Page(html).links
+                 if re.fullmatch(r'jobs/results/\d+-[^/?#]+', urlsplit(attrs['href']).path)]
+        title = re.search(r'<h3 class="(?:Ki3IFe|QJPWVe)">(.*?)</h3>', html, re.S)
+        if not links or title is None:
+            raise ValueError('Google result identity is unavailable')
+        places = re.findall(r'<span class="r0wTof\s*">(.*?)</span>', html, re.S)
+        location = '; '.join(dict.fromkeys(unescape(re.sub('<[^>]*>', '', place)) for place in places)) or None
+        path = links[0]
+        cards.append((path.split('/')[2].split('-')[0], unescape(re.sub('<[^>]*>', '', title[1])),
+                      location, 'https://www.google.com/about/careers/applications/' + path, html))
+    return cards
+
+
+def apple_data(text, section):
+    marker = 'window.__staticRouterHydrationData = JSON.parse('
+    if marker not in text:
+        raise ValueError('Apple career page data is unavailable')
+    encoded = json.JSONDecoder().raw_decode(text.split(marker, 1)[1])[0]
+    if not isinstance(encoded, str):
+        raise ValueError('Apple career page data is invalid')
+    payload = json.loads(encoded)
+    if not isinstance(payload, dict) or payload.get('errors'):
+        raise ValueError('Apple career page reported an error')
+    value = payload['loaderData'][section]
+    if not isinstance(value, dict):
+        raise ValueError('Apple career page section is invalid')
+    return value
+
+
+def apple_location(item):
+    places = item['locations']
+    if (not isinstance(places, list) or any(not isinstance(place, dict) for place in places) or
+            any(place.get(field) is not None and not isinstance(place[field], str)
+                for place in places for field in ('city', 'stateProvince', 'countryName'))):
+        raise ValueError('Apple career locations are invalid')
+    return '; '.join(dict.fromkeys(', '.join(filter(None, (place.get('city'), place.get('stateProvince'),
+                                                           place.get('countryName')))) for place in places)) or None
+
+
 def fetch(key, deadline=None):
     import logging
     from backend.job_ingestion import deduplicate, mode_for_source
@@ -281,6 +372,68 @@ def _listings(feed, rows=None):
                     location = None  # Resolve the actual locations from the detail response.
                 batch.append(job(key, path.rsplit('_', 1)[1], item['title'], location,
                                  origin + '/en-US/' + site + path, employment=item.get('timeType')))
+        elif kind == 'google':
+            text = feed.request('/about/careers/applications/jobs/results/', params=dict(page=page_number + 1))
+            match = re.search(r'<span class="SWhIm">([\d,]+)</span>\s*jobs matched', text)
+            if match is None:
+                raise ValueError('Google career result count is unavailable')
+            count = total(int(match[1].replace(',', '')))
+            items = google_cards(text)
+            batch = [job(key, identifier, title, location, url)
+                     for identifier, title, location, url, _ in items]
+        elif kind == 'apple':
+            payload = apple_data(feed.request('/en-us/search', params=dict(location='india-INDC', page=page_number + 1)), 'search')
+            locations = payload['filters']['locations']
+            if (not isinstance(locations, list) or len(locations) != 1 or
+                    not isinstance(locations[0], dict) or locations[0].get('id') != 'postLocation-INDC'):
+                raise ValueError('Apple career feed did not apply its India filter')
+            count, items = total(payload['totalRecords']), payload['searchResults']
+            batch = []
+            for item in items:
+                identifier, slug = item['reqId'], item['transformedPostingTitle']
+                if (not isinstance(identifier, str) or not re.fullmatch(r'[A-Za-z0-9-]+', identifier) or
+                        not isinstance(slug, str) or not re.fullmatch(r'[a-z0-9-]+', slug)):
+                    raise ValueError('Apple career identifier is invalid')
+                batch.append(job(key, identifier, item['postingTitle'], apple_location(item),
+                                 origin + '/en-us/details/' + identifier.removeprefix('PIPE-') + '/' + slug,
+                                 version=[item.get('postDateInGMT'), item.get('jobSummary')]))
+        elif kind == 'eightfold':
+            payload = feed.json('/api/apply/v2/jobs', params=dict(domain='netflix.com', start=len(rows), num=10))
+            count, items = total(payload['count']), payload['positions']
+            batch = []
+            for item in items:
+                identifier = item['id']
+                if type(identifier) is not int or identifier <= 0:
+                    raise ValueError('Netflix career identifier is invalid')
+                locations = item['locations']
+                if not isinstance(locations, list) or any(not isinstance(place, str) for place in locations):
+                    raise ValueError('Netflix career locations are invalid')
+                batch.append(job(key, identifier, item['name'], '; '.join(locations) or None,
+                                 origin + '/careers/job/' + str(identifier), version=item.get('t_update'),
+                                 department=item.get('department')))
+        elif kind == 'amazon':
+            payload = feed.json('/en/search.json', params=dict(offset=len(rows), result_limit=100, sort='recent',
+                                                              **{'normalized_country_code[]': 'IND'}))
+            if payload.get('error'):
+                raise ValueError('Amazon career feed reported an error')
+            count, items = total(payload['hits']), payload['jobs']
+            batch = []
+            for item in items:
+                identifier = item['id_icims']
+                path = item['job_path']
+                if (not isinstance(identifier, str) or not identifier.isascii() or not identifier.isdigit() or
+                        not isinstance(path, str) or not path.startswith('/en/jobs/' + identifier + '/') or
+                        item.get('country_code') != 'IND'):
+                    raise ValueError('Amazon career identity or location is invalid')
+                description = item['description']
+                qualifications = item['basic_qualifications']
+                preferred = item.get('preferred_qualifications') or ''
+                if any(not isinstance(value, str) for value in (description, qualifications, preferred)) or not description.strip() or not qualifications.strip():
+                    raise ValueError('Amazon full description or qualifications are unavailable')
+                description += '\n<h3>Basic qualifications</h3>\n' + qualifications + '\n<h3>Preferred qualifications</h3>\n' + preferred
+                batch.append(job(key, identifier, item['title'], item.get('location'), origin + path,
+                                 version=description, description=description, department=item.get('job_category'),
+                                 employment=item.get('job_schedule_type')))
         elif kind == 'jibe':
             payload = feed.json('/api/jobs', params=dict(page=page_number + 1, limit=100))
             count, items = total(payload['totalCount']), payload['jobs']
@@ -387,7 +540,37 @@ def prepare_job(job_row, deadline=None):
     feed = Feed(key, deadline if deadline is not None else time.monotonic() + 30)
     try:
         kind = SOURCES[key][1]
-        if kind == 'workday':
+        if kind == 'google':
+            text = feed.request(result['url'])
+            canonical = [attrs.get('href') for attrs in Page(text).attributes if attrs.get('rel') == 'canonical']
+            page_title = re.search(r'<title>(.*?)</title>', text, re.S)
+            descriptions = GoogleResultCards(text, detail=True).fragments
+            if (canonical != [result['url']] or page_title is None or
+                    not urlsplit(result['url']).path.rsplit('/', 1)[-1].startswith(result['external_id'] + '-') or
+                    len(descriptions) != 1):
+                raise ValueError('Google career detail identity changed')
+            title = unescape(page_title[1]).removesuffix(' — Google Careers')
+            location, description = result.get('location'), descriptions[0]
+            if not all(section in description for section in ('Minimum qualifications:', 'About the job', 'Responsibilities')):
+                raise ValueError('Google full description is unavailable')
+            employment = raw.get('employmentType')
+        elif kind == 'apple':
+            prefix = feed.origin + '/en-us/details/' + result['external_id'].removeprefix('PIPE-') + '/'
+            if not result['url'].startswith(prefix):
+                raise ValueError('Apple career detail identity is invalid')
+            detail = apple_data(feed.request(result['url']), 'jobDetails')['jobsData']
+            if detail['reqId'] != result['external_id']:
+                raise ValueError('Apple career detail identity changed')
+            if not isinstance(detail.get('description'), str) or not detail['description'].strip():
+                raise ValueError('Apple full description is unavailable')
+            parts = [detail.get(field) or '' for field in ('jobSummary', 'description', 'minimumQualifications', 'preferredQualifications')]
+            if any(not isinstance(part, str) for part in parts):
+                raise ValueError('Apple description sections are invalid')
+            description = '\n'.join(parts)
+            title, location = detail['postingTitle'], apple_location(detail)
+            # Apple's jobType identifies retail/corporate roles, not employment type.
+            employment = raw.get('employmentType')
+        elif kind == 'workday':
             tenant, site = WORKDAY[key]
             path = urlsplit(result['url']).path
             prefix = f'/en-US/{site}'

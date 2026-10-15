@@ -5,7 +5,7 @@ import json
 import re
 import secrets
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
@@ -296,6 +296,21 @@ def create_app(database_path=None, upload_dir=None):
         if data["user"]:
             conn = connection()
             data["versions"] = conn.execute("SELECT id,source_name,created_at FROM resume_versions WHERE user_id=? ORDER BY id DESC LIMIT 10", (data["user"]["id"],)).fetchall()
+            # Settings support only UTC and Kolkata, which has no daylight saving.
+            zone = {"UTC": timezone.utc, "Asia/Kolkata": timezone(timedelta(hours=5, minutes=30))}[data["settings"]["timezone"]]
+            versions = []
+            for row in data["versions"]:
+                version = dict(row)
+                try:
+                    uploaded_at = datetime.fromisoformat(version["created_at"])
+                    if uploaded_at.tzinfo is None:
+                        raise ValueError("Resume timestamp has no timezone")
+                    version["uploaded_display"] = uploaded_at.astimezone(zone).strftime("%d %m %Y at %H:%M")
+                except (TypeError, ValueError):
+                    application.logger.warning("Invalid resume upload timestamp: version_id=%s", version["id"])
+                    version["uploaded_display"] = "Not recorded"
+                versions.append(version)
+            data["versions"] = versions
         else:
             data["versions"] = []
         if request.method == "GET":
@@ -317,7 +332,7 @@ def create_app(database_path=None, upload_dir=None):
         except ValueError as error:
             data["message"] = str(error)
             return render("resume", data, 400)
-        flash("Resume saved. Previous scores are retained but need rescoring." if changed else "Resume is unchanged.")
+        flash("Resume saved. Because your resume changed, previous matches are temporarily hidden while they are rescored against your new resume. Updated matches will appear as automatic matching runs. Your previous scores are retained." if changed else "Resume is unchanged.")
         return redirect(url_for("resume"))
 
     @application.route("/applications", methods=["GET", "POST"])

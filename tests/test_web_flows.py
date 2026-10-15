@@ -69,12 +69,25 @@ class WebFlowTests(unittest.TestCase):
         values.update(overrides)
         return values
 
+    def test_pages_link_to_public_studentconnect_favicon(self):
+        page = self.client.get('/login')
+        self.assertIn(b'rel="icon" type="image/svg+xml" href="/static/favicon.svg"', page.data)
+        response = self.client.get('/static/favicon.svg')
+        self.addCleanup(response.close)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'image/svg+xml')
+        self.assertIn(b'<title>StudentConnect</title>', response.data)
+        self.seed_user()
+        page = self.client.get('/')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'href="/static/favicon.svg"', page.data)
+
     def test_migration_is_idempotent_and_preserves_existing_records(self):
         self.seed_user()
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 6)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 7)
 
     def test_location_suggestions_use_active_posting_terms_and_escape_markup(self):
         self.seed_user()
@@ -140,7 +153,8 @@ class WebFlowTests(unittest.TestCase):
                 self.assertIn(b'aria-hidden="true"', response.data)
                 self.assertNotIn(b"fonts.googleapis.com", response.data)
                 if route == "/settings":
-                    self.assertEqual(response.data.count(b"<script"), 1)
+                    self.assertEqual(response.data.count(b"<script"), 2)
+                    self.assertIn(b'src="/static/js/companies.js"', response.data)
                     self.assertIn(b'src="/static/js/locations.js"', response.data)
                 else:
                     self.assertNotIn(b"<script", response.data)
@@ -251,6 +265,22 @@ class WebFlowTests(unittest.TestCase):
         self.addCleanup(script.close)
         self.assertEqual(script.status_code, 200)
         self.assertNotIn("script-src", script.headers["Content-Security-Policy"])
+
+    def test_company_search_preserves_selected_companies_and_uses_script_nonce(self):
+        self.seed_user()
+        self.post('/settings', self.settings_data(companies=['2']))
+        page = self.client.get('/settings')
+        self.assertIn(b'id="company-search" type="search"', page.data)
+        self.assertIn(b'id="company-view-more" type="button"', page.data)
+        self.assertIn(b'data-company-name="Beta"', page.data)
+        self.assertRegex(page.data, rb'name="companies" value="2" checked')
+        nonce = re.search(rb'<script src="/static/js/companies.js" nonce="([^"]+)" defer>', page.data)
+        self.assertIsNotNone(nonce)
+        self.assertIn("script-src 'nonce-" + nonce.group(1).decode() + "'", page.headers['Content-Security-Policy'])
+        script = self.client.get('/static/js/companies.js')
+        self.addCleanup(script.close)
+        self.assertEqual(script.status_code, 200)
+        self.assertEqual(self.conn.execute('SELECT company_id FROM company_subscriptions WHERE user_id=1').fetchall()[0][0], 2)
 
     def test_cadence_radio_selection_round_trips_all_existing_values(self):
         self.seed_user()
@@ -385,9 +415,33 @@ class WebFlowTests(unittest.TestCase):
             self.assertEqual([row[1] for row in conn.execute("PRAGMA table_info(scores)")], ["id"])
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 0)
 
+    def test_resume_versions_format_upload_dates_in_settings_timezone(self):
+        self.seed_user()
+        self.post('/resume', dict(resume_text='Python SQL projects', consent='on'))
+        timestamp = '2026-10-15T19:00:00+00:00'
+        self.conn.execute('UPDATE resume_versions SET created_at=?', (timestamp,))
+        self.conn.commit()
+        page = self.client.get('/resume')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'<time datetime="2026-10-15T19:00:00+00:00">16 10 2026 at 00:30</time>', page.data)
+        self.assertEqual(self.conn.execute('SELECT created_at FROM resume_versions').fetchone()[0], timestamp)
+        for invalid in ('invalid', '2026-10-15T19:00:00'):
+            with self.subTest(timestamp=invalid):
+                self.conn.execute('UPDATE resume_versions SET created_at=?', (invalid,))
+                self.conn.commit()
+                with self.assertLogs(self.app.logger, level='WARNING'):
+                    page = self.client.get('/resume')
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'>Not recorded</time>', page.data)
+
     def test_resume_update_retains_scores_marks_stale_and_requeues(self):
         self.seed_user()
+        page = self.client.get('/resume')
+        self.assertIn(b'Updating your resume refreshes your matches.', page.data)
+        self.assertIn(b'aria-describedby="resume-matching-notice"', page.data)
         self.assertEqual(self.post("/resume", dict(resume_text="Python SQL projects", consent="on")).status_code, 302)
+        page = self.client.get('/resume')
+        self.assertIn(b'Because your resume changed, previous matches are temporarily hidden', page.data)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM scores").fetchone()[0], 2)
         self.assertEqual(self.conn.execute("SELECT SUM(is_stale) FROM scores").fetchone()[0], 2)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM resume_versions").fetchone()[0], 1)
@@ -405,8 +459,13 @@ class WebFlowTests(unittest.TestCase):
         self.assertEqual(len(files), 1)
         self.assertEqual(files[0].parent, self.uploads)
         self.assertEqual(self.client.get("/uploads/" + files[0].name).status_code, 404)
+        page = self.client.get('/resume')
+        self.assertIn(b'Because your resume changed, previous matches are temporarily hidden', page.data)
         self.post("/resume", dict(resume_text="Python SQL updated resume", consent="on"))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM resume_versions").fetchone()[0], 1)
+        page = self.client.get('/resume')
+        self.assertIn(b'Resume is unchanged.', page.data)
+        self.assertNotIn(b'Because your resume changed, previous matches are temporarily hidden', page.data)
 
     def test_invalid_resume_does_not_change_saved_data(self):
         self.seed_user()

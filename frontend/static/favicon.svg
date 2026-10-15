@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>StudentConnect</title>
+  <rect width="32" height="32" rx="8" fill="#2E4BE8"/>
+  <path d="M9 17v6c4 3 10 3 14 0v-6" fill="#E6EBFF"/>
+  <path d="m4 13 12-6 12 6-12 6Z" fill="#fff"/>
+  <path d="M27 14v9" fill="none" stroke="#FF7A59" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="27" cy="25" r="2" fill="#FF7A59"/>
+</svg>

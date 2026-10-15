@@ -17,6 +17,41 @@ from scripts import seed_companies as importer
 
 
 class CompanySeedTests(unittest.TestCase):
+    def test_major_company_catalog_is_idempotent_and_preserves_cvent_subscriptions(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            conn.execute('PRAGMA foreign_keys=ON')
+            conn.executescript(SCHEMA)
+            # Simulate an existing installation immediately before migration 007.
+            conn.execute('CREATE TABLE schema_migrations(name TEXT PRIMARY KEY, checksum TEXT NOT NULL)')
+            import hashlib
+            for path in sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql')):
+                if path.name.startswith('007_'):
+                    break
+                sql = path.read_text(encoding='utf-8')
+                conn.executescript(sql)
+                conn.execute('INSERT INTO schema_migrations VALUES(?,?)',
+                             (path.name, hashlib.sha256(sql.encode()).hexdigest()))
+            conn.execute("INSERT INTO companies(id,name,ats_type,board_slug,career_source) VALUES(99,'Cvent','greenhouse','career-site-cvent','cvent')")
+            conn.execute("INSERT INTO users(id,name,email,resume_text) VALUES(1,'Example','example@test.invalid','Python')")
+            conn.execute("INSERT INTO company_subscriptions(user_id,company_id,subscribed_at) VALUES(1,99,'2026-10-15T00:00:00+00:00')")
+            conn.commit()
+            apply_migrations(conn)
+            with redirect_stdout(io.StringIO()):
+                seed_companies(conn)
+                first = conn.execute('SELECT id,name,active,career_source FROM companies ORDER BY id').fetchall()
+                seed_companies(conn)
+            self.assertEqual(conn.execute('SELECT id,name,active,career_source FROM companies ORDER BY id').fetchall(), first)
+            self.assertEqual(conn.execute("SELECT id FROM companies WHERE career_source='cvent'").fetchall(), [(99,)])
+            self.assertEqual(conn.execute('SELECT user_id,company_id FROM company_subscriptions').fetchall(), [(1, 99)])
+            sources = dict(conn.execute('SELECT career_source,active FROM companies WHERE career_source IS NOT NULL'))
+            for key in ('pwc', 'google', 'amazon', 'apple', 'netflix', 'microsoft', 'meta'):
+                self.assertIn(key, sources)
+            self.assertEqual(sources['microsoft'], 0)
+            self.assertEqual(sources['meta'], 0)
+            self.assertEqual(conn.execute('PRAGMA foreign_key_check').fetchall(), [])
+            with self.assertRaises(sqlite3.IntegrityError):
+                conn.execute("INSERT INTO companies(name,ats_type,board_slug,career_source) VALUES('Duplicate','greenhouse','duplicate','pwc')")
+
     def test_postman_source_change_keeps_id_subscriptions_and_is_idempotent(self):
         with closing(sqlite3.connect(':memory:')) as conn:
             conn.execute('PRAGMA foreign_keys=ON')
@@ -77,7 +112,7 @@ class CompanySeedTests(unittest.TestCase):
                 self.assertEqual(saved.execute('SELECT name FROM companies').fetchall(), [('Original',)])
                 self.assertNotIn('career_source', [row[1] for row in saved.execute('PRAGMA table_info(companies)')])
                 self.assertEqual(current.execute("SELECT id,name FROM companies WHERE board_slug='original'").fetchall(), [(1, 'Original')])
-                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 6)
+                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 7)
 
     def test_source_extension_preserves_existing_source_and_constraints(self):
         import hashlib

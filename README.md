@@ -513,6 +513,38 @@ Postman company's source in place, preserving its ID and subscriptions.
 migration 005: its original column and unique index are retained as legacy
 metadata, and the current column has the extended validation and unique index.
 Cvent and ZS use their official public iCIMS listing and description feeds.
+The catalog also includes PwC, Google, Amazon (India), Apple (India), Netflix,
+Microsoft and Meta. Cvent's existing entry and subscriptions are reused.
+`007_major_company_sources.sql` extends source validation additively, retaining
+the previous source column/index and existing company IDs, jobs and subscriptions.
+Run the backup-producing offline import below before reloading the updated app;
+the code change alone does not update an existing database.
+
+PwC uses its worldwide Workday experienced-careers board; Google uses its
+worldwide public career result/detail pages. Amazon uses its official India
+search feed and retains the full description, basic and preferred qualifications.
+Apple uses its India listings and full detail data, including both qualification
+sections. Netflix uses its worldwide public Eightfold listings and structured
+job descriptions; the board can include Netflix-affiliated businesses.
+Apple's retail/corporate category is not treated as an employment type.
+Google and Apple do not currently expose a verified employment-type field here.
+These sources use additive observations, existing limits and senior-title filters.
+Live verification exercised pagination, transfer-size checks and one full
+description for each adapter. PwC returned a malformed later page; Amazon's
+advertised count changed during collection; Netflix repeated some paginated IDs.
+Validated observations were retained with warnings under the existing ingestion
+policy; these checks do not establish complete, stable worldwide snapshots.
+
+Microsoft's public search endpoint returned HTTP 429 during verification. Meta's
+public page did not expose a verified listing feed. Both are listed as
+"Automatic fetching unavailable" and cannot be subscribed to; no access checks
+or rate limits are bypassed.
+
+Target companies now offers case-insensitive name search across the whole catalog.
+It initially shows 12 entries; **View more** reveals 12 more at a time, and
+**View fewer** collapses the list. Searching and collapsing preserve checkbox
+selections, including selections outside the visible results. Without JavaScript,
+all companies remain visible. Picker checks: `node tests/test_company_picker.cjs`.
 Lever snapshots omit duplicate HTML fields only when usable plain versions
 exist; complete descriptions, requirement lists and employment metadata remain.
 This brings the verified Paytm snapshot below the existing 2 MiB transfer limit.

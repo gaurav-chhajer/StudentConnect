@@ -10,9 +10,10 @@
 <p class="sub">An uploaded file takes precedence over the editor.</p>
 <label class="field">Or edit resume text<textarea name="resume_text" rows="18" maxlength="100000">{{ user.resume_text }}</textarea></label>
 <label class="chk"><input type="checkbox" name="consent" required>I agree to private resume storage and its use in Groq requests for automatic job matching.</label>
-<button class="btn p">Save new version</button></form>
+<p class="notice" id="resume-matching-notice"><strong>Updating your resume refreshes your matches.</strong> Saving changed resume content temporarily hides your previous matches while they are rescored against the new version. Updated matches will appear as automatic matching runs. Uploading unchanged content keeps your current matches.</p>
+<button class="btn p" aria-describedby="resume-matching-notice">Save new version</button></form>
 <p class="sub">Saving retains old versions, marks old scores stale, and queues automatic matching. Groq requests run in the worker, after this page saves.</p></section>
-<section class="card"><h2>Recent versions</h2>{% for item in versions %}<div class="li"><span>{{ item.source_name }}</span><time>{{ item.created_at }}</time></div>{% else %}<p class="sub">No resume versions saved yet.</p>{% endfor %}
+<section class="card"><h2>Recent versions</h2>{% for item in versions %}<div class="li"><span>{{ item.source_name }}</span><time datetime="{{ item.created_at }}">{{ item.uploaded_display }}</time></div>{% else %}<p class="sub">No resume versions saved yet.</p>{% endfor %}
 <h3 class="spaced">Scoring status</h3><p>{{ stale_count }} stored scores need rescoring.</p><p class="sub">The matching worker processes pending work in batches. Check the matching status above after its next run.</p>
 <h3 class="spaced">Resume quality score</h3><p class="sub">An overall resume-quality score and predicted improvement points are not calculated yet.</p></section></div>
 <div class="two"><section class="card"><h2>Skills matched in jobs</h2><div class="chips spaced">{% for item in skills %}<span class="tag">{{ item.skill }} · {{ item.count }}</span>{% else %}<p class="sub">No current matching data yet.</p>{% endfor %}</div></section>
