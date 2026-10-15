@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% from 'macros.html' import page_banner,sparkline %}{% block title %}Analytics · StudentConnect{% endblock %}{% block content %}
+{% extends 'base.html' %}{% from 'macros.html' import page_banner,sparkline with context %}{% block title %}Analytics · StudentConnect{% endblock %}{% block content %}
 <div class="top2"><div><h1>Analytics</h1><p class="sub">Your saved matching and application activity.</p></div><nav class="seg" aria-label="Analytics period">{% for value,label in [(4,'4W'),(8,'8W'),(26,'6M')] %}<a class="btn" {% if weeks is defined and weeks == value %}aria-current="true"{% endif %} href="{{ url_for('analytics',weeks=value) }}">{{ label }}</a>{% endfor %}</nav></div>
 {% if user and metrics %}
 {{ page_banner('Your progress','See how your search is progressing','Explore your saved match scores and the application stages you have recorded.',url_for('jobs'),'View job matches',url_for('resume'),'Improve my resume','analytics') }}

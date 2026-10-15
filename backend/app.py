@@ -49,7 +49,16 @@ def create_app(database_path=None, upload_dir=None):
 
     def context():
         user = getattr(g, "user", None)
-        return dict(user=user, settings=store.settings(connection(), user["id"]) if user else store.DEFAULT_SETTINGS,
+        settings = store.settings(connection(), user["id"]) if user else store.DEFAULT_SETTINGS
+        has_resume = bool(user and user["resume_text"].strip())
+        has_email = bool(user and user["email"].strip())
+        # Legacy profiles still follow all companies until they save explicit choices.
+        has_companies = bool(user and (not settings["subscriptions_configured"] or
+            connection().execute("""SELECT EXISTS(SELECT 1 FROM company_subscriptions sub
+                JOIN companies c ON c.id=sub.company_id WHERE sub.user_id=? AND c.active=1)""",
+                (user["id"],)).fetchone()[0]))
+        return dict(user=user, settings=settings, has_resume=has_resume, has_email=has_email,
+                    has_companies=has_companies, setup_pending=bool(user and not (has_resume and has_email and has_companies)),
                     navigation=NAVIGATION, active=request.endpoint, message=None, matches=[], companies=[],
                     digest=[], trend=[], metrics=None, page=1, pages=1, search="", company=0, min_score=0,
                     location="", job_type="", sort="best", days=0, application_counts={}, stale_count=0,
@@ -104,7 +113,7 @@ def create_app(database_path=None, upload_dir=None):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; style-src 'self' 'unsafe-inline'; "
+            "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; "
             "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
         if getattr(g, "script_nonce", None):
@@ -258,7 +267,7 @@ def create_app(database_path=None, upload_dir=None):
                     raise ValueError("Use at most 20 short role/location preferences")
                 preferences[key] = values
             stipend = request.form.get("min_stipend", "").strip()
-            preferences["min_stipend"] = store.integer(stipend, 0, 1000000) if stipend else None
+            preferences["min_stipend"] = store.integer(stipend, 0, 10000000) if stipend else None
             types = request.form.getlist("employment_types")
             if any(value not in ("internship", "full-time", "part-time") for value in types):
                 raise ValueError("Invalid employment preference")
@@ -298,6 +307,15 @@ def create_app(database_path=None, upload_dir=None):
             data["versions"] = conn.execute("SELECT id,source_name,created_at FROM resume_versions WHERE user_id=? ORDER BY id DESC LIMIT 10", (data["user"]["id"],)).fetchall()
             # Settings support only UTC and Kolkata, which has no daylight saving.
             zone = {"UTC": timezone.utc, "Asia/Kolkata": timezone(timedelta(hours=5, minutes=30))}[data["settings"]["timezone"]]
+            data["resume_updated_display"] = "Not recorded"
+            if data["user"]["resume_updated_at"]:
+                try:
+                    updated_at = datetime.fromisoformat(data["user"]["resume_updated_at"])
+                    if updated_at.tzinfo is None:
+                        raise ValueError("Resume timestamp has no timezone")
+                    data["resume_updated_display"] = updated_at.astimezone(zone).strftime("%d/%m/%Y at %I:%M %p")
+                except (TypeError, ValueError):
+                    application.logger.warning("Invalid resume update timestamp: user_id=%s", data["user"]["id"])
             versions = []
             for row in data["versions"]:
                 version = dict(row)
@@ -305,7 +323,7 @@ def create_app(database_path=None, upload_dir=None):
                     uploaded_at = datetime.fromisoformat(version["created_at"])
                     if uploaded_at.tzinfo is None:
                         raise ValueError("Resume timestamp has no timezone")
-                    version["uploaded_display"] = uploaded_at.astimezone(zone).strftime("%d %m %Y at %H:%M")
+                    version["uploaded_display"] = uploaded_at.astimezone(zone).strftime("%d/%m/%Y at %I:%M %p")
                 except (TypeError, ValueError):
                     application.logger.warning("Invalid resume upload timestamp: version_id=%s", version["id"])
                     version["uploaded_display"] = "Not recorded"

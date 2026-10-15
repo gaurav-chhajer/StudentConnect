@@ -1,5 +1,13 @@
 {% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
 {% macro page_banner(eyebrow,title,description,primary_url,primary_label,secondary_url,secondary_label,art) %}
+{% if setup_pending %}
+{% set eyebrow = 'Get started' %}{% set title = 'Set up your job matches' %}
+{% set description = 'Add your resume and select the companies you want to follow. Your verified account email is used for alerts.' %}
+{% set primary_url = url_for('resume') ~ '#resume-editor' if not has_resume else url_for('settings_page') ~ '#companies' %}
+{% set primary_label = 'Upload resume' if not has_resume else 'Select companies' %}
+{% set secondary_url = url_for('settings_page') ~ '#companies' if not has_companies and not has_resume else url_for('settings_page') ~ '#profile' %}
+{% set secondary_label = 'Select companies' if not has_companies and not has_resume else 'Review email' %}
+{% endif %}
 <section class="hero-banner"><div class="hb-copy"><p class="eyebrow">{{ eyebrow }}</p><h2>{{ title }}</h2><p>{{ description }}</p><div class="chips"><a class="btn p" href="{{ primary_url }}">{{ primary_label }}</a><a class="btn ghost" href="{{ secondary_url }}">{{ secondary_label }}</a></div></div>
 <svg class="art" viewBox="0 0 220 180" aria-hidden="true" focusable="false">
 {% if art == 'matches' %}

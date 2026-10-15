@@ -71,6 +71,7 @@ class WebFlowTests(unittest.TestCase):
 
     def test_pages_link_to_public_studentconnect_favicon(self):
         page = self.client.get('/login')
+        self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
         self.assertIn(b'rel="icon" type="image/svg+xml" href="/static/favicon.svg"', page.data)
         response = self.client.get('/static/favicon.svg')
         self.addCleanup(response.close)
@@ -81,6 +82,8 @@ class WebFlowTests(unittest.TestCase):
         page = self.client.get('/')
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'href="/static/favicon.svg"', page.data)
+        self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
+        self.assertIn("default-src 'none'", page.headers['Content-Security-Policy'].split('; '))
 
     def test_migration_is_idempotent_and_preserves_existing_records(self):
         self.seed_user()
@@ -135,8 +138,16 @@ class WebFlowTests(unittest.TestCase):
         for route in routes:
             response=self.client.get(route)
             self.assertEqual(response.status_code,200)
+            navigation = re.search(rb'<nav class="nav".*?</nav>', response.data, re.S).group(0)
+            selected = re.findall(rb'<a\b[^>]*aria-current="page"[^>]*>', navigation)
+            self.assertEqual(len(selected), 1)
+            self.assertNotIn(b'href=', selected[0])
+            self.assertNotIn(b'tabindex="0"', selected[0])
+            self.assertIn(b'aria-disabled="true"', selected[0])
+            self.assertIn(b'class="on"', selected[0])
             for target in routes:
-                self.assertIn(('href="'+target+'"').encode(),response.data)
+                if target != route:
+                    self.assertIn(('href="'+target+'"').encode(),navigation)
 
     def test_refined_screens_preserve_local_navigation_and_read_only_rendering(self):
         self.seed_user()
@@ -335,6 +346,57 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn(b"Open tracking is not connected", analytics.data)
         self.assertNotIn(b"nan", analytics.data.lower())
 
+    def test_setup_checklist_allows_browsing_and_tracks_completed_steps(self):
+        self.seed_user()
+        self.post('/settings', self.settings_data(companies=[]))
+        self.conn.execute("UPDATE users SET resume_text='' WHERE id=1")
+        self.conn.commit()
+        before = self.database.read_bytes()
+        routes = ('/', '/jobs', '/resume', '/settings', '/analytics', '/applications')
+        for route in routes:
+            with self.subTest(route=route):
+                page = self.client.get(route)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'id="setup-checklist"', page.data)
+                self.assertIn(b'href="/resume#resume-editor">Upload resume</a>', page.data)
+                self.assertIn(b'href="/settings#companies">Select companies</a>', page.data)
+                self.assertIn(b'href="/settings#profile">Review email</a>', page.data)
+                self.assertIn(b'Verified email saved', page.data)
+                self.assertIn(b'You can keep browsing', page.data)
+                self.assertNotIn(b'>Update resume</a>', page.data)
+                self.assertNotIn(b'>Improve my resume</a>', page.data)
+                self.assertNotIn(b'>Review matches</a>', page.data)
+        self.assertEqual(before, self.database.read_bytes())
+        page = self.client.get('/settings')
+        self.assertIn(b'id="profile"', page.data)
+        self.assertRegex(page.data, rb'name="email"[^>]*readonly')
+        self.assertEqual(self.post('/resume', dict(resume_text='Python projects', consent='on')).status_code, 302)
+        page = self.client.get('/')
+        self.assertIn(b'Resume added', page.data)
+        self.assertIn(b'id="setup-checklist"', page.data)
+        self.assertIn(b'>Select companies</a>', page.data)
+        self.post('/settings', self.settings_data(companies=['1']))
+        for route in routes:
+            with self.subTest(completed_route=route):
+                page = self.client.get(route)
+                self.assertEqual(page.status_code, 200)
+                self.assertNotIn(b'id="setup-checklist"', page.data)
+        self.assertIn(b'>Review matches</a>', self.client.get('/').data)
+
+    def test_setup_resume_missing_and_legacy_company_selection(self):
+        self.seed_user()
+        self.assertNotIn(b'id="setup-checklist"', self.client.get('/').data)
+        self.post('/settings', self.settings_data(companies=['1']))
+        self.conn.execute("UPDATE users SET resume_text='  ' WHERE id=1")
+        self.conn.commit()
+        page = self.client.get('/jobs')
+        self.assertIn(b'id="setup-checklist"', page.data)
+        self.assertIn(b'Companies selected', page.data)
+        self.assertIn(b'>Upload resume</a>', page.data)
+        self.conn.execute('UPDATE companies SET active=0 WHERE id=1')
+        self.conn.commit()
+        self.assertIn(b'>Select companies</a>', self.client.get('/').data)
+
     def test_profile_onboarding_and_subscriptions_affect_every_match_view(self):
         self.seed_user()
         response = self.post("/settings", self.settings_data())
@@ -379,6 +441,24 @@ class WebFlowTests(unittest.TestCase):
         self.post("/settings", self.settings_data(cadence="off", min_score="0"))
         self.assertEqual(get_unsent_top_matches(self.conn, 1), [])
 
+    def test_annual_stipend_saves_up_to_one_crore_and_reloads(self):
+        self.seed_user()
+        for amount in ('20000', '1000000', '10000000', '0', ''):
+            with self.subTest(amount=amount):
+                self.assertEqual(self.post('/settings', self.settings_data(min_stipend=amount)).status_code, 302)
+                preferences = self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0]
+                self.assertEqual(json.loads(preferences)['min_stipend'], int(amount) if amount else None)
+                page = self.client.get('/settings')
+                self.assertIn(b'Minimum annual stipend (INR)', page.data)
+                self.assertIn(b'Enter the amount per year, up to 1 crore', page.data)
+                self.assertIn(('name="min_stipend" type="number" min="0" max="10000000" value="' + amount + '"').encode(), page.data)
+                self.assertEqual(self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0], preferences)
+        self.post('/settings', self.settings_data(min_stipend='10000000'))
+        saved = self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0]
+        for invalid in ('10000001', '-1', '12.5', 'invalid'):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(self.post('/settings', self.settings_data(min_stipend=invalid)).status_code, 400)
+                self.assertEqual(self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0], saved)
     def test_all_populated_screens_render_and_static_styles_are_available(self):
         self.seed_user()
         for route in ("/", "/jobs", "/settings", "/analytics", "/applications", "/resume", "/static/css/sc.css", "/static/css/theme.css", "/static/css/app.css", "/static/css/wow.css"):
@@ -423,8 +503,17 @@ class WebFlowTests(unittest.TestCase):
         self.conn.commit()
         page = self.client.get('/resume')
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'<time datetime="2026-10-15T19:00:00+00:00">16 10 2026 at 00:30</time>', page.data)
+        self.assertIn(b'<time datetime="2026-10-15T19:00:00+00:00">16/10/2026 at 12:30 AM</time>', page.data)
         self.assertEqual(self.conn.execute('SELECT created_at FROM resume_versions').fetchone()[0], timestamp)
+        for timestamp, display in (('2026-10-15T17:21:00+00:00', b'15/10/2026 at 10:51 PM'),
+                                   ('2026-10-15T05:21:00+00:00', b'15/10/2026 at 10:51 AM'),
+                                   ('2026-10-15T06:30:00+00:00', b'15/10/2026 at 12:00 PM')):
+            with self.subTest(display=display):
+                self.conn.execute('UPDATE resume_versions SET created_at=?', (timestamp,))
+                self.conn.commit()
+                page = self.client.get('/resume')
+                self.assertIn(b'>' + display + b'</time>', page.data)
+                self.assertEqual(self.conn.execute('SELECT created_at FROM resume_versions').fetchone()[0], timestamp)
         for invalid in ('invalid', '2026-10-15T19:00:00'):
             with self.subTest(timestamp=invalid):
                 self.conn.execute('UPDATE resume_versions SET created_at=?', (invalid,))
@@ -433,6 +522,31 @@ class WebFlowTests(unittest.TestCase):
                     page = self.client.get('/resume')
                 self.assertEqual(page.status_code, 200)
                 self.assertIn(b'>Not recorded</time>', page.data)
+
+    def test_current_resume_update_date_uses_readable_format_and_settings_timezone(self):
+        self.seed_user()
+        self.post('/settings', self.settings_data())
+        timestamp = '2026-10-15T17:21:00.445450+00:00'
+        self.conn.execute('UPDATE users SET resume_updated_at=? WHERE id=1', (timestamp,))
+        self.conn.commit()
+        page = self.client.get('/resume')
+        self.assertIn(b'Updated: 15/10/2026 at 10:51 PM', page.data)
+        self.assertNotIn(timestamp.encode(), page.data)
+        self.assertEqual(self.conn.execute('SELECT resume_updated_at FROM users WHERE id=1').fetchone()[0], timestamp)
+        self.post('/settings', self.settings_data(timezone='UTC'))
+        page = self.client.get('/resume')
+        self.assertIn(b'Updated: 15/10/2026 at 05:21 PM', page.data)
+        for invalid in (None, '', 'invalid', '2026-10-15T17:21:00'):
+            with self.subTest(timestamp=invalid):
+                self.conn.execute('UPDATE users SET resume_updated_at=? WHERE id=1', (invalid,))
+                self.conn.commit()
+                if invalid:
+                    with self.assertLogs(self.app.logger, level='WARNING'):
+                        page = self.client.get('/resume')
+                else:
+                    page = self.client.get('/resume')
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'Updated: Not recorded', page.data)
 
     def test_resume_update_retains_scores_marks_stale_and_requeues(self):
         self.seed_user()

@@ -1,8 +1,8 @@
-{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner %}{% block title %}My resume · StudentConnect{% endblock %}
-{% block content %}<div class="top2"><div><h1>My resume</h1><p class="sub">Keep the text used for matching up to date.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">View matches</a><a class="btn p" href="#resume-editor">Upload new version</a></div></div>
+{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner with context %}{% block title %}My resume · StudentConnect{% endblock %}
+{% block content %}<div class="top2"><div><h1>My resume</h1><p class="sub">Keep the text used for matching up to date.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">View matches</a><a class="btn p" href="#resume-editor">{{ 'Upload new version' if has_resume else 'Upload resume' }}</a></div></div>
 {% if user %}
 {{ page_banner('Your resume','Show what you bring to the role','Keep your resume current, review the extracted text, and explore the skills and gaps in your saved matches.','#resume-editor','Update resume',url_for('jobs'),'View job matches','resume') }}
-<div class="two"><section class="card" id="resume-editor"><h2>Current resume</h2><p class="sub">Updated: {{ user.resume_updated_at or 'Not recorded' }}</p>
+<div class="two"><section class="card" id="resume-editor"><h2>Current resume</h2><p class="sub">Updated: {{ resume_updated_display }}</p>
 <form method="post" enctype="multipart/form-data" class="page-form spaced">{{ csrf() }}
 <label class="field">Upload a PDF, DOCX, or UTF-8 TXT resume (maximum 2 MB)<input aria-describedby="upload-help" name="resume_file" type="file" accept=".pdf,.docx,.txt"></label>
 <p class="sub" id="upload-help">PDFs must contain selectable text and at most 20 pages. Scanned PDFs and encrypted documents are not supported. DOCX paragraphs, tables, headers, and footers are extracted; text boxes, images, and tracked changes may not be included.</p>

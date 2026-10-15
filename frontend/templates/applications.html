@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% from 'macros.html' import csrf,badge,page_banner,company_heading %}{% block title %}Applications · StudentConnect{% endblock %}
+{% extends 'base.html' %}{% from 'macros.html' import csrf,badge,page_banner,company_heading with context %}{% block title %}Applications · StudentConnect{% endblock %}
 {% block content %}<div class="top2"><div><h1>Applications</h1><p class="sub">Track every role from saved to offer. Stages are updated by you.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">Find a job</a>{% if user %}<a class="btn p" href="#add">Add application</a>{% endif %}</div></div>
 {% if user %}
 {% set tracked = application_counts.values()|sum %}{% set interviews = application_counts.get('interview',0) %}{% set offers = application_counts.get('offer',0) %}

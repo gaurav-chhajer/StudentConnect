@@ -9,8 +9,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wow.css') }}"></head>
 <body><a class="skip-link" href="#main">Skip to content</a><div class="app"><aside class="side"><a class="logo" href="{{ url_for('dashboard') }}"><i aria-hidden="true"></i>StudentConnect</a>
 <nav class="nav" aria-label="Main"><div class="cap">Menu</div>
-{% for endpoint,label in navigation %}<a href="{{ url_for(endpoint) }}" {% if active == endpoint %}class="on" aria-current="page"{% endif %}>{{ icon(endpoint) }}{{ label }}</a>
-{% if endpoint == 'jobs' %}<a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}Target companies</a>{% endif %}
+{% for endpoint,label in navigation %}<a {% if active == endpoint %}class="on" aria-current="page" role="link" aria-disabled="true"{% else %}href="{{ url_for(endpoint) }}"{% endif %}>{{ icon(endpoint) }}{{ 'Upload resume' if endpoint == 'resume' and not has_resume else label }}</a>
+{% if endpoint == 'jobs' %}<a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}{{ 'Select companies' if not has_companies else 'Target companies' }}</a>{% endif %}
 {% if endpoint == 'applications' %}<a href="{{ url_for('settings_page') }}#email">{{ icon('email') }}Email alerts</a>{% endif %}
 {% endfor %}{% if is_account_admin %}<a href="{{ url_for('accounts.invitations') }}">Invite testers</a>{% endif %}</nav>
 {% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Sign out</button></form>{% endif %}
@@ -18,7 +18,15 @@
 </aside><main class="main" id="main" tabindex="-1">
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
-{% if matching_status %}<p class="notice" role="status">
+{% if setup_pending %}<section class="card" aria-labelledby="setup-title" id="setup-checklist">
+<h2 id="setup-title">Finish setting up your matches</h2><p class="sub">Upload your resume, review your email, and select companies to receive relevant matches. You can keep browsing while you complete setup.</p>
+{% if not has_resume %}<p class="sub">Add a resume to start matching.</p>{% endif %}
+<ol>
+<li>{% if has_resume %}<strong>Resume added</strong>{% else %}<a href="{{ url_for('resume') }}#resume-editor">Upload resume</a>{% endif %}</li>
+<li><a href="{{ url_for('settings_page') }}#profile">Review email</a> {% if has_email %}<span class="tag ok">Verified email saved</span>{% endif %}</li>
+<li>{% if has_companies %}<strong>Companies selected</strong>{% else %}<a href="{{ url_for('settings_page') }}#companies">Select companies</a>{% endif %}</li>
+</ol></section>{% endif %}
+{% if matching_status and not setup_pending %}<p class="notice" role="status">
 {% if not user.resume_text|trim %}<strong>Matching pending.</strong> Add a resume to start matching.
 {% elif matching_status.status == 'pending' %}<strong>Matching pending.</strong> Your current openings will be checked automatically. Refresh this page to see updated results.
 {% elif matching_status.status == 'running' %}<strong>Matching in progress.</strong> Refresh this page to see updated results.

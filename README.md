@@ -110,6 +110,16 @@ cannot be issued while another unexpired owner invitation or any account exists.
    role/location/type preferences. No companies selected means no new matching
    or email candidates. Existing profiles continue matching all companies until
    company choices are explicitly saved.
+   Until a resume and active company choices are present, every main page shows
+   a setup checklist linking to **Upload resume**, **Review email**, and
+   **Select companies**. Browsing remains available. Registration already saves
+   the verified email; Settings displays it read-only. Completed steps are marked,
+   and setup prompts disappear automatically when the required data is saved.
+   Page banners prioritize setup actions while setup is incomplete.
+   The minimum annual stipend field accepts 0 through 1,00,00,000 INR (1 crore
+   per year); leave it blank for no minimum. Saved values are retained without
+   monthly-to-annual conversion. Compensation matching remains approximate:
+   posting amounts are not automatically normalized by payment period.
    A single location input suggests city, state, and other location terms from active
    company postings as you type (for example `ben` suggests Bengaluru with its
    posting context). Selected locations appear below the input with remove buttons;
