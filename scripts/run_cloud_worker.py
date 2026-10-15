@@ -25,6 +25,8 @@ MAX_ACCOUNTS = 1000
 CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
 # Allow Gemini's connect/read waits plus the hosted save's 10/90 waits and headroom.
 GEMINI_EVALUATION_RESERVE = sum(pipeline.GEMINI_REQUEST_TIMEOUT) + 110
+GEMINI_MAX_ATTEMPTS = 3
+GEMINI_RETRY_DELAY_SECONDS = 2
 
 
 class HostedOperationError(RuntimeError):
@@ -194,7 +196,7 @@ def fetch_and_score(client, deadline, fetch_only=False):
                     if not detail['eligible']:
                         continue
                     item = dict(item, job=detail['job'], fingerprint=detail['fingerprint'])
-                # Only an explicit Groq rate-limit rejection permits another provider call.
+                # Only an explicit Groq rate-limit rejection permits switching providers.
                 stage = "evaluation"
                 if scoring_provider == "groq":
                     try:
@@ -207,11 +209,25 @@ def fetch_and_score(client, deadline, fetch_only=False):
                         logger.warning("Groq rate limit: switching to Gemini for this run; user_id=%s job_id=%s",
                                        after, item["job"]["id"])
                 if scoring_provider == "gemini":
-                    if time.monotonic() >= deadline - GEMINI_EVALUATION_RESERVE:
-                        logger.error("Matching time budget reached before Gemini evaluation; remaining scores deferred")
-                        return 1
-                    result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
-                                                         provider="gemini")
+                    for attempt in range(GEMINI_MAX_ATTEMPTS):
+                        if time.monotonic() >= deadline - GEMINI_EVALUATION_RESERVE:
+                            logger.error("Matching time budget reached before Gemini evaluation; remaining scores deferred")
+                            return 1
+                        try:
+                            result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
+                                                                 provider="gemini")
+                            break
+                        except requests.HTTPError as error:
+                            if (error.response is None or error.response.status_code != 503 or
+                                    attempt == GEMINI_MAX_ATTEMPTS - 1):
+                                raise
+                            delay = GEMINI_RETRY_DELAY_SECONDS * 2 ** attempt
+                            if time.monotonic() >= deadline - GEMINI_EVALUATION_RESERVE - delay:
+                                logger.error("Matching time budget reached before Gemini retry; remaining scores deferred")
+                                return 1
+                            logger.warning("Gemini HTTP 503: retrying in %s seconds; user_id=%s job_id=%s attempt=%s/%s",
+                                           delay, after, item["job"]["id"], attempt + 2, GEMINI_MAX_ATTEMPTS)
+                            time.sleep(delay)
                 stage = "save"
                 client.call("score", dict(user_id=item["user"]["id"], job_id=item["job"]["id"],
                                           fingerprint=item["fingerprint"], result=result))

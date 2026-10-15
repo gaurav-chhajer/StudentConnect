@@ -456,8 +456,10 @@ Failed boards retain previous jobs and are skipped for scoring.
 Invalid evaluations and scoring HTTP 400/413/422 rejections defer that candidate
 and continue with the remaining candidates. When `GEMINI_API_KEY` is configured,
 a Groq HTTP 429 switches that candidate and the rest of the cloud matching run to
-Gemini. There is one request per provider for that candidate, no wait/retry loop,
-and no switch for invalid evaluations, authentication errors or uncertain failures.
+Gemini. Groq is called once per candidate. Explicit Gemini HTTP 503 responses
+allow up to three Gemini attempts per candidate, waiting 2 then 4 seconds.
+Each attempt and wait must fit the remaining evaluation/save time reserve.
+There is no switch for invalid evaluations, authentication errors or uncertain failures.
 Gemini uses a 10-second connection timeout and a 90-second read timeout; Groq
 retains its 30-second timeout. Before every Gemini evaluation, the worker requires
 more than 210 seconds remaining for the evaluation, hosted save and headroom.
@@ -467,7 +469,7 @@ the candidate stays pending and previously saved scores remain available.
 Both providers use the same complete resume/JD, rubric and evidence validation;
 the saved evaluation records its provider and model. A recovered Groq 429 alone
 does not mark the run failed. Gemini rate limits, authentication, network,
-other HTTP failures, and hosted description/save failures stop the batch;
+other HTTP failures (including exhausted 503 retries), and hosted description/save failures stop the batch;
 uncertain writes are not retried. Completed scores are retained. Any failure
 still returns exit code 1. Logs include safe user/job IDs, operation stage and
 HTTP status, without response bodies or credentials; the completed scoring
