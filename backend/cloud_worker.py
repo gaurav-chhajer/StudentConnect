@@ -139,6 +139,55 @@ def register_routes(application, connection, database):
             raise ValueError("Too many companies for one daily cycle")
         return {"companies": [dict(row, fingerprint=fingerprint(dict(row))) for row in rows]}
 
+    @routes.post("/groq-status")
+    def groq_status():
+        data = body()
+        if set(data) != {"run_id", "revision", "states", "outcome"}:
+            raise ValueError("Invalid key history fields")
+        run_id, revision = data["run_id"], data["revision"]
+        states, outcome = data["states"], data["outcome"]
+        allowed = {"not_configured", "not_attempted", "attempting", "succeeded", "rate_limited", "failed"}
+        if (not isinstance(run_id, str) or re.fullmatch(r"[a-f0-9]{32}", run_id) is None or
+                type(revision) is not int or not 0 <= revision <= 1000 or
+                not isinstance(states, list) or len(states) != 3 or
+                any(not isinstance(state, str) or state not in allowed for state in states) or
+                not isinstance(outcome, str) or outcome not in {"running", "complete", "deferred"}):
+            raise ValueError("Invalid key history")
+        conn = connection()
+        with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
+            conn.execute("BEGIN IMMEDIATE")
+            previous = conn.execute("SELECT * FROM groq_key_history WHERE run_id=? ORDER BY key_slot",
+                                    (run_id,)).fetchall()
+            now = datetime.now(timezone.utc).isoformat()
+            if not previous:
+                if (revision != 0 or outcome != "running" or states[0] != "not_attempted" or
+                        any(state not in {"not_configured", "not_attempted"} for state in states)):
+                    raise ValueError("History must begin with unattempted configured keys")
+                conn.executemany("""INSERT INTO groq_key_history
+                    (run_id,key_slot,state,outcome,revision,started_at,updated_at) VALUES(?,?,?,'running',0,?,?)""",
+                    [(run_id, slot, state, now, now) for slot, state in enumerate(states, 1)])
+            else:
+                old_revision = previous[0]["revision"]
+                if revision == old_revision:
+                    if states != [row["state"] for row in previous] or outcome != previous[0]["outcome"]:
+                        return {"error": "History revision already recorded"}, 409
+                    return {"saved": True, "revision": revision}
+                if revision != old_revision + 1 or previous[0]["outcome"] != "running":
+                    return {"error": "Stale or finished key history"}, 409
+                transitions = {
+                    "not_configured": set(), "not_attempted": {"attempting"},
+                    "attempting": {"succeeded", "rate_limited", "failed"},
+                    "succeeded": {"rate_limited", "failed"},
+                    "rate_limited": set(), "failed": {"attempting"},
+                }
+                for row, state in zip(previous, states):
+                    if state != row["state"] and state not in transitions[row["state"]]:
+                        raise ValueError("Invalid key history transition")
+                    conn.execute("""UPDATE groq_key_history SET state=?,outcome=?,revision=?,
+                        updated_at=CASE WHEN state<>? THEN ? ELSE updated_at END WHERE id=?""",
+                        (state, outcome, revision, state, now, row["id"]))
+        return {"saved": True, "revision": revision}
+
     @routes.post("/snapshot")
     def snapshot():
         data = body()

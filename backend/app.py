@@ -160,6 +160,8 @@ def create_app(database_path=None, upload_dir=None):
         data = context()
         try:
             data.update(store.filters(request.args))
+            history_before = (store.integer(request.args.get("history_before", "0"), 0, 9223372036854775807)
+                              if getattr(g, "account", None) and g.account["is_admin"] else 0)
         except ValueError as error:
             data["message"] = str(error)
             return render("dashboard", data, 400)
@@ -168,6 +170,27 @@ def create_app(database_path=None, upload_dir=None):
             data["matches"], data["pages"] = store.matches(connection(), data["user"]["id"], data, utc_now())
             data["target_companies"] = connection().execute("""SELECT c.id,c.name,CASE WHEN c.career_source IS NOT NULL THEN 'career site' ELSE c.ats_type END AS ats_type FROM company_subscriptions sub
                 JOIN companies c ON c.id=sub.company_id WHERE sub.user_id=? ORDER BY c.name,c.id LIMIT 1000""", (data["user"]["id"],)).fetchall()
+        if getattr(g, "account", None) and g.account["is_admin"]:
+            conn = connection()
+            runs = conn.execute("""SELECT id,run_id,started_at,outcome FROM groq_key_history
+                WHERE key_slot=1 AND (?=0 OR id<?) ORDER BY id DESC LIMIT 21""",
+                (history_before, history_before)).fetchall()
+            data["groq_history_next"] = runs[19]["id"] if len(runs) > 20 else None
+            zone = {"UTC": timezone.utc, "Asia/Kolkata": timezone(timedelta(hours=5, minutes=30))}[data["settings"]["timezone"]]
+            data["groq_history_zone"] = data["settings"]["timezone"]
+            data["groq_history"] = []
+            run_ids = [run["run_id"] for run in runs[:20]]
+            key_rows = conn.execute("""SELECT run_id,key_slot,state,updated_at FROM groq_key_history
+                WHERE run_id IN (""" + ",".join("?" for _ in run_ids) + ") ORDER BY key_slot LIMIT 60",
+                run_ids).fetchall() if run_ids else []
+            keys_by_run = {run_id: [] for run_id in run_ids}
+            for row in key_rows:
+                keys_by_run[row["run_id"]].append(row)
+            for run in runs[:20]:
+                entry = dict(run)
+                entry["display_time"] = datetime.fromisoformat(run["started_at"]).astimezone(zone).strftime("%d/%m/%Y at %I:%M %p")
+                entry["keys"] = keys_by_run[run["run_id"]]
+                data["groq_history"].append(entry)
         return render("dashboard", data)
 
     @application.get("/jobs")

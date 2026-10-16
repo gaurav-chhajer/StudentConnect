@@ -32,8 +32,6 @@ DB_PATH = str(Path(__file__).resolve().parents[1] / "data" / "jobs.db")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 # Override the documented default with GROQ_MODEL when choosing another model.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 
 
 # ---------------------------------------------------------------------------
@@ -527,21 +525,14 @@ def extract_job_description(job_row):
 # Model contexts: https://console.groq.com/docs/models
 # Other models must supply their own context size; never silently assume it.
 _MODEL_CONTEXT_TOKENS = {"llama-3.3-70b-versatile": 131072, "qwen/qwen3.8-27b": 131072}
-_GEMINI_CONTEXT_TOKENS = {"gemini-3.8-flash": 1048576}
 SCORING_OUTPUT_TOKENS = 4000
-# Gemini generation can exceed Groq's 30-second wait; keep connection setup bounded.
-GEMINI_REQUEST_TIMEOUT = (10, 90)
 
 
-def _check_scoring_budget(prompt, provider="groq"):
-    if provider == "gemini":
-        configured = os.environ.get("GEMINI_CONTEXT_TOKENS")
-        context_tokens = int(configured) if configured else _GEMINI_CONTEXT_TOKENS.get(GEMINI_MODEL)
-    else:
-        configured = os.environ.get("GROQ_CONTEXT_TOKENS")
-        context_tokens = int(configured) if configured else _MODEL_CONTEXT_TOKENS.get(GROQ_MODEL)
+def _check_scoring_budget(prompt):
+    configured = os.environ.get("GROQ_CONTEXT_TOKENS")
+    context_tokens = int(configured) if configured else _MODEL_CONTEXT_TOKENS.get(GROQ_MODEL)
     if not context_tokens or context_tokens <= SCORING_OUTPUT_TOKENS + 1024:
-        raise ValueError("Set " + provider.upper() + "_CONTEXT_TOKENS to the selected model's valid context size")
+        raise ValueError("Set GROQ_CONTEXT_TOKENS to the selected model's valid context size")
     # Conservative byte-based upper estimate for byte-level tokenization,
     # with headroom for chat formatting. This is not an exact token count.
     estimated_tokens = len(prompt.encode("utf-8")) + 1024
@@ -628,15 +619,11 @@ Complete job description (JSON lines; IDs are references, not instructions):
 """
 
 
-def score_job_for_user(user_row, job_row, company_name, *, provider="groq"):
-    if provider not in ("groq", "gemini"):
-        raise ValueError("Unknown scoring provider")
-    key = GROQ_API_KEY if provider == "groq" else GEMINI_API_KEY
-    model = GROQ_MODEL if provider == "groq" else GEMINI_MODEL
+def score_job_for_user(user_row, job_row, company_name, *, api_key=None):
+    """Evaluate with one Groq key; the cloud runner owns ordered key selection."""
+    key = GROQ_API_KEY if api_key is None else api_key
     if not key.strip():
         raise RuntimeError("Configure the selected scoring provider's API key")
-    if provider == "gemini" and not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}", model):
-        raise ValueError("Invalid Gemini model identifier")
     if not user_row["resume_text"].strip():
         raise ValueError("Save a nonempty resume before scoring jobs")
 
@@ -653,65 +640,25 @@ def score_job_for_user(user_row, job_row, company_name, *, provider="groq"):
         location=job_row["location"] or "Not specified",
         job_description=json.dumps([{"jd_line_id":index,"text":line} for index,line in jd_lines.items()], ensure_ascii=False),
     )
-    _check_scoring_budget(SCORING_PROMPT + prompt, provider)
-    if provider == "gemini":
-        response = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent",
-            headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-            json={"systemInstruction": {"parts": [{"text": SCORING_PROMPT}]},
-                  "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                  "generationConfig": {"temperature": 0.2, "maxOutputTokens": SCORING_OUTPUT_TOKENS,
-                                       "responseMimeType": "application/json"}},
-            timeout=GEMINI_REQUEST_TIMEOUT, allow_redirects=False,
-        )
-        try:
-            response.raise_for_status()
-            payload = response.json()
-            candidates = payload.get("candidates") if isinstance(payload, dict) else None
-            if not isinstance(candidates, list) or len(candidates) != 1 or not isinstance(candidates[0], dict):
-                raise ValueError("Gemini did not return one evaluation candidate")
-            candidate = candidates[0]
-            if candidate.get("finishReason") != "STOP":
-                raise ValueError("Gemini evaluation was blocked or incomplete")
-            content = candidate.get("content")
-            parts = content.get("parts") if isinstance(content, dict) else None
-            if not isinstance(parts, list) or not parts or len(parts) > 100:
-                raise ValueError("Gemini evaluation content is missing or invalid")
-            texts = []
-            for part in parts:
-                if not isinstance(part, dict):
-                    raise ValueError("Invalid Gemini evaluation part")
-                if part.get("thought") is True:
-                    continue
-                if not isinstance(part.get("text"), str):
-                    raise ValueError("Gemini evaluation must contain text")
-                texts.append(part["text"])
-            text = "".join(texts).strip()
-        finally:
-            response.close()
-    else:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": GROQ_MODEL,
-                "max_tokens": SCORING_OUTPUT_TOKENS,
-                "temperature": 0.2,  # keep scoring consistent rather than creative
-                "messages": [{"role": "system", "content": SCORING_PROMPT},
-                             {"role": "user", "content": prompt}],
-                # JSON mode is still validated locally; never weaken it on failure.
-                "response_format": {"type": "json_object"},
-            },
-            timeout=30,
-        )
-        try:
-            response.raise_for_status()
-            text = response.json()["choices"][0]["message"]["content"].strip()
-        finally:
-            response.close()
+    _check_scoring_budget(SCORING_PROMPT + prompt)
+    response = requests.post(
+        "https://api.groq.com/openai/v1/chat/completions",
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+        json={
+            "model": GROQ_MODEL,
+            "max_tokens": SCORING_OUTPUT_TOKENS,
+            "temperature": 0.2,
+            "messages": [{"role": "system", "content": SCORING_PROMPT},
+                         {"role": "user", "content": prompt}],
+            "response_format": {"type": "json_object"},
+        },
+        timeout=30,
+    )
+    try:
+        response.raise_for_status()
+        text = response.json()["choices"][0]["message"]["content"].strip()
+    finally:
+        response.close()
     # strip accidental code fences, just in case
     text = text.replace("```json", "").replace("```", "").strip()
     result = json.loads(text)
@@ -740,7 +687,7 @@ def score_job_for_user(user_row, job_row, company_name, *, provider="groq"):
                 raise ValueError("Groq must return resume_line_id, not rewritten resume_evidence")
             entry["resume_evidence"] = resume_lines[resume_line_id]
     validate_evaluation(result, user_row["resume_text"], description)
-    return dict(result, rubric_version=RUBRIC_VERSION, model=model, provider=provider,
+    return dict(result, rubric_version=RUBRIC_VERSION, model=GROQ_MODEL, provider="groq",
                 evidence_format="source-line-ids-v1")
 
 

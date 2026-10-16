@@ -7,7 +7,9 @@ No private response bodies or external exception messages are logged.
 import argparse
 import json
 import logging
+import os
 import time
+import uuid
 
 import requests
 
@@ -23,16 +25,77 @@ EMAIL_SECONDS = 7 * 60
 MAX_SCORES = 100
 MAX_ACCOUNTS = 1000
 CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
-# Allow Gemini's connect/read waits plus the hosted save's 10/90 waits and headroom.
-GEMINI_EVALUATION_RESERVE = sum(pipeline.GEMINI_REQUEST_TIMEOUT) + 110
-GEMINI_MAX_ATTEMPTS = 3
-GEMINI_RETRY_DELAY_SECONDS = 2
+GROQ_EVALUATION_RESERVE = 240  # Status reports, one evaluation, hosted save and headroom.
 
 
 class HostedOperationError(RuntimeError):
     def __init__(self, status):
         self.status = status
         super().__init__("Hosted operation failed (HTTP %s)" % status)
+
+
+class GroqKeyPool:
+    """Run-local key selection and credential-free, revisioned status reporting."""
+    def __init__(self, client, deadline):
+        self.client, self.deadline = client, deadline
+        self.keys = (pipeline.GROQ_API_KEY.strip(), os.environ.get("GROQ_API_KEY_2", "").strip(),
+                     os.environ.get("GROQ_API_KEY_3", "").strip())
+        configured = [key for key in self.keys if key]
+        if not self.keys[0]:
+            raise ValueError("Configure GROQ_API_KEY before matching")
+        if len(configured) != len(set(configured)):
+            raise ValueError("Configured Groq key slots must be distinct")
+        self.slot = 0
+        self.run_id = uuid.uuid4().hex
+        self.states = ["not_attempted" if key else "not_configured" for key in self.keys]
+        self.revision = 0
+        self.reporting_failed = False
+        self.publish("running")
+
+    def publish(self, outcome):
+        try:
+            reply = self.client.call("groq-status", dict(run_id=self.run_id, revision=self.revision,
+                                                        states=list(self.states), outcome=outcome))
+            if (reply.get("saved") is not True or type(reply.get("revision")) is not int or
+                    reply["revision"] != self.revision):
+                raise RuntimeError("Hosted key status was not acknowledged")
+        except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+            self.reporting_failed = True
+            raise RuntimeError("Could not record Groq key status; work stopped") from error
+        self.revision += 1
+
+    def state(self, value):
+        if self.states[self.slot] != value:
+            self.states[self.slot] = value
+            self.publish("running")
+
+    def score(self, user, job, company_name):
+        for slot in range(self.slot, len(self.keys)):
+            if not self.keys[slot]:
+                continue
+            self.slot = slot
+            if time.monotonic() >= self.deadline - GROQ_EVALUATION_RESERVE:
+                raise RuntimeError("Matching time budget reached before Groq evaluation")
+            if self.states[slot] in ("not_attempted", "failed"):
+                self.state("attempting")
+            try:
+                result = (pipeline.score_job_for_user(user, job, company_name) if slot == 0 else
+                          pipeline.score_job_for_user(user, job, company_name, api_key=self.keys[slot]))
+            except requests.HTTPError as error:
+                limited = error.response is not None and error.response.status_code == 429
+                self.state("rate_limited" if limited else "failed")
+                if not limited:
+                    raise
+                logger.warning("Groq Key %s rate limited; recorded in admin history", slot + 1)
+                if not any(self.keys[slot + 1:]):
+                    raise
+                continue
+            except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError):
+                self.state("failed")
+                raise
+            self.state("succeeded")
+            return result
+        raise RuntimeError("No configured Groq key remains")
 
 
 class HostedClient:
@@ -55,7 +118,8 @@ class HostedClient:
                                   self.origin + "/internal/worker/" + path,
                                   data=encoded,
                                   headers={"Content-Type": "application/json"},
-                                  timeout=(10, 90), allow_redirects=False, stream=True) as response:
+                                  timeout=(10, 20) if path == "groq-status" else (10, 90),
+                                  allow_redirects=False, stream=True) as response:
             if response.status_code == 409:
                 raise ValueError("Hosted inputs changed; work deferred")
             if response.status_code != 200:
@@ -81,6 +145,20 @@ def cursor(value, previous):
 
 
 def fetch_and_score(client, deadline, fetch_only=False):
+    if fetch_only:
+        return _fetch_and_score(client, deadline, fetch_only=True, pool=None)
+    pool = GroqKeyPool(client, deadline)
+    result = 1
+    try:
+        result = _fetch_and_score(client, deadline, fetch_only=False, pool=pool)
+        return result
+    finally:
+        # An uncertain status write must not be retried, including during cleanup.
+        if not pool.reporting_failed:
+            pool.publish("complete" if result == 0 else "deferred")
+
+
+def _fetch_and_score(client, deadline, fetch_only, pool):
     if not fetch_only and not pipeline.GROQ_API_KEY.strip():
         raise ValueError("Configure Groq before matching")
     companies = client.call("companies").get("companies")
@@ -134,7 +212,6 @@ def fetch_and_score(client, deadline, fetch_only=False):
         return int(failed)
     after, scores, accounts, skipped = 0, 0, 0, 0
     saved, candidate_failures = 0, 0
-    scoring_provider = "groq"
     company_query = "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 120:
@@ -196,38 +273,9 @@ def fetch_and_score(client, deadline, fetch_only=False):
                     if not detail['eligible']:
                         continue
                     item = dict(item, job=detail['job'], fingerprint=detail['fingerprint'])
-                # Only an explicit Groq rate-limit rejection permits switching providers.
+                # Only an explicit Groq rate-limit rejection permits advancing a key.
                 stage = "evaluation"
-                if scoring_provider == "groq":
-                    try:
-                        result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"])
-                    except requests.HTTPError as error:
-                        if (error.response is None or error.response.status_code != 429 or
-                                not pipeline.GEMINI_API_KEY.strip()):
-                            raise
-                        scoring_provider = "gemini"
-                        logger.warning("Groq rate limit: switching to Gemini for this run; user_id=%s job_id=%s",
-                                       after, item["job"]["id"])
-                if scoring_provider == "gemini":
-                    for attempt in range(GEMINI_MAX_ATTEMPTS):
-                        if time.monotonic() >= deadline - GEMINI_EVALUATION_RESERVE:
-                            logger.error("Matching time budget reached before Gemini evaluation; remaining scores deferred")
-                            return 1
-                        try:
-                            result = pipeline.score_job_for_user(item["user"], item["job"], item["company_name"],
-                                                                 provider="gemini")
-                            break
-                        except requests.HTTPError as error:
-                            if (error.response is None or error.response.status_code != 503 or
-                                    attempt == GEMINI_MAX_ATTEMPTS - 1):
-                                raise
-                            delay = GEMINI_RETRY_DELAY_SECONDS * 2 ** attempt
-                            if time.monotonic() >= deadline - GEMINI_EVALUATION_RESERVE - delay:
-                                logger.error("Matching time budget reached before Gemini retry; remaining scores deferred")
-                                return 1
-                            logger.warning("Gemini HTTP 503: retrying in %s seconds; user_id=%s job_id=%s attempt=%s/%s",
-                                           delay, after, item["job"]["id"], attempt + 2, GEMINI_MAX_ATTEMPTS)
-                            time.sleep(delay)
+                result = pool.score(item["user"], item["job"], item["company_name"])
                 stage = "save"
                 client.call("score", dict(user_id=item["user"]["id"], job_id=item["job"]["id"],
                                           fingerprint=item["fingerprint"], result=result))

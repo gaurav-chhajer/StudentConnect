@@ -90,7 +90,7 @@ class WebFlowTests(unittest.TestCase):
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 7)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 8)
 
     def test_location_suggestions_use_active_posting_terms_and_escape_markup(self):
         self.seed_user()

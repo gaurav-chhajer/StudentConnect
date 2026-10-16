@@ -335,56 +335,27 @@ class CloudEndpointTests(unittest.TestCase):
 
 
 class CloudRunnerTests(unittest.TestCase):
-    def test_gemini_503_retries_are_bounded_and_respect_deadline(self):
-        def http_error(status):
-            response = requests.Response()
-            response.status_code = status
-            return requests.HTTPError('private provider details', response=response)
+    def setUp(self):
+        # Legacy runner cases isolate board/scoring behavior; history is covered separately.
+        reporter = patch.object(runner.GroqKeyPool, 'publish', autospec=True)
+        reporter.start()
+        self.addCleanup(reporter.stop)
+        env = patch.dict(os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='')
+        env.start()
+        self.addCleanup(env.stop)
 
-        cases = (
-            ('recovered', [http_error(503), http_error(503), {}], 0, [2, 4], 3),
-            ('exhausted', [http_error(503)] * 3, 1, [2, 4], 3),
-            ('timeout', [requests.ReadTimeout('private timeout')], 1, [], 1),
-            ('authentication', [http_error(401)], 1, [], 1),
-            ('rate_limit', [http_error(429)], 1, [], 1),
-            ('missing_response', [requests.HTTPError('private')], 1, [], 1),
-            ('budget_before_wait', [http_error(503)], 1, [], 1),
-            ('budget_after_wait', [http_error(503)], 1, [2], 1),
-        )
-        for name, outcomes, expected, delays, attempts in cases:
-            with self.subTest(name=name):
-                company = dict(id=1, name='Synthetic', ats_type='lever', board_slug='synthetic', fingerprint='0' * 64)
-                item = dict(user=dict(id=1, resume_text='Python'),
-                            job=dict(id=1, company_id=1, raw_json='{}'),
-                            company_name='Synthetic', fingerprint='0' * 64)
-                client = MagicMock()
-                client.call.side_effect = [dict(companies=[company]), dict(saved=0),
-                    dict(next=1, items=[item]), dict(saved=True), dict(next=None, items=[])]
-                clock = [0]
-                def evaluate(*args, **kwargs):
-                    if kwargs.get('provider') != 'gemini':
-                        raise http_error(429)
-                    if name == 'budget_before_wait':
-                        clock[0] = 2100 - runner.GEMINI_EVALUATION_RESERVE - 1
-                    outcome = outcomes.pop(0)
-                    if isinstance(outcome, Exception):
-                        raise outcome
-                    return outcome
-                def sleep(delay):
-                    clock[0] = 2100 if name == 'budget_after_wait' else clock[0] + delay
-                with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                        patch.object(pipeline, 'GEMINI_API_KEY', 'synthetic'), \
-                        patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
-                        patch.object(pipeline, 'score_job_for_user', side_effect=evaluate) as score, \
-                        patch.object(runner.time, 'monotonic', side_effect=lambda: clock[0]), \
-                        patch.object(runner.time, 'sleep', side_effect=sleep) as wait, \
-                        self.assertLogs(runner.logger, level='INFO') as logs:
-                    self.assertEqual(runner.fetch_and_score(client, 2100), expected)
-                self.assertEqual(score.call_count, 1 + attempts)
-                self.assertEqual([call.args[0] for call in wait.call_args_list], delays)
-                saves = [call for call in client.call.call_args_list if call.args[0] == 'score']
-                self.assertEqual(len(saves), int(expected == 0))
-                self.assertNotIn('private', ' '.join(logs.output))
+    def test_groq_503_stops_without_key_switch_or_retry(self):
+        response = requests.Response()
+        response.status_code = 503
+        client = MagicMock()
+        with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'):
+            pool = runner.GroqKeyPool(client, 2100)
+        with patch.object(runner.time, 'monotonic', return_value=0), \
+                patch.object(pipeline, 'score_job_for_user', side_effect=requests.HTTPError(response=response)) as score:
+            with self.assertRaises(requests.HTTPError):
+                pool.score(dict(id=1), dict(id=1), 'Synthetic')
+        score.assert_called_once()
+        self.assertEqual(pool.states[0], 'failed')
 
     def test_scoring_failures_continue_only_for_candidate_rejections(self):
         cases = [(status, status in runner.CANDIDATE_HTTP_STATUSES)

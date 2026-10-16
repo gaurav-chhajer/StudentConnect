@@ -16,67 +16,47 @@ def http_error(status):
     return requests.HTTPError('private provider error', response=response)
 
 
-class GeminiEvaluationTests(unittest.TestCase):
+class GroqEvaluationTests(unittest.TestCase):
     def setUp(self):
         self.user = dict(resume_text='Python project')
         self.job = dict(title='Intern', department='', location='Remote',
                         raw_json=json.dumps(dict(content='Python required')))
-        self.key_patch = patch.object(pipeline, 'GEMINI_API_KEY', 'synthetic')
-        self.key_patch.start()
-        self.addCleanup(self.key_patch.stop)
-        self.model_patch = patch.object(pipeline, 'GEMINI_MODEL', 'gemini-3.8-flash')
-        self.model_patch.start()
-        self.addCleanup(self.model_patch.stop)
-        self.environment = patch.dict(pipeline.os.environ, GEMINI_CONTEXT_TOKENS='1048576')
-        self.environment.start()
-        self.addCleanup(self.environment.stop)
-
-    def response(self, result=None, finish='STOP'):
-        return dict(candidates=[dict(finishReason=finish, content=dict(parts=[
-            dict(text=json.dumps(test_evaluation.sample_result() if result is None else result))]))])
+        env = patch.dict(pipeline.os.environ, GROQ_CONTEXT_TOKENS='131072')
+        env.start()
+        self.addCleanup(env.stop)
 
     def evaluate(self):
-        return pipeline.score_job_for_user(self.user, self.job, 'Synthetic', provider='gemini')
+        return pipeline.score_job_for_user(self.user, self.job, 'Synthetic', api_key='synthetic-slot-2')
 
-    def test_same_rubric_and_exact_evidence_with_gemini_metadata(self):
+    def test_selected_key_uses_same_rubric_and_exact_evidence(self):
         result = test_evaluation.sample_result()
         result['matched_requirements'] = [dict(requirement='Python', jd_line_id=1, resume_line_id=1)]
-        payload = self.response(result)
-        payload['candidates'][0]['content']['parts'].insert(0, dict(thought=True, text='private thoughts'))
         with patch.object(pipeline.requests, 'post') as post:
-            post.return_value.json.return_value = payload
+            post.return_value.json.return_value = {'choices': [{'message': {'content': json.dumps(result)}}]}
             saved = self.evaluate()
-        self.assertEqual(saved['provider'], 'gemini')
-        self.assertEqual(saved['model'], 'gemini-3.8-flash')
+        self.assertEqual(saved['provider'], 'groq')
+        self.assertEqual(saved['model'], pipeline.GROQ_MODEL)
         self.assertEqual(saved['matched_requirements'][0]['jd_evidence'], 'Python required')
         self.assertEqual(saved['matched_requirements'][0]['resume_evidence'], 'Python project')
         request = post.call_args
-        self.assertNotIn('synthetic', request.args[0])
-        self.assertEqual(request.kwargs['headers']['x-goog-api-key'], 'synthetic')
-        self.assertEqual(request.kwargs['timeout'], (10, 90))
-        self.assertFalse(request.kwargs['allow_redirects'])
-        body = request.kwargs['json']
-        self.assertEqual(body['systemInstruction']['parts'][0]['text'], pipeline.SCORING_PROMPT)
-        self.assertIn('Python project', body['contents'][0]['parts'][0]['text'])
-        self.assertEqual(body['generationConfig']['responseMimeType'], 'application/json')
+        self.assertEqual(request.args[0], 'https://api.groq.com/openai/v1/chat/completions')
+        self.assertEqual(request.kwargs['headers']['Authorization'], 'Bearer synthetic-slot-2')
+        self.assertEqual(request.kwargs['timeout'], 30)
+        self.assertEqual(request.kwargs['json']['messages'][0]['content'], pipeline.SCORING_PROMPT)
         post.return_value.close.assert_called_once()
+        self.assertNotIn('synthetic-slot-2', json.dumps(saved))
 
-    def test_rejects_blocked_truncated_malformed_and_invalid_evidence(self):
+    def test_invalid_outputs_and_evidence_remain_rejected(self):
         invalid = test_evaluation.sample_result()
         invalid['matched_requirements'] = [dict(requirement='Python', jd_line_id=99, resume_line_id=1)]
-        malformed = self.response()
-        malformed['candidates'][0]['content']['parts'] = [dict(text='not JSON')]
-        payloads = [{}, [], dict(candidates=[]), self.response(finish='MAX_TOKENS'),
-                    self.response(finish='SAFETY'), malformed, self.response(invalid),
-                    self.response(dict(status='unable_to_evaluate')), self.response(dict(fit_score=100))]
-        for payload in payloads:
-            with self.subTest(payload_type=type(payload).__name__), patch.object(pipeline.requests, 'post') as post:
-                post.return_value.json.return_value = payload
+        for content in ('not JSON', '{}', json.dumps(invalid), json.dumps(dict(status='unable_to_evaluate'))):
+            with self.subTest(content_type=type(content).__name__), patch.object(pipeline.requests, 'post') as post:
+                post.return_value.json.return_value = {'choices': [{'message': {'content': content}}]}
                 with self.assertRaises(ValueError):
                     self.evaluate()
                 post.return_value.close.assert_called_once()
 
-    def test_http_and_network_failures_propagate_without_retry(self):
+    def test_http_and_network_errors_propagate_without_internal_retry(self):
         for status in (401, 429, 503):
             with self.subTest(status=status), patch.object(pipeline.requests, 'post') as post:
                 post.return_value.raise_for_status.side_effect = http_error(status)
@@ -85,28 +65,20 @@ class GeminiEvaluationTests(unittest.TestCase):
                 post.assert_called_once()
                 post.return_value.close.assert_called_once()
         with patch.object(pipeline.requests, 'post', side_effect=requests.ReadTimeout()) as post:
-            with self.assertRaises(requests.Timeout):
+            with self.assertRaises(requests.ReadTimeout):
                 self.evaluate()
             post.assert_called_once()
 
-    def test_invalid_input_configuration_and_budget_make_no_request(self):
-        cases = [('GEMINI_API_KEY', ''), ('GEMINI_MODEL', '../private'), ('GEMINI_MODEL', 'unknown-model')]
-        for field, value in cases:
-            with self.subTest(field=field, value=value), patch.object(pipeline, field, value), \
-                    patch.dict(pipeline.os.environ, GEMINI_CONTEXT_TOKENS=''), \
-                    patch.object(pipeline.requests, 'post') as post:
-                with self.assertRaises((ValueError, RuntimeError)):
-                    self.evaluate()
-                post.assert_not_called()
-        with patch.dict(pipeline.os.environ, GEMINI_CONTEXT_TOKENS='5000'), \
-                patch.object(pipeline.requests, 'post') as post:
-            with self.assertRaises(ValueError):
-                self.evaluate()
-            post.assert_not_called()
+    def test_invalid_input_and_budget_make_no_request(self):
         with patch.object(pipeline.requests, 'post') as post:
-            for user, job in ((dict(resume_text=''), self.job), (self.user, dict(self.job, raw_json='{}'))):
+            for user, job, key in ((dict(resume_text=''), self.job, 'synthetic'),
+                                   (self.user, dict(self.job, raw_json='{}'), 'synthetic'),
+                                   (self.user, self.job, '')):
+                with self.assertRaises((ValueError, RuntimeError)):
+                    pipeline.score_job_for_user(user, job, 'Synthetic', api_key=key)
+            with patch.dict(pipeline.os.environ, GROQ_CONTEXT_TOKENS='5000'):
                 with self.assertRaises(ValueError):
-                    pipeline.score_job_for_user(user, job, 'Synthetic', provider='gemini')
+                    self.evaluate()
             post.assert_not_called()
 
 
@@ -149,80 +121,97 @@ class HybridEndpointTests(unittest.TestCase):
             self.assertEqual(cloud_worker.rank_candidates([], user), [])
             self.assertEqual([job['id'] for job in cloud_worker.rank_candidates(jobs[:2], dict(resume_text=''))], [1, 2])
 
-    def run_matching(self, score, key='synthetic', clock=None):
+    def run_matching(self, score, keys=('synthetic-2', 'synthetic-3'), clock=None):
         client = MagicMock()
         def hosted_call(route, data=None):
+            if route == 'snapshot':
+                return {'saved': 0}  # Keep fixture postings active for real score writes.
             response = self.call(route, data)
-            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.status_code, 200, response.json)
             return response.json
         client.call.side_effect = hosted_call
-        with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.object(pipeline, 'GEMINI_API_KEY', key), \
+        with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic-1'), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2=keys[0], GROQ_API_KEY_3=keys[1]), \
                 patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
                 patch.object(runner.time, 'monotonic', return_value=0, side_effect=clock), \
                 patch.object(pipeline, 'score_job_for_user', side_effect=score) as evaluate:
-            # Empty snapshots would deactivate jobs: mock only snapshot transfer in this fixture.
-            original_call = client.call.side_effect
-            client.call.side_effect = lambda route, data=None: ({'saved': 0} if route == 'snapshot'
-                                                               else original_call(route, data))
             result = runner.fetch_and_score(client, 2100)
         return result, evaluate
 
-    def test_rate_limit_switches_once_and_success_does_not_fail_run(self):
+    def test_rate_limits_advance_in_order_and_keep_using_third_key(self):
         result = test_evaluation.sample_result()
-        status, evaluate = self.run_matching([http_error(429), result, result])
+        status, evaluate = self.run_matching([http_error(429), http_error(429), result, result])
         self.assertEqual(status, 0)
-        self.assertEqual([call.kwargs for call in evaluate.call_args_list], [{}, {'provider': 'gemini'}, {'provider': 'gemini'}])
-        self.assertEqual(evaluate.call_args_list[0].args, evaluate.call_args_list[1].args)
+        self.assertEqual([call.kwargs for call in evaluate.call_args_list],
+                         [{}, {'api_key': 'synthetic-2'}, {'api_key': 'synthetic-3'}, {'api_key': 'synthetic-3'}])
+        self.assertEqual(evaluate.call_args_list[0].args, evaluate.call_args_list[2].args)
+        rows = self.conn.execute('SELECT key_slot,state,outcome FROM groq_key_history ORDER BY key_slot').fetchall()
+        self.assertEqual([row['state'] for row in rows], ['rate_limited', 'rate_limited', 'succeeded'])
+        self.assertTrue(all(row['outcome'] == 'complete' for row in rows))
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 2)
+        self.assertNotIn('synthetic', repr([dict(row) for row in self.conn.execute('SELECT * FROM groq_key_history')]))
 
-    def test_both_limited_preserves_first_score_for_dashboard_and_email(self):
-        status, evaluate = self.run_matching([test_evaluation.sample_result(), http_error(429), http_error(429)])
+    def test_all_limited_preserves_saved_score_for_dashboard_and_email(self):
+        status, evaluate = self.run_matching([test_evaluation.sample_result()] + [http_error(429)] * 3)
         self.assertEqual(status, 1)
-        self.assertEqual(evaluate.call_count, 3)
+        self.assertEqual(evaluate.call_count, 4)
         saved_job = self.conn.execute('SELECT job_id FROM scores WHERE is_stale=0').fetchone()[0]
         displayed, _ = store.matches(self.conn, 1, store.filters({}), test_cloud_worker.NOW)
         self.assertEqual([row['job_id'] for row in displayed], [saved_job])
         self.assertEqual([row['job_id'] for row in pipeline.get_unsent_top_matches(self.conn, 1)], [saved_job])
         pending = pipeline.filter_candidate_jobs(self.conn, dict(id=1, preferences_json='{}'))
         self.assertEqual(len(pending), 1)
-        self.assertNotEqual(pending[0]['id'], saved_job)
+        rows = self.conn.execute('SELECT state,outcome FROM groq_key_history').fetchall()
+        self.assertTrue(all(row['state'] == 'rate_limited' and row['outcome'] == 'deferred' for row in rows))
 
-    def test_gemini_timeout_preserves_saved_score_without_retry(self):
-        status, evaluate = self.run_matching([
-            test_evaluation.sample_result(), http_error(429), requests.ReadTimeout()])
-        self.assertEqual(status, 1)
-        self.assertEqual(evaluate.call_count, 3)
-        self.assertEqual(evaluate.call_args.kwargs, {'provider': 'gemini'})
-        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 1)
+    def test_missing_slot_is_skipped_and_each_run_restarts_at_key_one(self):
+        status, evaluate = self.run_matching([http_error(429), test_evaluation.sample_result(),
+                                             test_evaluation.sample_result()], keys=('', 'synthetic-3'))
+        self.assertEqual(status, 0)
+        self.assertEqual(evaluate.call_args_list[1].kwargs, {'api_key': 'synthetic-3'})
+        self.conn.execute('UPDATE scores SET is_stale=1')
+        self.conn.commit()
+        status, evaluate = self.run_matching([test_evaluation.sample_result()] * 2)
+        self.assertEqual(status, 0)
+        self.assertEqual(evaluate.call_args_list[0].kwargs, {})
+        self.assertEqual(self.conn.execute('SELECT COUNT(DISTINCT run_id) FROM groq_key_history').fetchone()[0], 2)
 
-    def test_deadline_prevents_initial_and_subsequent_gemini_requests(self):
-        for remaining in (runner.GEMINI_EVALUATION_RESERVE, runner.GEMINI_EVALUATION_RESERVE - 1):
-            with self.subTest(remaining=remaining):
-                clock = {'now': 0}
-                def limited(*args, **kwargs):
-                    clock['now'] = 2100 - remaining
-                    raise http_error(429)
-                status, evaluate = self.run_matching(limited, clock=lambda: clock['now'])
+    def test_other_failures_do_not_switch_keys(self):
+        for error in (http_error(401), http_error(503), requests.ReadTimeout()):
+            with self.subTest(error=type(error).__name__):
+                status, evaluate = self.run_matching([error])
                 self.assertEqual(status, 1)
                 evaluate.assert_called_once()
-                self.assertEqual(evaluate.call_args.kwargs, {})
-        # First fallback succeeds; the next candidate must also reserve save time.
+        rows = self.conn.execute('SELECT state FROM groq_key_history WHERE key_slot=2').fetchall()
+        self.assertTrue(all(row['state'] == 'not_attempted' for row in rows))
+
+    def test_rejected_evaluation_does_not_switch_and_next_candidate_can_succeed(self):
+        status, evaluate = self.run_matching([ValueError('private evaluation'), test_evaluation.sample_result()])
+        self.assertEqual(status, 1)
+        self.assertEqual([call.kwargs for call in evaluate.call_args_list], [{}, {}])
+        self.assertEqual(self.conn.execute("SELECT state FROM groq_key_history WHERE key_slot=1").fetchone()[0], 'succeeded')
+
+    def test_deadline_prevents_next_key_request(self):
         clock = {'now': 0}
-        def scored_then_deadline(*args, **kwargs):
-            if kwargs.get('provider') != 'gemini':
-                raise http_error(429)
-            clock['now'] = 2100 - runner.GEMINI_EVALUATION_RESERVE
-            return test_evaluation.sample_result()
-        status, evaluate = self.run_matching(scored_then_deadline, clock=lambda: clock['now'])
+        def limited(*args, **kwargs):
+            clock['now'] = 2100 - runner.GROQ_EVALUATION_RESERVE
+            raise http_error(429)
+        status, evaluate = self.run_matching(limited, clock=lambda: clock['now'])
         self.assertEqual(status, 1)
-        self.assertEqual(evaluate.call_count, 2)
-        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 1)
+        evaluate.assert_called_once()
+        self.assertEqual(self.conn.execute('SELECT state FROM groq_key_history WHERE key_slot=2').fetchone()[0], 'not_attempted')
 
-    def test_no_fallback_for_other_failures_or_missing_key(self):
-        for error, key in ((http_error(401), 'synthetic'), (requests.Timeout(), 'synthetic'), (http_error(429), '')):
-            with self.subTest(error=type(error).__name__, configured=bool(key)):
-                status, evaluate = self.run_matching([error], key)
-                self.assertEqual(status, 1)
-                evaluate.assert_called_once()
-        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 0)
+    def test_no_secondary_keys_stops_after_first_limit(self):
+        status, evaluate = self.run_matching([http_error(429)], keys=('', ''))
+        self.assertEqual(status, 1)
+        evaluate.assert_called_once()
+
+    def test_duplicate_keys_rejected_without_status_or_provider_calls(self):
+        with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic', GROQ_API_KEY_3=''), \
+                patch.object(pipeline, 'score_job_for_user') as evaluate:
+            client = MagicMock()
+            with self.assertRaises(ValueError):
+                runner.fetch_and_score(client, 2100)
+            client.call.assert_not_called()
+            evaluate.assert_not_called()
