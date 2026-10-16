@@ -2,6 +2,7 @@ import copy
 import json
 import re
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -9,7 +10,42 @@ import requests
 from backend import cloud_worker, pipeline_skeleton as pipeline
 from backend.migrate import apply_migrations
 from scripts import run_cloud_worker as runner
-from tests import test_cloud_worker
+from tests import test_cloud_worker, test_web_flows
+
+
+class PreHistoryMigrationTests(unittest.TestCase):
+    def setUp(self):
+        migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
+        previous = [path for path in migrations if path.name != '008_groq_key_history.sql']
+        # Reproduce a deployed database that predates the new history feature.
+        with patch('backend.migrate.Path.glob', return_value=previous):
+            test_web_flows.WebFlowTests.setUp(self)
+        test_web_flows.WebFlowTests.seed_user(self)
+
+    def test_admin_dashboard_keeps_analytics_when_history_migration_is_missing(self):
+        self.conn.execute('UPDATE accounts SET is_admin=1 WHERE user_id=1')
+        self.conn.commit()
+        with self.assertLogs(self.app.logger, level='ERROR') as logs:
+            page = self.client.get('/')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Match score trend', page.data)
+        self.assertIn(b'Software Engineer 1', page.data)
+        self.assertIn(b'Groq key history is unavailable until the database update is applied.', page.data)
+        self.assertNotIn(b'Saved dashboard data could not be loaded', page.data)
+        self.assertNotIn(b'No matching run history recorded yet.', page.data)
+        self.assertIn('008_groq_key_history.sql', ' '.join(logs.output))
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores').fetchone()[0], 2)
+        apply_migrations(self.conn)
+        page = self.client.get('/')
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn(b'history is unavailable', page.data)
+        self.assertIn(b'No matching run history recorded yet.', page.data)
+
+    def test_nonadmin_dashboard_does_not_need_history_migration(self):
+        page = self.client.get('/')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'Match score trend', page.data)
+        self.assertNotIn(b'Groq key history', page.data)
 
 
 class GroqHistoryTests(unittest.TestCase):

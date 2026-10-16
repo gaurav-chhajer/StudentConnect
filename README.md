@@ -495,7 +495,9 @@ stored. The worker publishes revisioned snapshots through its authenticated
 out-of-order or terminal-state changes are rejected; identical revisions are
 idempotent. Status-write failures stop matching without retrying uncertain writes.
 The additive `008_groq_key_history.sql` migration creates only history storage;
-existing jobs, users and scores are retained. Before the next matching run, deploy
+if its table is absent, the admin panel explicitly reports that the database update
+is needed and logs the missing migration; saved dashboard analytics still load.
+Existing jobs, users and scores are retained. Before the next matching run, deploy
 the hosted endpoint and migration using the backup-producing offline import below,
 then reload the web app. Do not edit applied migrations. An older runner still
 works with the migrated host; the new runner requires the new endpoint. To roll

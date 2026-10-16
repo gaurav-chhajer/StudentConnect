@@ -172,6 +172,10 @@ def create_app(database_path=None, upload_dir=None):
                 JOIN companies c ON c.id=sub.company_id WHERE sub.user_id=? ORDER BY c.name,c.id LIMIT 1000""", (data["user"]["id"],)).fetchall()
         if getattr(g, "account", None) and g.account["is_admin"]:
             conn = connection()
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone() is None:
+                application.logger.error("Admin key history unavailable: apply migration 008_groq_key_history.sql")
+                data["groq_history_unavailable"] = True
+                return render("dashboard", data)
             runs = conn.execute("""SELECT id,run_id,started_at,outcome FROM groq_key_history
                 WHERE key_slot=1 AND (?=0 OR id<?) ORDER BY id DESC LIMIT 21""",
                 (history_before, history_before)).fetchall()
