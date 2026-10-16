@@ -321,9 +321,10 @@ class CloudEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(response.json['eligible'])
 
-    def test_catalog_includes_unavailable_companies_but_rejects_subscription(self):
+    def test_admin_catalog_includes_unavailable_companies_but_rejects_subscription(self):
         self.conn.execute("INSERT INTO companies(name,ats_type,board_slug,career_source,active) VALUES('ICICI Bank','greenhouse','career-site-icici','icici',0)")
         identifier = self.conn.execute("SELECT id FROM companies WHERE career_source='icici'").fetchone()[0]
+        self.conn.execute("UPDATE accounts SET is_admin=1 WHERE user_id=1")
         self.conn.commit()
         with self.client.session_transaction() as session:
             session['user_id'], session['session_version'] = 1, 0

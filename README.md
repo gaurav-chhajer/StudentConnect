@@ -563,16 +563,20 @@ advertised count changed during collection; Netflix repeated some paginated IDs.
 Validated observations were retained with warnings under the existing ingestion
 policy; these checks do not establish complete, stable worldwide snapshots.
 
-Microsoft's public search endpoint returned HTTP 429 during verification. Meta's
-public page did not expose a verified listing feed. Both are listed as
-"Automatic fetching unavailable" and cannot be subscribed to; no access checks
-or rate limits are bypassed.
+Microsoft's current public `/api/pcsx/search` protocol and structured full
+job descriptions are supported with offline tests. Single-page live checks passed,
+but the subsequent full-feed check returned HTTP 429, so Microsoft remains
+unavailable pending successful end-to-end verification. Meta's public page still
+has no verified listing connector. No access checks or rate limits are bypassed.
 
-Target companies now offers case-insensitive name search across the whole catalog.
+Target companies offers case-insensitive name search. Disabled companies are
+visible only to admins in Settings and dashboard subscriptions; regular users see
+active companies only. Disabled companies cannot be subscribed to, including by
+admins.
 It initially shows 12 entries; **View more** reveals 12 more at a time, and
 **View fewer** collapses the list. Searching and collapsing preserve checkbox
 selections, including selections outside the visible results. Without JavaScript,
-all companies remain visible. Picker checks: `node tests/test_company_picker.cjs`.
+all companies permitted for the signed-in account remain visible. Picker checks: `node tests/test_company_picker.cjs`.
 Lever snapshots omit duplicate HTML fields only when usable plain versions
 exist; complete descriptions, requirement lists and employment metadata remain.
 This brings the verified Paytm snapshot below the existing 2 MiB transfer limit.
@@ -597,14 +601,15 @@ require structured source data; leave those filters empty for sources without it
 
 Full live checks passed for Postman, Cvent, ZS, JioStar, Publicis Sapient, DP World,
 IDFC FIRST Bank, Bank of America, Morgan Stanley, Barclays and Nomura during
-development. Wipro's latest check rejected a changing listing count; JPMorgan's
-latest complete pagination returned duplicate job identifiers and its snapshot
-was withheld. Those connectors have offline tests, but complete live snapshots
-remain unverified. Newly imported Wipro and JPMorgan entries are inactive and
-appear as "Automatic fetching unavailable" until verified. Existing company
-activation choices are preserved by the import. The adapters remain accessible
-through the explicit read-only check command. A source failure
-is logged and retains prior jobs; it is not reported as a successful empty board.
+development. Wipro and JPMorgan passed new live listing, transfer-size and
+full-description checks using the existing additive observation policy. Wipro
+returned 1,671 eligible jobs; JPMorgan returned 205. Both runs retained incomplete
+observations because listing counts changed, and Wipro repeated IDs. These are
+validated observations, not complete worldwide snapshots. Both sources are now
+enabled on import, including existing inactive catalog rows; other companies'
+activation choices are preserved. A source failure retains prior jobs and is
+not reported as a successful empty board. Run the backed-up offline company
+import described below and reload the app to apply activation to a hosted catalog.
 
 Paginated career feeds use additive observations rather than complete snapshots.
 Validated pages collected before a timeout or pagination failure are retained with
@@ -622,7 +627,7 @@ snapshot behavior, including closure on successful empty results. Wipro uses the
 site's date sort. Paginated sources can retain closed jobs until closure is confirmed
 independently; absence from a crawl is not proof of closure. Automatic detail-page
 closure is deferred until removed-job responses are verified. Existing activation
-choices, including inactive Wipro/JPMorgan imports, remain unchanged.
+choices are preserved except for the requested Wipro/JPMorgan activation on import.
 
 The 6:30 AM / 6:30 PM fetch and 8:00 AM email schedules,
 runner-minute caps, authentication and email safeguards are unchanged. Large

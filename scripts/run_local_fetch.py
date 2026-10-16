@@ -45,6 +45,9 @@ def seed_companies(conn):
         inserted += cur.rowcount
         if conn.execute('SELECT 1 FROM companies WHERE career_source=?', (key,)).fetchone() is None:
             raise ValueError('Career catalog key conflicts with an existing ATS record')
+    # These feeds now pass live listing and full-description validation using
+    # the existing additive observation policy. Enable their saved catalog rows.
+    conn.execute("UPDATE companies SET active=1 WHERE career_source IN ('wipro','jpmorgan') AND active=0")
     conn.commit()
     print(f"Seeded {inserted} new companies.\n")
 

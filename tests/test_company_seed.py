@@ -90,7 +90,23 @@ class CompanySeedTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT name,active FROM companies WHERE career_source IN ('icici','futuresfirst') ORDER BY name").fetchall(),
                              [('Futures First', 0), ('ICICI Bank', 0)])
             self.assertEqual(conn.execute("SELECT name,active FROM companies WHERE career_source IN ('wipro','jpmorgan') ORDER BY name").fetchall(),
-                             [('JPMorgan Chase', 0), ('Wipro', 0)])
+                             [('JPMorgan Chase', 1), ('Wipro', 1)])
+
+    def test_verified_source_activation_preserves_other_disabled_companies(self):
+        with closing(sqlite3.connect(':memory:')) as conn:
+            conn.executescript(SCHEMA)
+            apply_migrations(conn)
+            with redirect_stdout(io.StringIO()):
+                seed_companies(conn)
+            conn.execute("UPDATE companies SET active=0 WHERE career_source IN ('wipro','jpmorgan','pwc')")
+            with redirect_stdout(io.StringIO()):
+                seed_companies(conn)
+                seed_companies(conn)
+            states = dict(conn.execute('SELECT career_source,active FROM companies WHERE career_source IS NOT NULL'))
+            self.assertEqual(states['wipro'], 1)
+            self.assertEqual(states['jpmorgan'], 1)
+            for key in ('pwc', 'icici', 'futuresfirst', 'microsoft', 'meta'):
+                self.assertEqual(states[key], 0)
 
     def test_offline_import_backs_up_before_migration_without_overwriting_backups(self):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent, prefix='tmp-company-') as directory:

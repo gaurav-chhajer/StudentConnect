@@ -277,6 +277,56 @@ class WebFlowTests(unittest.TestCase):
         self.assertEqual(script.status_code, 200)
         self.assertNotIn("script-src", script.headers["Content-Security-Policy"])
 
+    def test_disabled_companies_are_visible_only_to_admins(self):
+        self.seed_user()
+        self.conn.execute("UPDATE companies SET active=0 WHERE id=2")
+        self.conn.execute("INSERT INTO company_subscriptions(user_id,company_id,subscribed_at) VALUES(1,1,'2026-10-16T00:00:00+00:00')")
+        self.conn.execute("INSERT INTO company_subscriptions(user_id,company_id,subscribed_at) VALUES(1,2,'2026-10-16T00:00:00+00:00')")
+        self.conn.commit()
+        for admin in (0, 1, 0):
+            self.conn.execute('UPDATE accounts SET is_admin=? WHERE user_id=1', (admin,))
+            self.conn.commit()
+            for path in ('/', '/settings'):
+                with self.subTest(admin=admin, path=path):
+                    page = self.client.get(path)
+                    self.assertEqual(page.status_code, 200)
+                    section = re.search(rb'<section[^>]*id="companies"[^>]*>(.*?)</section>', page.data, re.S)
+                    self.assertIsNotNone(section)
+                    self.assertIn(b'>Alpha<', section.group(1))
+                    if admin:
+                        self.assertIn(b'>Beta<', section.group(1))
+                        if path == '/settings':
+                            self.assertRegex(section.group(1), rb'name="companies" value="2" checked\s+disabled')
+                            self.assertIn(b'Automatic fetching unavailable', section.group(1))
+                    else:
+                        self.assertNotIn(b'Beta', page.data)
+                        self.assertNotIn(b'Automatic fetching unavailable', page.data)
+            response = self.post('/settings', self.settings_data(companies=['2']))
+            self.assertEqual(response.status_code, 400)
+            if not admin:
+                self.assertNotIn(b'Beta', response.data)
+            self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM company_subscriptions WHERE user_id=1').fetchone()[0], 2)
+        page = self.client.get('/settings')
+        self.assertIn(b'>Alpha<', page.data)
+        self.assertNotIn(b'Beta', page.data)
+
+    def test_target_companies_show_names_without_source_details(self):
+        self.seed_user()
+        self.conn.execute("UPDATE companies SET career_source='google' WHERE id=2")
+        self.conn.commit()
+        self.post('/settings', self.settings_data(companies=['1', '2']))
+        for path in ('/', '/settings'):
+            with self.subTest(path=path):
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                section = re.search(rb'<section[^>]*id="companies"[^>]*>(.*?)</section>', page.data, re.S)
+                self.assertIsNotNone(section)
+                content = section.group(1)
+                self.assertIn(b'>Alpha<', content)
+                self.assertIn(b'>Beta<', content)
+                for source in (b'lever', b'greenhouse', b'career site', b'google', b' / alpha', b' / beta'):
+                    self.assertNotIn(source, content)
+
     def test_company_search_preserves_selected_companies_and_uses_script_nonce(self):
         self.seed_user()
         self.post('/settings', self.settings_data(companies=['2']))

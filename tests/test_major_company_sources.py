@@ -154,8 +154,47 @@ class MajorCompanySourceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     sources.fetch('netflix')
 
+    def test_microsoft_search_pagination_and_full_description(self):
+        item = dict(id=123, positionUrl='/careers/job/123', name='Engineer',
+                    locations=['Bengaluru, India'], postedTs=1234, department='Engineering')
+        def payload(items):
+            return dict(status=200, error=dict(message='', body=''), data=dict(count=2, positions=items))
+        pages = [payload([item]), payload([dict(item, id=124, positionUrl='/careers/job/124')])]
+        with patch.object(sources.Feed, 'json', side_effect=pages) as request:
+            jobs = sources.fetch('microsoft')
+        self.assertEqual([row['external_id'] for row in jobs], ['123', '124'])
+        self.assertEqual(request.call_args.args[0], '/api/pcsx/search')
+        self.assertEqual(request.call_args.kwargs['params']['start'], 1)
+        candidate = self.candidate('microsoft', '123', jobs[0]['url'])
+        candidate['location'] = jobs[0]['location']
+        detail = dict(title='Engineer', url=jobs[0]['url'], description='<p>Full requirements tail</p>',
+                      employmentType='FULL_TIME', **{'@type': 'JobPosting'})
+        def html(value):
+            return '<script type="application/ld+json">' + json.dumps(value) + '</script>'
+        with patch.object(sources.Feed, 'request', return_value=html(detail)):
+            prepared = sources.prepare_job(candidate)
+        self.assertIn('Full requirements tail', json.loads(prepared['raw_json'])['descriptionHtml'])
+        self.assertEqual(prepared['location'], 'Bengaluru, India')
+        self.assertEqual(json.loads(prepared['raw_json'])['employmentType'], 'FULL_TIME')
+        for changed in (dict(detail, url='https://example.test/wrong'), dict(detail, title='Other'),
+                        dict(detail, description='')):
+            with self.subTest(detail=changed), patch.object(sources.Feed, 'request', return_value=html(changed)):
+                with self.assertRaises(ValueError):
+                    sources.prepare_job(candidate)
+        for changed in (dict(item, id=True), dict(item, positionUrl='/careers/job/999'),
+                        dict(item, locations=['India', None])):
+            with self.subTest(item=changed), patch.object(sources.Feed, 'json', return_value=payload([changed])):
+                with self.assertRaises(ValueError):
+                    sources.fetch('microsoft')
+        with patch.object(sources.Feed, 'json', return_value=dict(status=429, error='limited')):
+            with self.assertRaises(ValueError):
+                sources.fetch('microsoft')
+        with patch.object(sources.Feed, 'json', return_value=dict(status=200, error=dict(message='', body=''),
+                                                                  data=dict(count=0, positions=[]))):
+            self.assertEqual(sources.fetch('microsoft'), [])
+
     def test_unavailable_sources_make_no_requests(self):
-        for key in ('meta', 'microsoft'):
+        for key in ('meta', 'icici', 'futuresfirst'):
             with patch.object(sources.requests.Session, 'request') as request:
                 with self.assertRaises(ValueError):
                     sources.fetch(key)

@@ -39,7 +39,7 @@ SOURCES = {
     'amazon': ('Amazon (India)', 'amazon', 'https://www.amazon.jobs'),
     'apple': ('Apple (India)', 'apple', 'https://jobs.apple.com'),
     'netflix': ('Netflix', 'eightfold', 'https://explore.jobs.netflix.net'),
-    'microsoft': ('Microsoft', 'blocked', 'https://apply.careers.microsoft.com'),
+    'microsoft': ('Microsoft', 'pcsx', 'https://apply.careers.microsoft.com'),
     'meta': ('Meta', 'blocked', 'https://www.metacareers.com'),
 }
 WORKDAY = {'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
@@ -47,7 +47,7 @@ WORKDAY = {'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
 ORACLE = {'dpworld': 'CX_1', 'jpmorgan': 'CX_1001'}
 # Keep the adapters available for explicit read-only verification, but do not
 # enable new subscriptions until live listing and full-description checks pass.
-UNVERIFIED_SOURCES = frozenset(('wipro', 'jpmorgan'))
+UNVERIFIED_SOURCES = frozenset(('microsoft',))
 
 
 class Page(HTMLParser):
@@ -397,6 +397,26 @@ def _listings(feed, rows=None):
                 batch.append(job(key, identifier, item['postingTitle'], apple_location(item),
                                  origin + '/en-us/details/' + identifier.removeprefix('PIPE-') + '/' + slug,
                                  version=[item.get('postDateInGMT'), item.get('jobSummary')]))
+        elif kind == 'pcsx':
+            payload = feed.json('/api/pcsx/search', params=dict(
+                domain='microsoft.com', query='', location='', start=len(rows)))
+            if payload.get('status') != 200 or payload.get('error') != {'message': '', 'body': ''}:
+                raise ValueError('Microsoft career search reported an error')
+            data = payload['data']
+            count, items = total(data['count']), data['positions']
+            batch = []
+            for item in items:
+                identifier = item['id']
+                if type(identifier) is not int or identifier <= 0:
+                    raise ValueError('Microsoft career identifier is invalid')
+                path = '/careers/job/' + str(identifier)
+                if item['positionUrl'] != path:
+                    raise ValueError('Microsoft career URL does not match its identifier')
+                locations = item['locations']
+                if not isinstance(locations, list) or any(not isinstance(place, str) for place in locations):
+                    raise ValueError('Microsoft career locations are invalid')
+                batch.append(job(key, identifier, item['name'], '; '.join(locations) or None,
+                                 origin + path, version=item.get('postedTs'), department=item.get('department')))
         elif kind == 'eightfold':
             payload = feed.json('/api/apply/v2/jobs', params=dict(domain='netflix.com', start=len(rows), num=10))
             count, items = total(payload['count']), payload['positions']
@@ -570,6 +590,16 @@ def prepare_job(job_row, deadline=None):
             title, location = detail['postingTitle'], apple_location(detail)
             # Apple's jobType identifies retail/corporate roles, not employment type.
             employment = raw.get('employmentType')
+        elif kind == 'pcsx':
+            expected_url = feed.origin + '/careers/job/' + result['external_id']
+            if result['url'] != expected_url or not result['external_id'].isascii() or not result['external_id'].isdigit():
+                raise ValueError('Microsoft career detail identity is invalid')
+            detail = structured_job(feed.request(expected_url))
+            if detail.get('url') != expected_url:
+                raise ValueError('Microsoft career detail identity changed')
+            description, title = detail['description'], detail['title']
+            location = result.get('location')
+            employment = detail.get('employmentType')
         elif kind == 'workday':
             tenant, site = WORKDAY[key]
             path = urlsplit(result['url']).path
