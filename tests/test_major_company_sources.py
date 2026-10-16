@@ -142,6 +142,28 @@ class MajorCompanySourceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 sources.fetch('amazon')
 
+    def test_amazon_accepts_sf_identifiers_and_validates_their_urls(self):
+        item = dict(id_icims='SF260123206',
+                    job_path='/en/jobs/SF260123206/customer-service-associate-delhi-india',
+                    country_code='IND', title='Customer Service Associate', location='Delhi, India',
+                    description='Full job description', basic_qualifications='Required qualifications')
+        with patch.object(sources.Feed, 'json', return_value=dict(hits=1, jobs=[item])):
+            jobs = sources.fetch('amazon')
+        self.assertEqual(jobs[0]['external_id'], 'SF260123206')
+        self.assertEqual(jobs[0]['url'], 'https://www.amazon.jobs' + item['job_path'])
+        for identifier in ('SF', 'SF123/456', 'SF１２３', '../123', '', 123):
+            with self.subTest(identifier=identifier), patch.object(
+                    sources.Feed, 'json', return_value=dict(hits=1, jobs=[dict(
+                        item, id_icims=identifier, job_path='/en/jobs/' + str(identifier) + '/engineer')])):
+                with self.assertRaises(ValueError):
+                    sources.fetch('amazon')
+        for changed in (dict(item, job_path='/en/jobs/SF999/engineer'), dict(item, country_code='USA'),
+                        dict(item, description=''), dict(item, basic_qualifications=None)):
+            with self.subTest(changed=changed), patch.object(
+                    sources.Feed, 'json', return_value=dict(hits=1, jobs=[changed])):
+                with self.assertRaises(ValueError):
+                    sources.fetch('amazon')
+
     def test_netflix_pagination_and_invalid_locations(self):
         item = dict(id=123, name='Engineer', locations=['Mumbai,India'], t_update=100)
         pages = [dict(count=2, positions=[item]), dict(count=2, positions=[dict(item, id=124)])]

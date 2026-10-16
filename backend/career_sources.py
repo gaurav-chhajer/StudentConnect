@@ -441,7 +441,8 @@ def _listings(feed, rows=None):
             for item in items:
                 identifier = item['id_icims']
                 path = item['job_path']
-                if (not isinstance(identifier, str) or not identifier.isascii() or not identifier.isdigit() or
+                # Amazon also publishes customer-service listings with SF-prefixed IDs.
+                if (not isinstance(identifier, str) or not re.fullmatch(r'(?:SF)?[0-9]+', identifier) or
                         not isinstance(path, str) or not path.startswith('/en/jobs/' + identifier + '/') or
                         item.get('country_code') != 'IND'):
                     raise ValueError('Amazon career identity or location is invalid')
