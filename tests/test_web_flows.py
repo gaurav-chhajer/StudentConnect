@@ -112,10 +112,14 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(path)
                 self.assertEqual(page.status_code, 200)
                 controls = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">[^<]+</span>', page.data)
+                if path == '/settings':
+                    controls += re.findall(rb'<input\b[^>]*id="(?:roles-input|stipend-input)"[^>]*>', page.data)
                 names = {match.group(1).decode() for control in controls
                          if (match := re.search(rb'name="([^\"]+)"', control))}
                 self.assertTrue(expected.issubset(names))
                 if path == '/settings':
+                    self.assertIn(b'for="roles-input">Target roles</label>', page.data)
+                    self.assertIn(b'for="stipend-input">Minimum annual stipend</label>', page.data)
                     self.assertIn(b'value="Owner &lt;test&gt;"', page.data)
                     self.assertIn(b'readonly required', page.data)
                     self.assertIn(b'aria-describedby="stipend-help"', page.data)
@@ -210,7 +214,8 @@ class WebFlowTests(unittest.TestCase):
                 if route == "/settings":
                     self.assertEqual(response.data.count(b"<script"), 3)
                     self.assertIn(b'src="/static/js/companies.js"', response.data)
-                    self.assertIn(b'src="/static/js/locations.js"', response.data)
+                    self.assertIn(b'src="/static/js/preferences.js"', response.data)
+                    self.assertIn(b'href="/static/css/preferences.css"', response.data)
                 else:
                     self.assertEqual(response.data.count(b"<script"), 1)
                 self.assertNotIn(b"Scheduled sending is not connected yet", response.data)
@@ -306,8 +311,9 @@ class WebFlowTests(unittest.TestCase):
         page = self.client.get("/settings")
         fields = re.findall(rb'<input\b[^>]*name="locations"[^>]*>', page.data)
         self.assertEqual(len(fields), 4)
-        self.assertEqual(sum(b'type="hidden"' not in field for field in fields), 1)
-        self.assertIn(b'id="location-input"', fields[0])
+        visible_fields = [field for field in fields if b'type="hidden"' not in field]
+        self.assertEqual(len(visible_fields), 1)
+        self.assertIn(b'id="location-input"', visible_fields[0])
         self.assertIn(b'aria-label="Remove Bengaluru"', page.data)
         self.assertIn(b'value="&lt;script&gt;unsafe&lt;/script&gt;"', page.data)
         self.assertNotIn(b'<script>unsafe</script>', page.data)
@@ -322,7 +328,7 @@ class WebFlowTests(unittest.TestCase):
         nonces = []
         for _ in range(2):
             page = self.client.get("/settings")
-            nonce = re.search(rb'<script src="/static/js/locations.js" nonce="([^"]+)" defer>', page.data)
+            nonce = re.search(rb'<script src="/static/js/preferences.js" nonce="([^"]+)" defer>', page.data)
             self.assertIsNotNone(nonce)
             value = nonce.group(1).decode()
             nonces.append(value)
@@ -334,10 +340,14 @@ class WebFlowTests(unittest.TestCase):
             self.assertNotIn("script-src 'self'", policy)
             self.assertNotIn("script-src 'unsafe-inline'", policy)
         self.assertNotEqual(nonces[0], nonces[1])
-        script = self.client.get("/static/js/locations.js")
+        script = self.client.get("/static/js/preferences.js")
         self.addCleanup(script.close)
         self.assertEqual(script.status_code, 200)
         self.assertNotIn("script-src", script.headers["Content-Security-Policy"])
+        stylesheet = self.client.get('/static/css/preferences.css')
+        self.addCleanup(stylesheet.close)
+        self.assertEqual(stylesheet.status_code, 200)
+        self.assertEqual(stylesheet.mimetype, 'text/css')
 
     def test_disabled_companies_are_visible_only_to_admins(self):
         self.seed_user()
@@ -561,9 +571,16 @@ class WebFlowTests(unittest.TestCase):
                 preferences = self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0]
                 self.assertEqual(json.loads(preferences)['min_stipend'], int(amount) if amount else None)
                 page = self.client.get('/settings')
-                self.assertIn(b'Minimum annual stipend (INR)', page.data)
+                self.assertIn(b'for="stipend-input">Minimum annual stipend</label>', page.data)
+                self.assertIn(b'&#8377;</span>', page.data)
                 self.assertIn(b'Enter the amount per year, up to 1 crore', page.data)
-                self.assertIn(('name="min_stipend" type="number" min="0" max="10000000" value="' + amount + '"').encode(), page.data)
+                field = re.search(rb'<input\b[^>]*id="stipend-input"[^>]*>', page.data)
+                self.assertIsNotNone(field)
+                attributes = dict(re.findall(rb'([\w-]+)="([^"]*)"', field.group(0)))
+                for key, value in {b'name': b'min_stipend', b'type': b'number', b'min': b'0',
+                                   b'max': b'10000000', b'inputmode': b'numeric',
+                                   b'value': amount.encode(), b'aria-describedby': b'stipend-help'}.items():
+                    self.assertEqual(attributes.get(key), value)
                 self.assertEqual(self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0], preferences)
         self.post('/settings', self.settings_data(min_stipend='10000000'))
         saved = self.conn.execute('SELECT preferences_json FROM users WHERE id=1').fetchone()[0]
