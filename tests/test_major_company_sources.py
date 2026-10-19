@@ -4,6 +4,8 @@ import json
 import unittest
 from unittest.mock import patch
 
+import requests
+
 from backend import career_sources as sources
 
 
@@ -52,7 +54,32 @@ class MajorCompanySourceTests(unittest.TestCase):
             jobs = sources.fetch('pwc')
         self.assertEqual([item['external_id'] for item in jobs], ['123WD'])
         self.assertIn('Incomplete observations retained: source=pwc rows=1 error=KeyError', ' '.join(logs.output))
+        self.assertIn('reason=invalid_response_shape page=2 expected=2 advertised=0', ' '.join(logs.output))
+        self.assertIn('location=_listings:', ' '.join(logs.output))
         close.assert_called_once()
+
+    def test_google_partial_diagnostics_distinguish_count_parsing_and_deadline(self):
+        first = '<span class="SWhIm">2</span> jobs matched' + google_card()
+        cases = [
+            ('<span class="SWhIm">3</span> jobs matched' + google_card('124'),
+             'listing_count_changed_or_invalid_items', 'advertised=3 batch_rows=1'),
+            ('<html>Unavailable</html>', 'google_count_missing', 'advertised=None batch_rows=None'),
+            (ValueError('Career feed time budget exhausted; snapshot withheld'),
+             'deadline_exhausted', 'advertised=None batch_rows=None'),
+            (requests.Timeout('private-response-token'), 'request_failed', 'http_status=unavailable'),
+            (ValueError('private-response-token'), 'validation_failed', 'http_status=unavailable'),
+        ]
+        for second, reason, detail in cases:
+            with self.subTest(reason=reason), patch.object(sources.Feed, 'request', side_effect=[first, second]), \
+                    patch.object(sources.Feed, 'close') as close, \
+                    self.assertLogs('backend.career_sources', level='WARNING') as logs:
+                jobs = sources.fetch('google')
+            self.assertEqual(len(jobs), 1)
+            output = ' '.join(logs.output)
+            self.assertIn('reason=' + reason + ' page=2 expected=2', output)
+            self.assertIn(detail, output)
+            self.assertNotIn('private-response-token', output)
+            close.assert_called_once()
 
     def test_google_paginates_and_preserves_complete_nested_description(self):
         compact = google_card().replace('Ki3IFe', 'QJPWVe').replace('123-engineer"', '123-engineer?page=1"')

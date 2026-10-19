@@ -164,6 +164,30 @@ class HybridEndpointTests(unittest.TestCase):
         rows = self.conn.execute('SELECT state,outcome FROM groq_key_history').fetchall()
         self.assertTrue(all(row['state'] == 'rate_limited' and row['outcome'] == 'deferred' for row in rows))
 
+    def test_later_runs_skip_scores_saved_before_rate_limit_interruption(self):
+        status, _ = self.run_matching([test_evaluation.sample_result()] + [http_error(429)] * 3)
+        self.assertEqual(status, 1)
+        saved_job = self.conn.execute('SELECT job_id FROM scores WHERE is_stale=0').fetchone()[0]
+
+        status, evaluate = self.run_matching([test_evaluation.sample_result()])
+        self.assertEqual(status, 0)
+        evaluate.assert_called_once()
+        self.assertNotEqual(evaluate.call_args.args[1]['id'], saved_job)
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 2)
+
+        status, evaluate = self.run_matching([])
+        self.assertEqual(status, 0)
+        evaluate.assert_not_called()
+
+    def test_worker_modes_use_extended_deadlines(self):
+        for mode, seconds in (('fetch', 20 * 60), ('matching', 50 * 60)):
+            with self.subTest(mode=mode), patch.object(runner, 'HostedClient') as client, \
+                    patch.object(runner.time, 'monotonic', return_value=100), \
+                    patch.object(runner, 'fetch_and_score', return_value=0) as run:
+                self.assertEqual(runner.main([mode]), 0)
+                run.assert_called_once_with(client.return_value, 100 + seconds, fetch_only=mode == 'fetch')
+                client.return_value.close.assert_called_once()
+
     def test_missing_slot_is_skipped_and_each_run_restarts_at_key_one(self):
         status, evaluate = self.run_matching([http_error(429), test_evaluation.sample_result(),
                                              test_evaluation.sample_result()], keys=('', 'synthetic-3'))

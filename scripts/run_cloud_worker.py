@@ -19,8 +19,8 @@ from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, 
 from backend.job_ingestion import deduplicate, mode_for_source, observation_batches
 
 logger = logging.getLogger(__name__)
-MATCHING_SECONDS = 35 * 60
-FETCH_SECONDS = 7 * 60
+MATCHING_SECONDS = 50 * 60
+FETCH_SECONDS = 20 * 60
 EMAIL_SECONDS = 7 * 60
 MAX_SCORES = 100
 MAX_ACCOUNTS = 1000

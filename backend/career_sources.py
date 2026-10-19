@@ -95,6 +95,7 @@ class Feed:
         if key not in SOURCES or SOURCES[key][1] == 'blocked':
             raise ValueError('Career source is not verified for automated fetching')
         self.key, self.origin, self.deadline = key, SOURCES[key][2], deadline
+        self.progress = dict(page=None, expected=None, advertised=None, batch_rows=None)
         self.session = requests.Session()
 
     def request(self, path, *, data=None, params=None):
@@ -307,8 +308,37 @@ def fetch(key, deadline=None):
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:
             if mode != 'observed' or not rows:
                 raise
+            # Only fixed local messages are safe; external exception text can
+            # contain response bodies, URLs or credentials. Local raise sites
+            # identify other validation failures without exposing those values.
+            reasons = {
+                'Career feed time budget exhausted; snapshot withheld': 'deadline_exhausted',
+                'Career response exceeded its size or time budget': 'response_size_or_deadline_exceeded',
+                'Career listing count changed; snapshot withheld': 'listing_count_changed_or_invalid_items',
+                'Career pagination ended before the advertised count': 'pagination_ended_early',
+                'Career pagination returned too many jobs': 'pagination_exceeded_count',
+                'Career pagination limit reached; snapshot withheld': 'page_limit_reached',
+                'Google career result count is unavailable': 'google_count_missing',
+                'Google result identity is unavailable': 'google_identity_missing',
+                'Google result card is incomplete': 'google_card_incomplete',
+                'Workday job path is invalid': 'workday_path_invalid',
+            }
+            reason = (reasons.get(error.args[0], 'validation_failed')
+                      if type(error) is ValueError and len(error.args) == 1 and isinstance(error.args[0], str)
+                      else 'request_failed' if isinstance(error, requests.RequestException) else 'invalid_response_shape')
+            location = 'unavailable'
+            trace = error.__traceback__
+            while trace is not None:
+                if trace.tb_frame.f_code.co_filename == __file__:
+                    location = '%s:%s' % (trace.tb_frame.f_code.co_name, trace.tb_lineno)
+                trace = trace.tb_next
+            response = error.response if isinstance(error, requests.RequestException) else None
             logging.getLogger(__name__).warning(
-                'Incomplete observations retained: source=%s rows=%s error=%s', key, len(rows), type(error).__name__)
+                'Incomplete observations retained: source=%s rows=%s error=%s reason=%s '
+                'page=%s expected=%s advertised=%s batch_rows=%s location=%s http_status=%s',
+                key, len(rows), type(error).__name__, reason, feed.progress['page'],
+                feed.progress['expected'], feed.progress['advertised'], feed.progress['batch_rows'],
+                location, response.status_code if response is not None else 'unavailable')
         if len(rows) > MAX_LISTINGS or mode == 'snapshot' and len({row['external_id'] for row in rows}) != len(rows):
             raise ValueError('Career snapshot is oversized or contains duplicate jobs')
         if mode == 'observed' and len({row['external_id'] for row in rows}) != len(rows):
@@ -353,11 +383,13 @@ def _listings(feed, rows=None):
             rows.append(job(key, slug, slug.replace('-', ' '), None, urljoin(origin, path)))
         return rows
     for page_number in range(MAX_PAGES):
+        feed.progress.update(page=page_number + 1, expected=expected, advertised=None, batch_rows=None)
         if kind == 'workday':
             tenant, site = WORKDAY[key]
             payload = feed.json(f'/wday/cxs/{tenant}/{site}/jobs',
                                 data=dict(appliedFacets={}, limit=20, offset=len(rows), searchText=''))
             count, items = total(payload['total']), payload['jobPostings']
+            feed.progress['advertised'] = count
             # Workday computes total only at offset zero. Subsequent pages
             # legitimately return total=0 alongside their jobPostings.
             if rows and count == 0:
@@ -378,6 +410,7 @@ def _listings(feed, rows=None):
             if match is None:
                 raise ValueError('Google career result count is unavailable')
             count = total(int(match[1].replace(',', '')))
+            feed.progress['advertised'] = count
             items = google_cards(text)
             batch = [job(key, identifier, title, location, url)
                      for identifier, title, location, url, _ in items]
@@ -534,6 +567,7 @@ def _listings(feed, rows=None):
                          urljoin(origin, entry[0])) for entry in links]
         else:
             raise ValueError('Unsupported career connector')
+        feed.progress['batch_rows'] = len(batch)
         if not isinstance(items, list) or expected is not None and expected != count:
             raise ValueError('Career listing count changed; snapshot withheld')
         expected = count

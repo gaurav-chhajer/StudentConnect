@@ -427,10 +427,11 @@ even when your PC is off. It targets fetching/scoring at **06:30 Asia/Kolkata**
 **08:00 Asia/Kolkata** (02:30 UTC). Evening openings are scored during the next
 morning run; the evening worker never scores or sends mail. GitHub schedules
 can be delayed or missed; these are target times, not delivery guarantees.
-The three jobs have 40-minute, 10-minute and 10-minute limits, including dependency
-setup: 31 scheduled triples use at most **1,860 job minutes**, leaving 140 of the
-2,000-minute allowance. Other workflows, reruns
-and other repositories using the same account consume the remaining allowance.
+The three jobs have 55-minute, 25-minute and 10-minute limits, including dependency
+setup: 31 scheduled triples can use up to **2,790 job minutes**, exceeding a
+2,000-minute allowance by 790 minutes if every job reaches its limit. Actual usage
+depends on run duration. Other workflows, reruns and other repositories using the
+same account also consume the allowance.
 Do not add frequent runs or automatic workflow retries. Configure a zero-spend
 GitHub Actions budget that stops usage at the free allowance, and monitor billing
 usage. Public scheduled workflows can be disabled after 60 days of inactivity.
@@ -455,7 +456,7 @@ Repeated keywords do not add points; ties use ascending job ID. Missing descript
 are logged and ranked using metadata until their selected posting is resolved.
 This ranking only prioritizes the five candidates: it does not assign a final fit
 score or permanently exclude lower-ranked jobs. It uses no external calls.
-Its own 35-minute matching, 7-minute evening
+Its own 50-minute matching, 20-minute evening
 fetch and 7-minute email budgets leave room within the job limits. The evening
 fetch needs neither Groq nor Gmail credentials on GitHub. Reaching a limit reports
 failure and defers unfinished work to another scheduled run. Transfers are limited to 2 MB;
@@ -481,6 +482,10 @@ uncertain writes are not retried. Completed scores are retained. Any failure
 still returns exit code 1. Logs include safe user/job IDs, operation stage and
 HTTP status, without response bodies or credentials; the completed scoring
 summary includes saved and failed candidate counts.
+Later matching runs skip jobs with a current saved score for that user, including
+after an interrupted run. Scores marked stale after resume or posting changes
+remain eligible for rescoring. Fetching reserves the final two minutes of its
+budget, leaving an 18-minute evening fetching window.
 The admin dashboard's **Groq key history** panel preserves three slot statuses per
 matching run, showing which keys hit HTTP 429. It includes run time (in the admin's
 saved timezone) and completion/defer status, with 20 runs per page and an older-runs
@@ -788,6 +793,48 @@ private backups and monitor storage limits and web-app expiry.
 
 Official setup: [Flask WSGI](https://help.pythonanywhere.com/pages/Flask/) and
 [Force HTTPS](https://help.pythonanywhere.com/pages/ForcingHTTPS/).
+
+## Automatic PythonAnywhere deployment from main
+
+`.github/workflows/deploy-pythonanywhere.yml` runs the offline tests on pushes to
+`main`, then updates `/home/GauravChhajer/StudentConnect` and requests a web reload.
+It uses the official [PythonAnywhere API](https://help.pythonanywhere.com/pages/API/)
+and works with an already running dedicated Bash console on the free account.
+Creating a console through the API does not start its process. If PythonAnywhere
+restarts or kills that console, reopen it in a browser before deploying again.
+
+One-time setup after pushing these files:
+
+1. Manually update the existing PythonAnywhere checkout once so it contains
+   `scripts/deploy_pythonanywhere.py`. Review `git status --short` first, then use
+   `git pull --ff-only origin main` from `/home/GauravChhajer/StudentConnect`.
+2. In PythonAnywhere **Account > API token**, generate a token. Store it only in
+   GitHub **Settings > Secrets and variables > Actions > Secrets** as
+   `PYTHONANYWHERE_API_TOKEN`. Do not paste it into code, chat or console commands.
+3. Open a dedicated **Bash** console and leave it at an empty prompt, with no
+   running command, partial input, virtual environment activation requirement or
+   interactive program. Get its numeric ID from its browser URL. In GitHub's
+   Actions **Variables**, add `PYTHONANYWHERE_CONSOLE_ID` with that number.
+   Keep this console dedicated to deployment; do not use it for other work.
+4. Run **Actions > Deploy PythonAnywhere > Run workflow**, selecting `main`.
+   Later pushes to `main` trigger deployment automatically. The initial push may
+   fail until the console, token and bootstrap checkout update are configured.
+
+Deployment accepts only the exact tested commit if it is still remote `main`.
+The hosted checkout must be clean, on `main`, and able to fast-forward. The script
+never resets, stashes, merges divergent history, installs dependencies or runs
+migrations. Changes to `requirements.txt` or `backend/migrations/` require manual
+dependency installation or backup/migration review before updating the checkout.
+Private runtime paths are blocked, and ignored files cannot be overwritten by
+the fast-forward. Existing databases, resumes and `.env` stay on the server.
+
+The workflow shares the scheduled workers' concurrency group. The hosted update
+also takes the existing pipeline lock. It polls one private, atomic result file
+at `data/deployment-status.json` for up to three minutes and reloads only after
+the exact run and commit report success. Failed or uncertain requests stop without
+automatic retries. If confirmation times out, inspect the hosted checkout before
+retrying: an update may have completed without a reload. Reload acknowledgement
+does not verify site health; check the website and PythonAnywhere error log.
 
 ## Remaining work
 
