@@ -9,7 +9,15 @@ The live pages adapt the latest references in `frontend/designs/animated/` with 
 shared navy sidebar, blue/coral theme, glass cards, illustrated page banners,
 company initial tiles, and reduced-motion support. Dashboard and Analytics
 sparklines use saved weekly scores and counts; unsupported mockup metrics remain
-identified as unavailable. The live effects use server-rendered SVG and CSS;
+identified as unavailable. All pages also use the canvas background adapted from
+`frontend/designs/backgrounds/StudentConnect – Match Constellation Background.html`.
+Its linked nodes, cursor scanner, glows and click ripples are decorative; labels
+show randomly generated 55–97% matches from the original design, unrelated to
+saved job-match scores. The animation uses
+at most 90 nodes and 12 ripples, pauses in hidden tabs, and becomes a static scene
+with reduced motion enabled. It uses local JavaScript with per-response CSP
+nonces, without enabling inline scripts or loading external services.
+Other live effects use server-rendered SVG and CSS;
 the reference React/Three.js runtimes are not loaded by the application. Fonts
 use local system fallbacks so the interface does not request external font services.
 
@@ -24,8 +32,11 @@ frontend/static/js/  Location picker and account-page effects
 frontend/designs/original/ Preserved earlier exports and unmodified runtimes
 frontend/designs/updated/  Preserved newer six *-html design references
 frontend/designs/animated/ Latest six *-html exports, including original CSS/JS/vendor files
+frontend/designs/root-exports/ Former root-level *-html references, preserved unchanged
+frontend/designs/backgrounds/ Original standalone background references
 scripts/             Explicit fetch, score, test-profile, and board-discovery commands
 tests/               Offline unittest suites
+tests/artifacts/     Preserved historical test reports (not current verification)
 data/boards/         Company-board CSV files
 data/jobs.db         Local SQLite database (ignored by Git)
 data/backups/        Database backups (ignored by Git)
@@ -40,7 +51,8 @@ repository root. Paths to the database and CSVs are anchored to the project,
 not the shell's working directory. Do not serve the repository as a static site.
 Design exports are reference files, not live templates. Edit `frontend/templates/`
 and `frontend/static/` for application changes. All design collections retain
-their original contents; root-level exports are also retained as supplied.
+their original contents; former root-level exports are retained unchanged under
+`frontend/designs/root-exports/`.
 Existing backend, script, test and private-data paths
 are unchanged; module commands still run from the repository root.
 
@@ -486,10 +498,10 @@ Later matching runs skip jobs with a current saved score for that user, includin
 after an interrupted run. Scores marked stale after resume or posting changes
 remain eligible for rescoring. Fetching reserves the final two minutes of its
 budget, leaving an 18-minute evening fetching window.
-The admin dashboard's **Groq key history** panel preserves three slot statuses per
-matching run, showing which keys hit HTTP 429. It includes run time (in the admin's
-saved timezone) and completion/defer status, with 20 runs per page and an older-runs
-link. Regular users receive no key history in their dashboard or email.
+The worker records three Groq key slot statuses per matching run, including which
+keys hit HTTP 429 and whether work completed or was deferred. The dashboard does
+not display a Groq limit or key-history container. History remains stored for
+diagnostics and is not included in email.
 History is retained without automatic deletion and grows by three small rows per run.
 Statuses describe observed evaluations, not live quotas or predicted reset times.
 Key labels identify slots, not accounts; replacing a secret does not relabel old runs.
@@ -705,6 +717,7 @@ can interrupt service. Keep private backups and monitor the PythonAnywhere app.
 ```powershell
 .\.venv\Scripts\python.exe -B -m unittest discover -s tests
 .\.venv\Scripts\python.exe -m pip check
+node tests/test_constellation.cjs
 ```
 
 Tests use temporary databases and mock HTTP calls. No formatter, linter, or type

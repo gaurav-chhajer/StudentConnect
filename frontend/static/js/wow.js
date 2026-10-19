@@ -23,13 +23,6 @@ $('.card,.kc,.jc').forEach(el=>{
   el.style.setProperty('--mx',e.clientX-r.left+'px');el.style.setProperty('--my',e.clientY-r.top+'px');
   if(tilt)el.style.transform='perspective(800px) rotateX('+(-y*7)+'deg) rotateY('+(x*9)+'deg) translateY(-3px)'});
  el.addEventListener('pointerleave',()=>{el.style.transform=''})});
-$('.btn.p').forEach(b=>{
- if(b.dataset.m||RM)return;b.dataset.m=1;
- b.addEventListener('pointermove',e=>{const r=b.getBoundingClientRect();b.style.transform='translate('+(e.clientX-r.left-r.width/2)*.12+'px,'+(e.clientY-r.top-r.height/2)*.18+'px)'});
- b.addEventListener('pointerleave',()=>{b.style.transform=''})});
-if(!RM&&!document.querySelector('.cursor-glow')){
- const g=document.createElement('div');g.className='cursor-glow';document.body.append(g);
- addEventListener('pointermove',e=>{g.style.transform='translate('+e.clientX+'px,'+e.clientY+'px)';g.classList.add('on')})}
 $('.auth-hero,.hero-banner[data-scene]').forEach(scene)}
 function scene(host){
  if(host.dataset['3']||!window.THREE||RM||matchMedia('(max-width:760px)').matches)return;host.dataset['3']=1;

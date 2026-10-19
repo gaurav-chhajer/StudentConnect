@@ -5,7 +5,7 @@
 {{ page_banner('Job matches','Find the roles that fit you','Filter your saved matches by company, location, job type, and score. Review the evidence before applying.',url_for('jobs') ~ '#match-list','Review matches',url_for('resume'),'Improve my resume','matches') }}
 {{ filter_form('jobs') }}<p class="sub">Job-type filtering uses fields supplied by the ATS. Postings without that field cannot match a specific type.</p>
 <details class="card" id="save-search"><summary>Save this search</summary><form method="post" action="{{ url_for('save_search') }}" class="fields">{{ csrf() }}
-<label class="field">Search name<input name="name" maxlength="80" required></label>
+<label class="field"><span class="inputbox"><input name="name" maxlength="80" required placeholder=" "><span class="input-label">Search name</span><i aria-hidden="true"></i></span></label>
 {% for name,value in [('q',search),('company',company),('min_score',min_score),('location',location),('job_type',job_type),('days',days),('sort',sort)] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<button class="btn p">Save search</button></form>
 <div class="chips">{% for item in saved_searches %}<a class="btn" href="{{ item.link }}">{{ item.name }}</a>{% endfor %}</div></details>
 <div class="split" id="match-list"><div class="list">{% for item in matches %}

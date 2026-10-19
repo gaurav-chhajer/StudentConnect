@@ -1,18 +1,6 @@
 {% extends 'base.html' %}{% from 'macros.html' import badge,filter_form,pagination,score_trend,page_banner,company_heading,sparkline with context %}
 {% block title %}Dashboard · StudentConnect{% endblock %}{% block content %}
 <div class="top2"><div><h1>{{ 'Welcome, ' ~ (user.name or 'Student') if user else 'Welcome to StudentConnect' }}</h1><p class="sub">Your job search at a glance.</p></div><a class="btn p" href="{{ url_for('resume') }}">{{ 'Update resume' if has_resume else 'Upload resume' }}</a></div>
-{% if is_account_admin %}<section class="card" id="groq-history" aria-labelledby="groq-history-title">
-<h2 id="groq-history-title">Groq key history</h2>
-{% if groq_history_unavailable %}<p class="notice" role="status">Groq key history is unavailable until the database update is applied. Your saved matches and analytics remain available.</p>
-{% else %}
-<p class="sub">Admin only. Each run starts with Key 1 and advances after HTTP 429. A recorded limit applies to that run; this is not a live quota check. Key labels refer to secret slots, including after a key is replaced. Times: {{ groq_history_zone }}.</p>
-{% set key_labels = {'not_configured':'Not configured','not_attempted':'Not attempted','attempting':'Attempt started; result not yet recorded','succeeded':'Evaluation succeeded','rate_limited':'Rate limit hit (HTTP 429)','failed':'Evaluation failed (not a recorded rate limit)'} %}
-{% set run_labels = {'running':'Run not yet completed','complete':'Completed','deferred':'Unfinished work deferred'} %}
-{% for run in groq_history %}<div class="li"><div><strong>{{ run.display_time }}</strong><p class="sub">{{ run_labels[run.outcome] }}</p>
-<ul>{% for key in run['keys'] %}<li><strong>Key {{ key.key_slot }}:</strong> {{ key_labels[key.state] }}</li>{% endfor %}</ul></div></div>
-{% else %}<p class="sub">No matching run history recorded yet.</p>{% endfor %}
-<div class="actions"><a class="btn" href="{{ url_for('dashboard') }}#groq-history">Latest runs</a>{% if groq_history_next %}<a class="btn" href="{{ url_for('dashboard',history_before=groq_history_next) }}#groq-history">Older runs</a>{% endif %}</div>
-{% endif %}</section>{% endif %}
 {% if user and metrics %}
 {{ page_banner('Your matches',metrics.total|string ~ (' current match for your resume' if metrics.total == 1 else ' current matches for your resume'),'Review saved matches from your target companies and see where your skills fit.',url_for('jobs'),'Review matches',url_for('resume'),'Improve my resume','matches') }}
 <section class="kpis"><div class="card k spark-card"><div class="l">Matches scored in the last 7 days</div><div class="v">{{ metrics.recent }}</div>{{ sparkline(trend,'count') }}</div>

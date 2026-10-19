@@ -4,8 +4,8 @@
 {% set tracked = application_counts.values()|sum %}{% set interviews = application_counts.get('interview',0) %}{% set offers = application_counts.get('offer',0) %}
 {{ page_banner('Your pipeline',tracked|string ~ (' application tracked' if tracked == 1 else ' applications tracked'),interviews|string ~ (' interview and ' if interviews == 1 else ' interviews and ') ~ offers|string ~ (' offer recorded.' if offers == 1 else ' offers recorded.') ~ ' Keep each stage up to date.',url_for('jobs'),'Find more roles',url_for('analytics'),'See analytics','applications') }}
 <details class="card" id="add"><summary>Add an application</summary><form method="post" class="page-form spaced">{{ csrf() }}<div class="fields">
-<label class="field">Role<input name="title" maxlength="200" required></label><label class="field">Company<input name="company_name" maxlength="200" required></label>
-<label class="field">Job URL (optional)<input name="url" type="url" maxlength="2000"></label>
+<label class="field"><span class="inputbox"><input name="title" maxlength="200" required placeholder=" "><span class="input-label">Role</span><i aria-hidden="true"></i></span></label><label class="field"><span class="inputbox"><input name="company_name" maxlength="200" required placeholder=" "><span class="input-label">Company</span><i aria-hidden="true"></i></span></label>
+<label class="field"><span class="inputbox"><input name="url" type="url" maxlength="2000" placeholder=" "><span class="input-label">Job URL (optional)</span><i aria-hidden="true"></i></span></label>
 <label class="field">Stage<select name="status">{% for status in statuses %}<option value="{{ status }}">{{ status|title }}</option>{% endfor %}</select></label></div>
 <label class="field">Notes<textarea name="notes" maxlength="2000" rows="3"></textarea></label><button class="btn p">Add application</button></form></details>
 <div class="kan">{% for status in statuses %}<section class="col" data-stage="{{ status }}" aria-label="{{ status|title }} applications"><h3><span>{{ status|title }}</span><span class="co">{{ application_counts.get(status,0) }}</span></h3>

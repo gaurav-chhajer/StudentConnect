@@ -85,6 +85,41 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
         self.assertIn("default-src 'none'", page.headers['Content-Security-Policy'].split('; '))
 
+    def test_animated_fields_preserve_labels_values_and_validation(self):
+        public = {'/login': {'email', 'password'}, '/register': {'email', 'name', 'code', 'password', 'confirmation'},
+                  '/forgot-password': {'email'}, '/reset-password': {'email', 'code', 'password', 'confirmation'}}
+        for path, expected in public.items():
+            with self.subTest(path=path):
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                fields = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">([^<]+)</span>', page.data)
+                names = {re.search(rb'name="([^\"]+)"', control).group(1).decode() for control, _ in fields}
+                self.assertEqual(names, expected)
+                self.assertTrue(all(b'required' in control for control, _ in fields))
+                self.assertTrue(all(b'placeholder=" "' in control for control, _ in fields))
+                self.assertIn(b'type="email" maxlength="254" autocomplete="email"', page.data)
+                self.assertIn(b'name="csrf_token"', page.data)
+
+        self.seed_user()
+        self.conn.execute("UPDATE accounts SET is_admin=1 WHERE user_id=1")
+        self.conn.execute("UPDATE users SET name=? WHERE id=1", ('Owner <test>',))
+        self.conn.commit()
+        private = {'/settings': {'name', 'email', 'university', 'graduation_year', 'min_score', 'min_stipend', 'roles'},
+                   '/jobs': {'q', 'min_score', 'location', 'name'},
+                   '/applications': {'title', 'company_name', 'url'}, '/accounts/invitations': {'email'}}
+        for path, expected in private.items():
+            with self.subTest(path=path):
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                controls = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">[^<]+</span>', page.data)
+                names = {match.group(1).decode() for control in controls
+                         if (match := re.search(rb'name="([^\"]+)"', control))}
+                self.assertTrue(expected.issubset(names))
+                if path == '/settings':
+                    self.assertIn(b'value="Owner &lt;test&gt;"', page.data)
+                    self.assertIn(b'readonly required', page.data)
+                    self.assertIn(b'aria-describedby="stipend-help"', page.data)
+
     def test_migration_is_idempotent_and_preserves_existing_records(self):
         self.seed_user()
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
@@ -163,16 +198,43 @@ class WebFlowTests(unittest.TestCase):
                 self.assertIn(b'aria-current="page"', response.data)
                 self.assertIn(b'aria-hidden="true"', response.data)
                 self.assertNotIn(b"fonts.googleapis.com", response.data)
+                self.assertIn(b'id="match-constellation" aria-hidden="true"', response.data)
+                self.assertLess(response.data.index(b'<canvas'), response.data.index(b'<div class="app"'))
+                script = re.search(rb'<script defer nonce="([^"]+)" src="/static/js/constellation.js"></script>', response.data)
+                self.assertIsNotNone(script)
+                policy = response.headers["Content-Security-Policy"]
+                self.assertIn("script-src 'nonce-" + script.group(1).decode() + "'", policy)
+                self.assertIn("script-src-attr 'none'", policy)
+                self.assertNotIn("script-src 'self'", policy)
+                self.assertNotIn("script-src 'unsafe-inline'", policy)
                 if route == "/settings":
-                    self.assertEqual(response.data.count(b"<script"), 2)
+                    self.assertEqual(response.data.count(b"<script"), 3)
                     self.assertIn(b'src="/static/js/companies.js"', response.data)
                     self.assertIn(b'src="/static/js/locations.js"', response.data)
                 else:
-                    self.assertNotIn(b"<script", response.data)
-                    self.assertNotIn("script-src", response.headers["Content-Security-Policy"])
+                    self.assertEqual(response.data.count(b"<script"), 1)
                 self.assertNotIn(b"Scheduled sending is not connected yet", response.data)
                 self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(before, self.database.read_bytes())
+
+    def test_constellation_is_decorative_and_nonce_protected_on_account_pages(self):
+        nonces = []
+        for path in ('/login', '/register', '/forgot-password', '/reset-password'):
+            with self.subTest(path=path):
+                page = self.client.get(path)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'id="match-constellation" aria-hidden="true"', page.data)
+                self.assertLess(page.data.index(b'<canvas'), page.data.index(b'<div class="app auth-app"'))
+                nonce = re.search(rb'nonce="([^"]+)" src="/static/js/constellation.js"', page.data).group(1).decode()
+                nonces.append(nonce)
+                self.assertIn("script-src 'nonce-" + nonce + "'", page.headers['Content-Security-Policy'])
+                self.assertNotIn(b'id="energy"', page.data)
+                self.assertNotIn(b'id="pulse"', page.data)
+        self.assertEqual(len(set(nonces)), len(nonces))
+        script = self.client.get('/static/js/constellation.js')
+        self.addCleanup(script.close)
+        self.assertEqual(script.status_code, 200)
+        self.assertNotIn("script-src", script.headers['Content-Security-Policy'])
 
     def test_banner_counts_use_saved_data_and_do_not_include_mockup_claims(self):
         self.seed_user()

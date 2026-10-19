@@ -4,8 +4,10 @@
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static',filename='css/sc.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/app.css') }}">
 <link rel="stylesheet" href="{{ url_for('static',filename='css/theme.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/wow.css') }}">
-<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static',filename='js/wow.js') }}"></script></head>
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static',filename='js/wow.js') }}"></script>
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static',filename='js/constellation.js') }}"></script></head>
 <body><a class="skip-link" href="#content">Skip to content</a>
+<canvas class="match-constellation" id="match-constellation" aria-hidden="true"></canvas>
 <div class="app auth-app">
 <aside class="side auth-hero">
 <a class="logo" href="{{ url_for('accounts.login') }}"><i></i>StudentConnect</a>
@@ -35,11 +37,11 @@
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
 <form method="post" class="page-form">{{ csrf() }}<div class="fields spaced">
-<label class="field">Email<input name="email" type="email" maxlength="254" autocomplete="email" required></label>
-{% if mode == 'register' %}<label class="field">Full name<input name="name" maxlength="100" autocomplete="name" required></label>{% endif %}
-{% if mode in ['register','reset'] %}<label class="field">Emailed code<input name="code" type="password" minlength="43" maxlength="43" autocomplete="off" required></label>{% endif %}
-{% if mode != 'forgot' %}<label class="field">Password<input name="password" type="password" minlength="{{ 1 if mode=='login' else 12 }}" maxlength="128" autocomplete="{{ 'current-password' if mode=='login' else 'new-password' }}" required></label>{% endif %}
-{% if mode in ['register','reset'] %}<label class="field">Confirm password<input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label><p class="sub">Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
+<label class="field"><span class="inputbox"><input name="email" type="email" maxlength="254" autocomplete="email" required placeholder=" "><span class="input-label">Email</span><i aria-hidden="true"></i></span></label>
+{% if mode == 'register' %}<label class="field"><span class="inputbox"><input name="name" maxlength="100" autocomplete="name" required placeholder=" "><span class="input-label">Full name</span><i aria-hidden="true"></i></span></label>{% endif %}
+{% if mode in ['register','reset'] %}<label class="field"><span class="inputbox"><input name="code" type="password" minlength="43" maxlength="43" autocomplete="off" required placeholder=" "><span class="input-label">Emailed code</span><i aria-hidden="true"></i></span></label>{% endif %}
+{% if mode != 'forgot' %}<label class="field"><span class="inputbox"><input name="password" type="password" minlength="{{ 1 if mode=='login' else 12 }}" maxlength="128" autocomplete="{{ 'current-password' if mode=='login' else 'new-password' }}" required placeholder=" "><span class="input-label">Password</span><i aria-hidden="true"></i></span></label>{% endif %}
+{% if mode in ['register','reset'] %}<label class="field"><span class="inputbox"><input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required placeholder=" "><span class="input-label">Confirm password</span><i aria-hidden="true"></i></span></label><p class="sub">Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
 </div><div class="actions"><button class="btn p" type="submit"><span>{{ 'Send recovery instructions' if mode=='forgot' else 'Continue' }}</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div></form>
 <nav class="actions auth-links" aria-label="Account links"><a href="{{ url_for('accounts.login') }}"{% if mode=='login' %} aria-current="page"{% endif %}>Sign in</a><a href="{{ url_for('accounts.register') }}"{% if mode=='register' %} aria-current="page"{% endif %}>Accept invitation</a><a href="{{ url_for('accounts.forgot') }}"{% if mode=='forgot' %} aria-current="page"{% endif %}>Forgot password</a><a href="{{ url_for('accounts.reset') }}"{% if mode=='reset' %} aria-current="page"{% endif %}>Enter recovery code</a></nav>
 </section></main></div></body></html>

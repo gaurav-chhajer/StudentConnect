@@ -2,5 +2,5 @@
 {% block title %}Invite testers · StudentConnect{% endblock %}
 {% block content %}<section class="card"><h1>Invite a tester</h1>
 <p>Send a single-use invitation to their email. It expires in 48 hours. Each tester gets a separate private account.</p>
-<form method="post" class="page-form">{{ csrf() }}<label class="field">Tester email<input name="email" type="email" maxlength="254" required></label><button class="btn p" type="submit">Send invitation email</button></form>
+<form method="post" class="page-form">{{ csrf() }}<label class="field"><span class="inputbox"><input name="email" type="email" maxlength="254" required placeholder=" "><span class="input-label">Tester email</span><i aria-hidden="true"></i></span></label><button class="btn p" type="submit">Send invitation email</button></form>
 <p>Sending uses Gmail. If delivery is uncertain, inspect Gmail before trying again. The emailed code is entered on the Accept invitation page.</p></section>{% endblock %}

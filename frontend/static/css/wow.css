@@ -1,9 +1,10 @@
 /* StudentConnect wow layer. Load after sc.css, app.css, theme.css and auth.css. */
-@keyframes aur{to{transform:translate3d(-2%,3%,0) scale(1.1)}}
 @keyframes floaty{50%{transform:translateY(-9px)}}
 @keyframes sparkdraw{to{stroke-dashoffset:0}}
-.app{position:relative}
-.app::before{content:"";position:fixed;inset:-10%;z-index:0;pointer-events:none;background:radial-gradient(620px 420px at 82% 0%,rgba(46,75,232,.2),transparent 62%),radial-gradient(520px 380px at 38% 100%,rgba(255,122,89,.16),transparent 62%),radial-gradient(440px 340px at 100% 58%,rgba(124,92,255,.14),transparent 62%);animation:aur 18s ease-in-out infinite alternate}
+/* Keep decoration outside the app grid: background, canvas, then existing UI. */
+body{background:#F2F4FB;isolation:isolate}
+.app{position:relative;z-index:1;isolation:isolate;background:transparent}
+.match-constellation{position:fixed;inset:0;width:100%;height:100vh;z-index:0;pointer-events:none}
 .app .side{position:relative;z-index:2}.app .main{position:relative;z-index:1}
 .app .card{position:relative;background:rgba(255,255,255,.82);-webkit-backdrop-filter:blur(14px) saturate(1.3);backdrop-filter:blur(14px) saturate(1.3);border-color:rgba(255,255,255,.85);box-shadow:0 10px 30px rgba(14,21,48,.06)}
 .app .kc,.app .jc{position:relative}
@@ -12,12 +13,34 @@
 .app .list .jc,.app .kc{animation-fill-mode:backwards}
 .app .nav a .ic{transition:transform .25s}.app .nav a:hover .ic{transform:scale(1.18) rotate(-6deg)}
 .app .nav a.on,.app .nav a.on:hover{box-shadow:0 10px 26px rgba(46,75,232,.5)}
-.app .btn.p{position:relative;overflow:hidden}
-.app .btn.p::after{content:"";position:absolute;top:0;left:-70%;width:40%;height:100%;background:rgba(255,255,255,.35);transform:skewX(-20deg);transition:left .7s}
-.app .btn.p:hover::after{left:140%}
-.app .btn.ghost{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.28);color:#fff}
-.cursor-glow{position:fixed;left:0;top:0;width:360px;height:360px;margin:-180px 0 0 -180px;border-radius:50%;pointer-events:none;z-index:0;background:radial-gradient(closest-side,rgba(46,75,232,.16),transparent);opacity:0;transition:opacity .4s;will-change:transform}
-.cursor-glow.on{opacity:1}
+/* Indigo/navy controls retain the reference's rounded shape and soft edge glow. */
+.app :is(button,.btn),.app .btn.p,.app .btn.ghost{position:relative;overflow:hidden;border:1px solid #41548B;border-radius:20px;background:linear-gradient(145deg,#24366A,#17264D);color:#F3F5FF;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);transition:background-color .25s,border-color .25s,box-shadow .25s,transform .15s}
+.app .btn.p{background:linear-gradient(115deg,var(--acc),#4543C9);border-color:#637AF4}
+.app .btn{min-height:48px;padding:12px 20px;font-size:12px;font-weight:600;letter-spacing:.045em;text-transform:uppercase}
+.app :is(button,.btn):is(:hover,:focus-visible):not(:disabled):not([aria-disabled=true]){background:linear-gradient(145deg,#304988,#243667);border-color:#8299F0;color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 0 16px rgba(46,75,232,.22),0 4px 12px rgba(14,21,48,.1);transform:none}
+.app .btn.p:is(:hover,:focus-visible):not(:disabled):not([aria-disabled=true]){background:linear-gradient(115deg,#3958EE,#514BD5)}
+.app .seg .btn[aria-current]{background:var(--acc);color:#fff;box-shadow:inset 0 0 0 1px #8299F0}
+.app :is(button,.btn):disabled,.app .btn[aria-disabled=true]{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
+.app input[type=file]::file-selector-button{border:1px solid #41548B;border-radius:16px;background:#24366A;color:#F3F5FF;transition:background-color .25s,border-color .25s,box-shadow .25s}
+.app input[type=file]::file-selector-button:hover{background:#304988;border-color:#8299F0;box-shadow:0 0 12px rgba(46,75,232,.22)}
+.app :is(input,textarea,select):focus-visible{outline-color:var(--acc)}
+.app .cadence input:focus-visible+span{outline-color:var(--acc)}
+.app :is(button,.btn):focus-visible{outline-color:#8299F0}
+/* Floating labels / rising fill adapted from Uiverse.io by VijinV.
+   Placeholder state keeps optional and invalid nonempty values readable. */
+.app .inputbox{position:relative;display:block;isolation:isolate;width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;background:var(--card);transition:border-color .25s,box-shadow .25s}
+.app .inputbox input{position:relative;z-index:1;display:block;width:100%;height:64px;min-height:64px;padding:27px 12px 9px;border:0;border-radius:inherit;background:transparent;font:inherit;font-size:14px;font-weight:400;line-height:20px;color:var(--ink);box-shadow:none}
+.app .inputbox .input-label{position:absolute;top:22px;left:12px;right:12px;z-index:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500;line-height:20px;color:var(--mute);pointer-events:none;transform-origin:left top;transition:transform .25s,color .25s}
+.app .inputbox i{position:absolute;inset:0;z-index:0;border-radius:inherit;background:linear-gradient(110deg,var(--accbg),#F2EEFF);transform:scaleY(.03);transform-origin:bottom;transition:transform .35s ease;pointer-events:none}
+.app .inputbox:focus-within{border-color:var(--acc);box-shadow:0 4px 14px rgba(46,75,232,.1)}
+.app .inputbox input:focus~.input-label,.app .inputbox input:not(:placeholder-shown)~.input-label,.app .inputbox.has-hint .input-label{transform:translateY(-15px) scale(.78);color:var(--acc)}
+.app .inputbox input:focus~i,.app .inputbox input:not(:placeholder-shown)~i{transform:scaleY(1)}
+.app .inputbox input:read-only{color:var(--mute);cursor:default}
+.app .inputbox input:disabled{opacity:.55;cursor:not-allowed}
+.app .field select,.app .filters select,.app textarea{transition:border-color .25s,background-color .25s}
+.app .field select:focus,.app .filters select:focus,.app textarea:focus{border-color:var(--acc);background-color:var(--accbg)}
+.app .location-entry>.inputbox{flex:1;min-width:0}
+@media(prefers-reduced-motion:reduce){.app input[type=file]::file-selector-button,.app .inputbox i{transition:none}}
 .logo-tile{grid-row:1/3;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#fff;font:700 18px 'Bricolage Grotesque',sans-serif;box-shadow:0 6px 14px rgba(14,21,48,.2)}
 .with-logo{display:grid;grid-template-columns:40px minmax(0,1fr);column-gap:12px;align-items:center}
 .spark{position:absolute;right:16px;bottom:16px;width:96px;height:29px;overflow:visible}
@@ -32,7 +55,7 @@
 .hero-banner .art{width:100%;max-width:300px;justify-self:end}
 .f1,.f2,.f3{animation:floaty 5s ease-in-out infinite}.f2{animation-delay:-1.6s}.f3{animation-delay:-3.2s}
 @media (max-width:760px){.hero-banner{grid-template-columns:1fr;padding:24px}.hero-banner .art{display:none}}
-@media (prefers-reduced-motion:reduce){.app::before,.hero-banner *,.spark path{animation:none!important}.spark path{stroke-dashoffset:0}.cursor-glow{display:none}}
+@media (prefers-reduced-motion:reduce){.hero-banner *,.spark path{animation:none!important}.spark path{stroke-dashoffset:0}}
 .auth-app{grid-template-columns:minmax(320px,1fr) minmax(380px,1fr)}
 .auth-app .auth-hero{padding:clamp(24px,5vw,64px);gap:32px;justify-content:center;overflow:hidden}
 .auth-hero>*{position:relative;z-index:1}.auth-hero .logo{padding:0}

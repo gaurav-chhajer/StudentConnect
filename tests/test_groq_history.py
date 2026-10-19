@@ -1,11 +1,11 @@
 import copy
 import json
-import re
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+from flask import render_template
 
 from backend import cloud_worker, pipeline_skeleton as pipeline
 from backend.migrate import apply_migrations
@@ -30,7 +30,7 @@ class PreHistoryMigrationTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'Match score trend', page.data)
         self.assertIn(b'Software Engineer 1', page.data)
-        self.assertIn(b'Groq key history is unavailable until the database update is applied.', page.data)
+        self.assertNotIn(b'Groq key history', page.data)
         self.assertNotIn(b'Saved dashboard data could not be loaded', page.data)
         self.assertNotIn(b'No matching run history recorded yet.', page.data)
         self.assertIn('008_groq_key_history.sql', ' '.join(logs.output))
@@ -39,7 +39,7 @@ class PreHistoryMigrationTests(unittest.TestCase):
         page = self.client.get('/')
         self.assertEqual(page.status_code, 200)
         self.assertNotIn(b'history is unavailable', page.data)
-        self.assertIn(b'No matching run history recorded yet.', page.data)
+        self.assertNotIn(b'No matching run history recorded yet.', page.data)
 
     def test_nonadmin_dashboard_does_not_need_history_migration(self):
         page = self.client.get('/')
@@ -107,7 +107,7 @@ class GroqHistoryTests(unittest.TestCase):
             self.assertEqual(self.call('groq-status', self.initial()).status_code, 503)
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM groq_key_history').fetchone()[0], 0)
 
-    def test_history_is_visible_only_to_admin_and_preserved_across_runs(self):
+    def test_dashboard_omits_history_for_all_accounts_and_preserves_runs(self):
         data = self.initial()
         self.record(data)
         data.update(revision=1, states=['attempting', 'not_attempted', 'not_attempted'])
@@ -124,9 +124,10 @@ class GroqHistoryTests(unittest.TestCase):
         self.conn.execute('UPDATE accounts SET is_admin=1 WHERE user_id=1')
         self.conn.commit()
         page = self.client.get('/')
-        self.assertIn(b'Groq key history', page.data)
-        self.assertIn(b'Key 1:</strong> Rate limit hit (HTTP 429)', page.data)
-        self.assertIn(b'Key 2:</strong> Not attempted', page.data)
+        self.assertNotIn(b'Groq key history', page.data)
+        self.assertNotIn(b'id="groq-history"', page.data)
+        self.assertNotIn(b'Rate limit hit', page.data)
+        self.assertNotIn(b'Key 2:</strong> Not attempted', page.data)
         self.assertNotIn(b'a' * 32, page.data)
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM groq_key_history').fetchone()[0], 6)
         self.assertNotIn(b'Groq key history', self.client.get('/jobs').data)
@@ -139,11 +140,14 @@ class GroqHistoryTests(unittest.TestCase):
         self.conn.commit()
         with self.client.session_transaction() as session:
             session['user_id'], session['session_version'] = 1, 0
-        page = self.client.get('/')
-        self.assertEqual(page.data.count(b'Key 1:</strong>'), 20)
-        cursor = re.search(rb'href="/\?history_before=(\d+)#groq-history"', page.data).group(1).decode()
-        older = self.client.get('/?history_before=' + cursor)
-        self.assertEqual(older.data.count(b'Key 1:</strong>'), 2)
+        with patch('backend.app.render_template', wraps=render_template) as render:
+            page = self.client.get('/')
+        self.assertEqual(len(render.call_args.kwargs['groq_history']), 20)
+        cursor = str(render.call_args.kwargs['groq_history_next'])
+        self.assertNotIn(b'id="groq-history"', page.data)
+        with patch('backend.app.render_template', wraps=render_template) as render:
+            older = self.client.get('/?history_before=' + cursor)
+        self.assertEqual(len(render.call_args.kwargs['groq_history']), 2)
         self.assertNotIn(b'>Older runs</a>', older.data)
         with self.app.test_request_context('/?history_before=' + cursor):
             # Run identities are not exposed in HTML; cursor pagination is based on DB IDs.
