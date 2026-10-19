@@ -10,10 +10,15 @@ shared navy sidebar, blue/coral theme, glass cards, illustrated page banners,
 company initial tiles, and reduced-motion support. Dashboard and Analytics
 sparklines use saved weekly scores and counts; unsupported mockup metrics remain
 identified as unavailable. All pages also use the canvas background adapted from
-`frontend/designs/backgrounds/StudentConnect – Match Constellation Background.html`.
+`frontend/designs/backgrounds/updated/StudentConnect – Match Constellation Background.html`.
+The earlier export is preserved directly in `frontend/designs/backgrounds/`.
 Its linked nodes, cursor scanner, glows and click ripples are decorative; labels
 show randomly generated 55–97% matches from the original design, unrelated to
-saved job-match scores. The animation uses
+saved job-match scores. Labels avoid visible text, controls, and cards, trying
+above and then below each node. Nodes dim behind these areas. Custom containers
+can use `data-bg-avoid`; `data-bg-ignore` excludes an element and its text from
+avoidance. Bounds refresh on scrolling, resizing, and periodically during motion.
+The animation uses
 at most 90 nodes and 12 ripples, pauses in hidden tabs, and becomes a static scene
 with reduced motion enabled. It uses local JavaScript with per-response CSP
 nonces, without enabling inline scripts or loading external services.

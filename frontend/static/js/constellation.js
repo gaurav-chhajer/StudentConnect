@@ -15,6 +15,46 @@
     const options = {signal: owner.signal};
     let width = 0, height = 0, nodes = [], ripples = [], frameId = null;
     let tick = 0, previous = null, pointer = {x: 0, y: 0, active: false};
+    let avoid = [], avoidDirty = true, collectedAt = -30;
+
+    function collectAvoidance() {
+        avoid = []; avoidDirty = false; collectedAt = tick;
+        function collect(rectangles) {
+            for (const rect of rectangles) {
+                if (rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < height) avoid.push(rect);
+            }
+        }
+        for (const element of document.querySelectorAll('button,input,select,textarea,.card,[data-bg-avoid]')) {
+            if (!element.closest('[data-bg-ignore]')) collect([element.getBoundingClientRect()]);
+        }
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+                return node.nodeValue.trim() && !/^(SCRIPT|STYLE|NOSCRIPT)$/.test(node.parentNode.tagName) ?
+                    NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+            }
+        });
+        const range = document.createRange();
+        while (walker.nextNode()) {
+            if (walker.currentNode.parentElement.closest('[data-bg-ignore]')) continue;
+            range.selectNodeContents(walker.currentNode);
+            collect(range.getClientRects());
+        }
+    }
+
+    function hitsContent(x, y, boxWidth, boxHeight) {
+        return avoid.some(rect => x < rect.right + 6 && x + boxWidth > rect.left - 6 &&
+            y < rect.bottom + 4 && y + boxHeight > rect.top - 4);
+    }
+
+    function labelTop(node) {
+        return node.labelDirection < 0 ? node.y - node.radius - 30 : node.y + node.radius + 8;
+    }
+
+    function labelHitsContent(node) {
+        context.font = '600 11px system-ui,sans-serif';
+        const labelWidth = context.measureText(node.score + '% match').width + 14;
+        return hitsContent(node.x - labelWidth / 2, labelTop(node), labelWidth, 18);
+    }
 
     function resize() {
         width = innerWidth; height = innerHeight;
@@ -27,14 +67,16 @@
             x: Math.random() * width, y: Math.random() * height,
             vx: (Math.random() - .5) * .3, vy: (Math.random() - .5) * .3,
             score: 55 + Math.floor(Math.random() * 43), radius: 3 + Math.random() * 3, flash: 0,
-            label: false, labelSince: 0, cooldown: 0, alpha: 0
+            label: false, labelSince: 0, cooldown: 0, alpha: 0, labelDirection: -1, obscured: 0
         }));
         ripples = [];
+        avoidDirty = true;
         if (motion.matches) draw(0);
     }
 
     function draw(step) {
         tick += step;
+        if (avoidDirty || tick - collectedAt >= 30) collectAvoidance();
         context.clearRect(0, 0, width, height);
         const x = pointer.active ? pointer.x : width / 2 + Math.cos(tick * .006) * width * .3;
         const y = pointer.active ? pointer.y : height / 2 + Math.sin(tick * .009) * height * .25;
@@ -78,6 +120,9 @@
         }
         for (const node of nodes) {
             const boost = Math.max(node.flash, 1 - node.distance / SCAN_RADIUS, 0);
+            node.obscured += ((hitsContent(node.x - 12, node.y - 12, 24, 24) ? 1 : 0) - node.obscured) *
+                (motion.matches ? 1 : .12 * step);
+            context.globalAlpha = 1 - .85 * node.obscured;
             const color = node.score >= 85 ? '235,95,60' : node.score >= 70 ? '47,75,234' : '30,160,125';
             const radius = node.radius * (1 + boost * .7);
             if (node.distance < SCAN_RADIUS) line(x, y, node.x, node.y, `rgba(255,122,89,${boost * .4})`);
@@ -92,7 +137,8 @@
             context.beginPath();
             context.roundRect(node.x - radius, node.y - radius, radius * 2, radius * 2, radius * .6);
             context.fill();
-            if (node.label && (node.distance > SCAN_RADIUS * .9 || tick - node.labelSince > 240)) {
+            context.globalAlpha = 1;
+            if (node.label && (node.distance > SCAN_RADIUS * .9 || tick - node.labelSince > 240 || labelHitsContent(node))) {
                 node.label = false; node.cooldown = tick + 150;
             }
         }
@@ -104,16 +150,22 @@
         for (const node of nodes) {
             if (labels < 3 && !node.label && node.cooldown <= tick && node.distance < SCAN_RADIUS * .65 &&
                 !nodes.some(other => other.label && Math.hypot(other.x - node.x, other.y - node.y) < 90)) {
+                node.labelDirection = -1;
+                if (labelHitsContent(node)) {
+                    node.labelDirection = 1;
+                    if (labelHitsContent(node)) continue;
+                }
                 node.label = true; node.labelSince = tick; labels++;
             }
-            node.alpha += ((node.label ? 1 : 0) - node.alpha) * (motion.matches ? 1 : .1 * step);
+            node.alpha += ((node.label ? 1 : 0) - node.alpha) * (motion.matches ? 1 : (node.label ? .1 : .25) * step);
             if (node.alpha > .02) {
                 const text = node.score + '% match';
                 context.globalAlpha = node.alpha * .8; context.font = '600 11px system-ui,sans-serif';
                 const pillWidth = context.measureText(text).width + 14;
                 context.fillStyle = 'rgba(47,75,234,.92)'; context.beginPath();
-                context.roundRect(node.x - pillWidth / 2, node.y - 30, pillWidth, 18, 9); context.fill();
-                context.fillStyle = '#fff'; context.textAlign = 'center'; context.fillText(text, node.x, node.y - 17);
+                const top = labelTop(node);
+                context.roundRect(node.x - pillWidth / 2, top, pillWidth, 18, 9); context.fill();
+                context.fillStyle = '#fff'; context.textAlign = 'center'; context.fillText(text, node.x, top + 13);
                 context.globalAlpha = 1;
             }
         }
@@ -143,6 +195,10 @@
     }, options);
     document.addEventListener('pointerleave', () => { pointer.active = false; }, options);
     addEventListener('resize', resize, options);
+    addEventListener('scroll', () => {
+        avoidDirty = true;
+        if (motion.matches && !document.hidden) draw(0);
+    }, {signal: owner.signal, passive: true, capture: true});
     document.addEventListener('visibilitychange', synchronize, options);
     motion.addEventListener('change', synchronize, options);
     addEventListener('pageshow', synchronize, options);
