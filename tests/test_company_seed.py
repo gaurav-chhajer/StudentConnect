@@ -128,7 +128,7 @@ class CompanySeedTests(unittest.TestCase):
                 self.assertEqual(saved.execute('SELECT name FROM companies').fetchall(), [('Original',)])
                 self.assertNotIn('career_source', [row[1] for row in saved.execute('PRAGMA table_info(companies)')])
                 self.assertEqual(current.execute("SELECT id,name FROM companies WHERE board_slug='original'").fetchall(), [(1, 'Original')])
-                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 8)
+                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 9)
 
     def test_source_extension_preserves_existing_source_and_constraints(self):
         import hashlib

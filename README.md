@@ -563,6 +563,20 @@ Postman company's source in place, preserving its ID and subscriptions.
 migration 005: its original column and unique index are retained as legacy
 metadata, and the current column has the extended validation and unique index.
 Cvent and ZS use their official public iCIMS listing and description feeds.
+The catalog also includes Salesforce, Adobe and Slack through their official
+Workday boards, Spotify through Lever, Figma/Asana/Dropbox through Greenhouse,
+Airbnb through Greenhouse and Notion through Ashby. Slack uses its dedicated
+Salesforce-hosted board. These feeds cover worldwide listings; saved location
+preferences still apply. Airbnb and Notion apply the existing senior-title
+exclusion before transfer, preserving full descriptions and complete-feed
+snapshot semantics within the current hosted limits. Zoom's official career
+pages returned HTTP 403 and its catalog entry remains disabled; no access
+controls are bypassed. Live checks verified listings, transfer size and full
+descriptions for the nine enabled companies on 2026-10-21.
+Migration `009_saas_company_sources.sql` extends the source allowlist additively,
+preserving existing company IDs, subscriptions, jobs and users. Use the
+backup-producing offline company import below before reloading the app.
+
 The catalog also includes PwC, Google, Amazon (India), Apple (India), Netflix,
 Microsoft and Meta. Cvent's existing entry and subscriptions are reused.
 `007_major_company_sources.sql` extends source validation additively, retaining

@@ -41,9 +41,17 @@ SOURCES = {
     'netflix': ('Netflix', 'eightfold', 'https://explore.jobs.netflix.net'),
     'microsoft': ('Microsoft', 'pcsx', 'https://apply.careers.microsoft.com'),
     'meta': ('Meta', 'blocked', 'https://www.metacareers.com'),
+    'salesforce': ('Salesforce', 'workday', 'https://salesforce.wd12.myworkdayjobs.com'),
+    'adobe': ('Adobe', 'workday', 'https://adobe.wd5.myworkdayjobs.com'),
+    'slack': ('Slack', 'workday', 'https://salesforce.wd12.myworkdayjobs.com'),
+    'airbnb': ('Airbnb', 'greenhouse', 'https://boards-api.greenhouse.io'),
+    'notion': ('Notion', 'ashby', 'https://api.ashbyhq.com'),
+    'zoom': ('Zoom', 'blocked', 'https://careers.zoom.us'),
 }
 WORKDAY = {'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
-           'postman': ('postman', 'careers'), 'pwc': ('pwc', 'Global_Experienced_Careers')}
+           'postman': ('postman', 'careers'), 'pwc': ('pwc', 'Global_Experienced_Careers'),
+           'salesforce': ('salesforce', 'External_Career_Site'),
+           'adobe': ('adobe', 'external_experienced'), 'slack': ('salesforce', 'Slack')}
 ORACLE = {'dpworld': 'CX_1', 'jpmorgan': 'CX_1001'}
 # Keep the adapters available for explicit read-only verification, but do not
 # enable new subscriptions until live listing and full-description checks pass.
@@ -359,6 +367,46 @@ def _listings(feed, rows=None):
     key, kind, origin = feed.key, SOURCES[feed.key][1], feed.origin
     rows = [] if rows is None else rows
     expected = None
+    if kind in ('greenhouse', 'ashby'):
+        path = ('/v1/boards/' + key + '/jobs?content=true' if kind == 'greenhouse'
+                else '/posting-api/job-board/' + key)
+        payload = feed.json(path)
+        items = payload['jobs']
+        if not isinstance(items, list) or len(items) > MAX_LISTINGS:
+            raise ValueError('Career board snapshot is invalid or oversized')
+        if kind == 'greenhouse' and total(payload['meta']['total']) != len(items):
+            raise ValueError('Career board snapshot is incomplete')
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError('Career board listing is invalid')
+            description = item.get('content') if kind == 'greenhouse' else item.get('descriptionHtml')
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError('Full career description is missing')
+            location, department = item.get('location'), item.get('department')
+            if kind == 'greenhouse':
+                if location is not None and not isinstance(location, dict):
+                    raise ValueError('Career board location is invalid')
+                location = (location or {}).get('name')
+                departments = item.get('departments', [])
+                if (not isinstance(departments, list) or any(
+                        not isinstance(value, dict) or not isinstance(value.get('name'), str)
+                        for value in departments)):
+                    raise ValueError('Career board departments are invalid')
+                department = ', '.join(value['name'] for value in departments) or None
+            if department is not None and (not isinstance(department, str) or len(department) > 4000):
+                raise ValueError('Career board department is invalid')
+            row = job(key, item['id'], item['title'], location,
+                      item['absolute_url'] if kind == 'greenhouse' else item['jobUrl'],
+                      description=description, department=department,
+                      employment=item.get('employmentType'))
+            # Keep source metadata and the full JD without duplicating its HTML.
+            raw = dict(item)
+            if kind == 'greenhouse':
+                raw.pop('content')
+            raw.update(row['raw_json'])
+            row['raw_json'] = raw
+            rows.append(row)
+        return rows
     if kind == 'morgan':
         # The verified public result-set feed serves students and graduates.
         for opportunity in ('sg',):

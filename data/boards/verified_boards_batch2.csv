@@ -10,3 +10,7 @@ Newton School,greenhouse,newton,1,https://boards-api.greenhouse.io/v1/boards/new
 Newton School,lever,newton,3,https://api.lever.co/v0/postings/newton?mode=json
 Arcesium,greenhouse,arcesiumllc,50,https://boards-api.greenhouse.io/v1/boards/arcesiumllc/jobs
 Apollo.io,greenhouse,apolloio,,https://boards-api.greenhouse.io/v1/boards/apolloio/jobs
+Spotify,lever,spotify,79,https://api.lever.co/v0/postings/spotify?mode=json
+Figma,greenhouse,figma,139,https://boards-api.greenhouse.io/v1/boards/figma/jobs
+Asana,greenhouse,asana,105,https://boards-api.greenhouse.io/v1/boards/asana/jobs
+Dropbox,greenhouse,dropbox,23,https://boards-api.greenhouse.io/v1/boards/dropbox/jobs
