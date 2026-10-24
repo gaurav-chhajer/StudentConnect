@@ -303,13 +303,13 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
     return 1
 
 
-def send_emails(client, deadline):
+def send_emails(client, deadline, immediate=False):
     after = 0
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 100:
             logger.error("Email time budget reached; remaining accounts deferred")
             return 1
-        payload = client.call("email", dict(after=after))
+        payload = client.call("email/immediate" if immediate else "email", dict(after=after))
         if "next" not in payload or type(payload.get("sent")) is not bool:
             raise ValueError("Invalid email response")
         next_id = cursor(payload["next"], after)

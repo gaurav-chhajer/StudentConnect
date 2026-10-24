@@ -436,6 +436,55 @@ below can automate the hosted site instead. Windows scheduling against the local
 does not process accounts stored in the separate hosted database. The existing
 Windows email-only installer remains unchanged and does not fetch or score.
 
+### Run frequent hosted checks from your computer
+
+`scripts.watch_hosted_jobs` runs on your PC against the PythonAnywhere database.
+First publish the updated `backend/cloud_worker.py` through your normal reviewed
+deployment process and reload the PythonAnywhere app. The new authenticated
+`/internal/worker/email/immediate` route is required; an older server returns 404
+and the worker stops. No database migration is required for this change.
+
+Configure the existing `STUDENTCONNECT_BASE_URL`, `STUDENTCONNECT_WORKER_KEY`
+(matching the private hosted value), and `GROQ_API_KEY` in your private local
+`.env` or process environment. Optional existing Groq key slots still apply.
+Never paste keys into commands or logs. Gmail credentials stay on PythonAnywhere.
+Resume text and preferences pass through your PC's memory and Groq for scoring;
+this worker does not save them locally. Do not enable verbose HTTP logging.
+
+Preview without external requests:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs
+```
+
+Start real fetching, scoring, and hosted immediate email delivery using `.env`:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs --run
+```
+
+Add `--once` to perform one real cycle. Keep the terminal open and your computer
+awake and online; Ctrl+C stops the worker. Disable the GitHub daily automation
+workflow while using this worker, and run only one scheduler. No Windows task
+is installed and no existing workflow is changed by these commands.
+
+Each cycle fetches active companies and scores pending candidates with the
+existing cloud limits, then sends up to five qualifying unsent matches per
+verified active account. Immediate delivery overrides daily/weekly timing for
+email-enabled accounts; Off, minimum scores, subscriptions, stale-score checks,
+sent-job tracking and uncertain-delivery pause protection still apply. Existing
+eligible unsent matches from today's refreshed companies may also be sent on
+the first run. The website's displayed daily/weekly settings still describe
+scheduled digests, not this opt-in worker's immediate mode.
+
+The next check starts five minutes **after the previous cycle completes**.
+Large boards, description downloads, scoring budgets and Groq limits can delay
+alerts substantially; this does not guarantee detection within five minutes.
+The worker stops on an incomplete cycle or error rather than retrying uncertain
+writes or sends. Review local/hosted logs before restarting. If delivery is
+paused, reconcile Gmail and hosted send records before clearing the hosted
+pause marker. Existing daily cloud commands retain their scheduled behavior.
+
 ### Free daily cloud automation
 
 `.github/workflows/daily-automation.yml` runs on GitHub-hosted Linux runners,

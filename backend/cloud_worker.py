@@ -322,6 +322,7 @@ def register_routes(application, connection, database):
             return {'eligible': eligible, 'job': prepared, 'fingerprint': fingerprint(work_identity(user, prepared))}
 
     @routes.post("/email")
+    @routes.post("/email/immediate")
     def email():
         after = body().get("after", 0)
         if type(after) is not int or not 0 <= after <= 2147483647:
@@ -342,7 +343,12 @@ def register_routes(application, connection, database):
                 WHERE is_active=1 AND last_seen_at>=? AND last_seen_at<=?""",
                 (start.isoformat(), now.isoformat()))}
             matches = pipeline.get_unsent_top_matches(conn, user["id"], company_ids=refreshed)
-            if not fixed_schedule_due(conn, user["id"], now) or not matches:
+            immediate = request.path.endswith("/email/immediate")
+            cadence = store.settings(conn, user["id"])["cadence"]
+            if cadence not in ("off", "daily", "weekly"):
+                raise ValueError("Invalid cadence")
+            due = cadence != "off" if immediate else fixed_schedule_due(conn, user["id"], now)
+            if not due or not matches:
                 return {"next": user["id"], "sent": False}
             pipeline.validate_email_configuration()
             with pause.open("x", encoding="utf-8") as marker:

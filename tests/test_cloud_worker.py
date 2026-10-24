@@ -10,6 +10,7 @@ import requests
 from backend import automatic_matching, cloud_worker, pipeline_skeleton as pipeline
 from backend.app import create_app
 from scripts import run_cloud_worker as runner
+from scripts import watch_hosted_jobs as watcher
 from tests import test_evaluation, test_web_flows
 
 KEY = "cd" * 32  # Synthetic test credential only.
@@ -156,6 +157,44 @@ class CloudEndpointTests(unittest.TestCase):
         mail.assert_called_once()
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sent_log").fetchone()[0], 2)
         self.assertFalse((self.database.parent / "email_schedule.paused").exists())
+
+    def test_immediate_alerts_ignore_time_and_previous_digest_but_deduplicate(self):
+        before = NOW.replace(hour=0)
+        self.conn.execute("UPDATE scores SET is_stale=0")
+        self.conn.execute("UPDATE jobs SET last_seen_at=?", (before.isoformat(),))
+        self.conn.execute("INSERT INTO user_settings(user_id,cadence) VALUES(1,'weekly')")
+        self.conn.execute("INSERT INTO sent_log(user_id,job_id,channel,sent_at) VALUES(1,1,'email',?)", (before.isoformat(),))
+        self.conn.commit()
+        with patch.object(cloud_worker, 'datetime') as clock, \
+                patch.object(pipeline, 'validate_email_configuration'), \
+                patch.object(pipeline, 'deliver_email') as mail:
+            clock.now.return_value = before
+            clock.fromisoformat.side_effect = datetime.fromisoformat
+            self.assertFalse(self.call('email', dict(after=0)).json['sent'])
+            self.assertTrue(self.call('email/immediate', dict(after=0)).json['sent'])
+            self.assertFalse(self.call('email/immediate', dict(after=0)).json['sent'])
+        mail.assert_called_once()
+        self.assertEqual([row['job_id'] for row in mail.call_args.args[1]], [2])
+
+    def test_immediate_alerts_preserve_off_stale_scores_and_pause(self):
+        self.conn.execute("UPDATE jobs SET last_seen_at=?", (datetime.now(timezone.utc).isoformat(),))
+        self.conn.execute("INSERT INTO user_settings(user_id,cadence) VALUES(1,'off')")
+        self.conn.commit()
+        with patch.object(pipeline, 'deliver_email') as mail:
+            self.assertFalse(self.call('email/immediate', dict(after=0)).json['sent'])
+            self.conn.execute("UPDATE user_settings SET cadence='daily'")
+            self.conn.commit()
+            self.assertFalse(self.call('email/immediate', dict(after=0)).json['sent'])
+            self.conn.execute("UPDATE scores SET is_stale=0")
+            self.conn.commit()
+            marker = self.database.parent / 'email_schedule.paused'
+            marker.write_text('Review required', encoding='utf-8')
+            self.assertEqual(self.call('email/immediate', dict(after=0)).status_code, 503)
+        mail.assert_not_called()
+
+    def test_immediate_alerts_require_worker_authentication(self):
+        self.assertEqual(self.client.post('/internal/worker/email/immediate', json=dict(after=0)).status_code, 401)
+        self.assertEqual(self.call('email/immediate', dict(after=True)).status_code, 400)
 
     def test_uncertain_send_pauses_and_is_not_retried(self):
         self.conn.execute("UPDATE scores SET is_stale=0")
@@ -703,6 +742,64 @@ class CloudRunnerTests(unittest.TestCase):
                 client.call("companies")
             client.close()
             session.return_value.close.assert_called_once()
+
+
+class LocalHostedWatcherTests(unittest.TestCase):
+    def test_preview_makes_no_external_calls(self):
+        with patch.object(watcher, 'run_cycle') as cycle, patch.object(runner, 'HostedClient') as client:
+            self.assertEqual(watcher.main([]), 0)
+        cycle.assert_not_called()
+        client.assert_not_called()
+
+    def test_cycle_matches_then_sends_immediately_and_closes(self):
+        client = MagicMock()
+        with patch.object(runner, 'HostedClient', return_value=client), \
+                patch.object(runner, 'fetch_and_score', return_value=0) as matching, \
+                patch.object(runner.time, 'monotonic', return_value=0), \
+                patch.object(runner, 'send_emails', return_value=0) as email:
+            self.assertEqual(watcher.run_cycle(), 0)
+        matching.assert_called_once_with(client, runner.MATCHING_SECONDS)
+        email.assert_called_once_with(client, runner.EMAIL_SECONDS, immediate=True)
+        client.close.assert_called_once()
+
+    def test_failed_matching_never_sends_and_always_closes(self):
+        for failure in (1, requests.Timeout('private')):
+            client = MagicMock()
+            with patch.object(runner, 'HostedClient', return_value=client), \
+                    patch.object(runner, 'fetch_and_score', side_effect=[failure]), \
+                    patch.object(runner, 'send_emails') as email:
+                if isinstance(failure, Exception):
+                    with self.assertRaises(requests.Timeout):
+                        watcher.run_cycle()
+                else:
+                    self.assertEqual(watcher.run_cycle(), 1)
+            email.assert_not_called()
+            client.close.assert_called_once()
+
+    def test_watch_waits_five_minutes_then_stops_on_failure(self):
+        with patch.object(watcher, 'exclusive_cycle'), \
+                patch.object(watcher, 'run_cycle', side_effect=[0, 1]) as cycle, \
+                patch.object(watcher.time, 'sleep') as sleep:
+            self.assertEqual(watcher.main(['--run']), 1)
+        self.assertEqual(cycle.call_count, 2)
+        self.assertEqual(sum(call.args[0] for call in sleep.call_args_list), 300)
+
+    def test_once_interrupt_and_uncertain_errors_do_not_retry(self):
+        for outcome, expected in ((0, 0), (KeyboardInterrupt(), 130), (requests.Timeout('private'), 1)):
+            with patch.object(watcher, 'exclusive_cycle'), \
+                    patch.object(watcher, 'run_cycle', side_effect=[outcome]) as cycle, \
+                    patch.object(watcher.time, 'sleep') as sleep:
+                self.assertEqual(watcher.main(['--run', '--once']), expected)
+            cycle.assert_called_once()
+            sleep.assert_not_called()
+
+    def test_immediate_pagination_uses_distinct_hosted_route(self):
+        client = MagicMock()
+        client.call.side_effect = [dict(next=1, sent=True), dict(next=None, sent=False)]
+        with patch.object(runner.time, 'monotonic', return_value=0):
+            self.assertEqual(runner.send_emails(client, 420, immediate=True), 0)
+        self.assertEqual([call.args for call in client.call.call_args_list], [
+            ('email/immediate', dict(after=0)), ('email/immediate', dict(after=1))])
 
 
 if __name__ == "__main__":
