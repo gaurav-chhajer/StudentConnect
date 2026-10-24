@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, hosting, matching_tasks, resumes, store
+from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, store
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,7 +92,8 @@ def create_app(database_path=None, upload_dir=None):
             if account:
                 g.account = dict(account)
                 g.user = dict(connection().execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone())
-        public = {"accounts.login", "accounts.register", "accounts.forgot", "accounts.reset", "static"}
+        public = {"accounts.login", "accounts.register", "accounts.forgot", "accounts.reset",
+                  "google_accounts.login", "google_accounts.callback", "static"}
         if request.url_rule is not None and request.endpoint not in public and g.user is None:
             if request.method == "GET":
                 return redirect(url_for("accounts.login"))
@@ -430,6 +431,7 @@ def create_app(database_path=None, upload_dir=None):
                     matching_status=matching_tasks.status(connection(), user['id']) if user else None)
 
     accounts.register_routes(application, connection, context, lambda: utc_now())
+    google_accounts.register_routes(application, connection, lambda: utc_now())
     cloud_worker.register_routes(application, connection, database)
     return application
 

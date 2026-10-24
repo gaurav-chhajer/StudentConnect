@@ -82,6 +82,56 @@ the page before submitting. These local session settings are not a production
 deployment configuration. Accounts expire after eight hours without cookie
 refresh. Sign-out and password reset revoke all existing sessions for that account.
 
+### Public Google signup and existing accounts
+
+Google signup lets anyone with a Google account join without an invitation code.
+Existing password login and invitation links remain available. Google signup
+never grants administrator access. Set up the owner account below before opening
+public signup; owner bootstrap requires that no accounts exist yet.
+
+1. In Google Cloud, create an OAuth client of type **Web application**. Configure
+   the consent screen for external users and publish its audience for public use;
+   a client in testing mode only admits its configured test users.
+2. Register the exact redirect URI:
+   `https://gauravchhajer.pythonanywhere.com/auth/google/callback` for this hosted
+   site, or `http://127.0.0.1:5000/auth/google/callback` for local development.
+   Use that exact local origin when testing, rather than switching to localhost.
+3. Store `STUDENTCONNECT_GOOGLE_CLIENT_ID` and
+   `STUDENTCONNECT_GOOGLE_CLIENT_SECRET` privately on the server. Set both or
+   neither; partial configuration fails startup. Never paste the secret into chat
+   or commit it. Hosted WSGI loads `.env`; local module commands use process
+   variables, as with the existing configuration.
+4. Install `requirements.txt`, back up the existing SQLite database, then run
+   `.\.venv\Scripts\python.exe -B -m backend.migrate` (Windows) or
+   `.venv/bin/python -B -m backend.migrate` (hosting). The additive
+   `011_google_accounts.sql` migration adds identity and temporary callback-state
+   tables. Reload the application after configuration and migration.
+
+Choose **Continue with Google** on Sign in or Sign up. Google verifies the email;
+new accounts start with empty private profiles and no company subscriptions.
+Existing profiles are never automatically claimed by an email match. To link an
+existing password account, sign in with its password, open `/login`, then choose
+**Continue with Google** with the same email. This preserves the original profile,
+password, settings and administrator status. A linked Google identity cannot be
+reassigned to another profile. Google-only users can use password recovery to set
+a password if the existing recovery mail service is configured.
+
+The flow validates the signed ID token, issuer, audience, expiry and nonce through
+Authlib, and requires a verified email. Callback state expires after five minutes,
+is consumed once, uses PKCE, and is bound to a separate HttpOnly callback cookie.
+That temporary cookie uses SameSite=Lax for Google's redirect; authenticated
+sessions retain SameSite=Strict. Google tokens are not saved. Existing login
+limits and CSRF checks still apply. With credentials absent, password/invitation
+access continues and the Google button is hidden.
+
+Test signup, returning login, cancelled consent and existing-account linking on
+the actual hosted site before announcing public access. Outbound Google discovery,
+token and signing-key requests must be allowed by the host. No Google credentials
+or live sign-in are needed for the offline suite.
+
+Reference: [Google web-server OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server)
+and [Authlib Flask OpenID Connect](https://docs.authlib.org/en/stable/oauth2/client/web/flask.html).
+
 ### Owner setup and invited accounts
 
 Back up the database before applying `003_accounts.sql` through the migration
@@ -102,7 +152,9 @@ confirm `SEND` to send a real invitation. Open `/register`, enter the emailed
 43-character code, your email/name, and a new 12–128-character password. Ownership
 is verified by access to that email. Registration links the existing user ID
 without replacing profile data. The first owner can use **Invite testers** to
-send invitations; testers cannot invite others. Public registration is disabled.
+send invitations; testers cannot invite others. Public Google signup is available
+when the Google credentials above are configured; password signup still requires
+an invitation.
 
 Invitations expire after 48 hours. Recovery is available from **Forgot password**;
 enter its code on **Enter recovery code** within 30 minutes. Codes work once, are
@@ -484,6 +536,32 @@ The worker stops on an incomplete cycle or error rather than retrying uncertain
 writes or sends. Review local/hosted logs before restarting. If delivery is
 paused, reconcile Gmail and hosted send records before clearing the hosted
 pause marker. Existing daily cloud commands retain their scheduled behavior.
+
+#### No-alert reminders
+
+The immediate hosted-email worker also checks for accounts that have gone seven
+full days without a job-match email. For accounts that have never received one,
+the window starts at verified account creation (invitation redemption). It sends
+one reminder to review the website, resume and matching preferences, followed by
+at most one follow-up fourteen full days after the first reminder. Reminders then
+pause until a new match email or a detected resume, role/location preference,
+minimum-score or company-subscription change starts another window. Profile
+changes start their new window when first observed by the email worker.
+
+Verified active accounts with email enabled are eligible. Off also disables
+reminders. Pending/failed matching work, unscored candidates and qualifying
+unsent matches block reminders. The local worker reaches email only after a
+successful matching cycle; an outage must not be described as a poor resume.
+Reminders never change preferences, and do not count as job-match emails.
+They are checked on completed worker cycles, not at a guaranteed wall-clock time.
+The same exclusive lock and uncertain-delivery pause protection cover reminders.
+
+This feature requires the additive `010_match_reminders.sql` migration. Back up
+the hosted SQLite database before running the existing migration command with
+the private hosted configuration, then reload the app. The automatic deployment
+script deliberately rejects migration changes, so this release requires the
+manual backed-up migration process. Existing users may receive their first
+reminder on the first healthy cycle if their seven-day window has already passed.
 
 ### Free daily cloud automation
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, request
 
-from backend import matching_tasks, pipeline_skeleton as pipeline, store
+from backend import match_reminders, matching_tasks, pipeline_skeleton as pipeline, store
 from backend.evaluation import validate_evaluation
 from scripts import run_pipeline
 
@@ -348,19 +348,25 @@ def register_routes(application, connection, database):
             if cadence not in ("off", "daily", "weekly"):
                 raise ValueError("Invalid cadence")
             due = cadence != "off" if immediate else fixed_schedule_due(conn, user["id"], now)
-            if not due or not matches:
+            reminder = immediate and not matches and match_reminders.due(conn, user['id'], now)
+            if not due or not (matches or reminder):
                 return {"next": user["id"], "sent": False}
             pipeline.validate_email_configuration()
             with pause.open("x", encoding="utf-8") as marker:
                 marker.write("Cloud email attempt requires review unless completed.\n")
             try:
-                pipeline.deliver_email(user, matches)
-                pipeline.mark_sent(conn, user["id"], [match["job_id"] for match in matches])
+                if reminder:
+                    match_reminders.deliver(user)
+                    match_reminders.mark_sent(conn, user['id'], now)
+                    conn.commit()
+                else:
+                    pipeline.deliver_email(user, matches)
+                    pipeline.mark_sent(conn, user["id"], [match["job_id"] for match in matches])
                 pause.unlink()
             except (smtplib.SMTPException, OSError, ValueError, RuntimeError):
                 current_app.logger.error("Cloud digest failed or is uncertain; delivery paused (user_id=%s)", user["id"])
                 return {"error": "Delivery uncertain; inspect Gmail and hosted send records"}, 503
-            current_app.logger.info("Gmail accepted cloud digest (user_id=%s matches=%s)", user["id"], len(matches))
+            current_app.logger.info("Gmail accepted cloud email (user_id=%s matches=%s reminder=%s)", user["id"], len(matches), reminder)
             return {"next": user["id"], "sent": True}
 
     application.register_blueprint(routes)
