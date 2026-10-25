@@ -148,7 +148,8 @@ def register_routes(app, connection, now):
         session.clear()
         session.permanent = True
         session["user_id"], session["session_version"] = account["user_id"], account["session_version"]
-        response = redirect(url_for("dashboard"))
+        response = app.make_response(render_template(
+            "google_complete.html", dashboard_url=url_for("dashboard")))
         response.delete_cookie(COOKIE_NAME, path=CALLBACK_PATH, secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
         return response
 

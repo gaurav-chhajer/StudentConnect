@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Google sign-in complete - StudentConnect</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wow.css') }}">
+</head>
+<body>
+<div class="app auth-app">
+<main class="auth-complete">
+<section class="card auth-card" aria-labelledby="complete-title">
+<span class="tag">Signed in</span>
+<h1 id="complete-title">Google sign-in complete</h1>
+<p class="sub">Continue to your StudentConnect dashboard.</p>
+<div class="actions spaced"><a class="btn p" href="{{ dashboard_url }}">Continue to StudentConnect</a></div>
+</section>
+</main>
+</div>
+<script nonce="{{ g.script_nonce }}">window.location.replace({{ dashboard_url|tojson }});</script>
+</body>
+</html>
