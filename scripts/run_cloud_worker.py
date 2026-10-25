@@ -144,9 +144,20 @@ def cursor(value, previous):
     return value
 
 
-def fetch_and_score(client, deadline, fetch_only=False):
+def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
+    if provider not in ("groq", "similarity"):
+        raise ValueError("Choose groq or similarity as the scoring provider")
     if fetch_only:
         return _fetch_and_score(client, deadline, fetch_only=True, pool=None)
+    if provider == "similarity":
+        from backend.local_embeddings import LocalScorer
+        from scripts.run_similarity import score_pending
+        scorer = LocalScorer()  # Fail before external work if the local model is unavailable.
+        try:
+            status = _fetch_and_score(client, deadline, fetch_only=True, pool=None)
+            return status if status else score_pending(client, deadline, scorer)
+        finally:
+            scorer.close()
     pool = GroqKeyPool(client, deadline)
     result = 1
     try:

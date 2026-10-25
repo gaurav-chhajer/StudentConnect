@@ -491,17 +491,60 @@ Windows email-only installer remains unchanged and does not fetch or score.
 ### Run frequent hosted checks from your computer
 
 `scripts.watch_hosted_jobs` runs on your PC against the PythonAnywhere database.
-First publish the updated `backend/cloud_worker.py` through your normal reviewed
-deployment process and reload the PythonAnywhere app. The new authenticated
-`/internal/worker/email/immediate` route is required; an older server returns 404
-and the worker stops. No database migration is required for this change.
+It now defaults to **local similarity**, with no Groq calls or LLM fallback.
+Use `--fetch-only` for the five-minute job-fetch worker; that mode does no
+comparison or email delivery. The separate daily comparison workflow remains
+enabled. Groq remains an explicit `--provider groq` option for comparison mode.
+This change does not deploy or restart the hosted site.
 
-Configure the existing `STUDENTCONNECT_BASE_URL`, `STUDENTCONNECT_WORKER_KEY`
-(matching the private hosted value), and `GROQ_API_KEY` in your private local
-`.env` or process environment. Optional existing Groq key slots still apply.
-Never paste keys into commands or logs. Gmail credentials stay on PythonAnywhere.
-Resume text and preferences pass through your PC's memory and Groq for scoring;
-this worker does not save them locally. Do not enable verbose HTTP logging.
+First publish the reviewed source through your normal deployment process, back
+up the hosted SQLite database, apply migrations, and reload the PythonAnywhere
+app. `012_local_similarity.sql` adds a separate user/job ranking table; existing
+Groq scores and evidence are retained. The authenticated `similarity/work` and
+`similarity` endpoints are required; an older server returns 404 and the worker
+stops. Install only `requirements.txt` on the host: the embedding model runs on
+your PC, not in PythonAnywhere's web process.
+
+Configure the existing `STUDENTCONNECT_BASE_URL` and `STUDENTCONNECT_WORKER_KEY`
+(matching the private hosted value) in your private local `.env` or process
+environment. Local mode needs no Groq key. Never paste keys into commands or
+logs. Resume text is processed on your PC and is not sent to a model service.
+Private, user-scoped resume embeddings and extracted skill mentions are cached
+in ignored `data/local_similarity_cache.db`; raw resume text is not stored there.
+JD embeddings are shared between users. Treat vectors as private data too.
+
+Prepare the CPU dependencies and pinned, public Apache-2.0 model on the PC:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-local.txt
+.\.venv\Scripts\python.exe -B -m scripts.prepare_similarity --download
+```
+
+The explicit download uses no resume data and stores the model beneath
+`data/models/`. Normal scoring loads only local files and fails with setup
+instructions if the model is missing; it never silently downloads or uses Groq.
+The model revision and scoring version participate in cache keys. The local
+embedding/result caches each retain at most 50,000 entries, evicting older
+insertions. Repeated text reuses cached embeddings, and resume caches include
+the user ID. Result keys include user ID, resume-text hash, JD-text hash, model
+revision and scoring version. Preference changes are rechecked on the server.
+
+Long documents are split into overlapping tokenizer-sized chunks rather than
+silently truncated to MiniLM's default context. Normalized chunk embeddings are
+averaged and normalized again. Recognized skill names are compared locally;
+mentions are not proof of proficiency, required qualifications, or eligibility.
+The relevance index uses 70% nonnegative cosine similarity and 30% skill mention
+overlap; with no recognized JD skills it uses semantic similarity alone. This
+initial weighting is not a calibrated hiring prediction.
+
+Open **Local similarity** in the sidebar (`/jobs/local`) to review rankings.
+Changed resumes, preferences or posting content hide obsolete results until
+rescored. Inactive jobs and unsubscribed companies are excluded. The local
+worker scans eligible jobs in bounded pages rather than stopping at five jobs
+per user, with up to 1,000 evaluations, 10,000 pages, and the existing 50-minute
+time budget per cycle. Unfinished results remain pending for the next invocation.
+Initial model loading and encoding can take much longer than cached comparisons;
+benchmark your PC before choosing a refresh interval.
 
 Preview without external requests:
 
@@ -509,18 +552,28 @@ Preview without external requests:
 .\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs
 ```
 
-Start real fetching, scoring, and hosted immediate email delivery using `.env`:
+Start the five-minute fetch-only worker using `.env`:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs --run
+.\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs --run --fetch-only
 ```
+
+The fetch-only worker does not score jobs or send emails. Leave the separate
+daily comparison workflow enabled; do not run another five-minute fetch worker.
+To run local similarity comparisons instead, omit `--fetch-only`; local rankings
+do **not** trigger fit-score email alerts: the old minimum-fit
+threshold has not been calibrated for this new metric. Local mode does not call
+the email endpoint. Existing fit evaluations remain visible in Job matches.
+To explicitly resume the previous Groq scoring and immediate-email behavior,
+configure `GROQ_API_KEY` (optional existing key slots still apply) and append
+`--provider groq` to the command above. Gmail credentials stay on PythonAnywhere.
 
 Add `--once` to perform one real cycle. Keep the terminal open and your computer
 awake and online; Ctrl+C stops the worker. Disable the GitHub daily automation
 workflow while using this worker, and run only one scheduler. No Windows task
 is installed and no existing workflow is changed by these commands.
 
-Each cycle fetches active companies and scores pending candidates with the
+In explicit Groq mode, each cycle fetches active companies and scores pending candidates with the
 existing cloud limits, then sends up to five qualifying unsent matches per
 verified active account. Immediate delivery overrides daily/weekly timing for
 email-enabled accounts; Off, minimum scores, subscriptions, stale-score checks,
