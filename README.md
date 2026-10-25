@@ -497,13 +497,15 @@ comparison or email delivery. The separate daily comparison workflow remains
 enabled. Groq remains an explicit `--provider groq` option for comparison mode.
 This change does not deploy or restart the hosted site.
 
-First publish the reviewed source through your normal deployment process, back
-up the hosted SQLite database, apply migrations, and reload the PythonAnywhere
-app. `012_local_similarity.sql` adds a separate user/job ranking table; existing
-Groq scores and evidence are retained. The authenticated `similarity/work` and
-`similarity` endpoints are required; an older server returns 404 and the worker
-stops. Install only `requirements.txt` on the host: the embedding model runs on
-your PC, not in PythonAnywhere's web process.
+Publish the reviewed source through your normal deployment process. The
+migration-aware deploy script backs up the hosted SQLite database and applies
+`012_local_similarity.sql` before reloading; existing Groq scores and evidence
+are retained. If the hosted checkout still has the older deploy script, follow
+the one-time bootstrap instructions in the deployment section below. The
+authenticated `similarity/work` and `similarity` endpoints are required; an
+older server returns 404 and the worker stops. Install only `requirements.txt`
+on the host: the embedding model runs on your PC, not in PythonAnywhere's web
+process.
 
 Configure the existing `STUDENTCONNECT_BASE_URL` and `STUDENTCONNECT_WORKER_KEY`
 (matching the private hosted value) in your private local `.env` or process
@@ -609,12 +611,11 @@ Reminders never change preferences, and do not count as job-match emails.
 They are checked on completed worker cycles, not at a guaranteed wall-clock time.
 The same exclusive lock and uncertain-delivery pause protection cover reminders.
 
-This feature requires the additive `010_match_reminders.sql` migration. Back up
-the hosted SQLite database before running the existing migration command with
-the private hosted configuration, then reload the app. The automatic deployment
-script deliberately rejects migration changes, so this release requires the
-manual backed-up migration process. Existing users may receive their first
-reminder on the first healthy cycle if their seven-day window has already passed.
+This feature required the additive `010_match_reminders.sql` migration. The
+deployment script now makes and verifies a private SQLite backup before applying
+pending SQL migrations, and reloads only after migration verification succeeds.
+Existing users may receive their first reminder on the first healthy cycle if
+their seven-day window has already passed.
 
 ### Free daily cloud automation
 
@@ -1034,11 +1035,22 @@ One-time setup after pushing these files:
 
 Deployment accepts only the exact tested commit if it is still remote `main`.
 The hosted checkout must be clean, on `main`, and able to fast-forward. The script
-never resets, stashes, merges divergent history, installs dependencies or runs
-migrations. Changes to `requirements.txt` or `backend/migrations/` require manual
-dependency installation or backup/migration review before updating the checkout.
-Private runtime paths are blocked, and ignored files cannot be overwritten by
-the fast-forward. Existing databases, resumes and `.env` stay on the server.
+never resets, stashes, or merges divergent history. For pending SQL migrations it
+checks applied checksums, creates a uniquely named SQLite backup, verifies the
+backup, runs `python -B -m backend.migrate` with a timeout, and verifies that all
+migrations applied before permitting a web reload. A failed backup or migration
+withholds the reload and reports the failure stage. Changes to `requirements.txt`
+still require manual dependency installation. Private runtime paths are blocked,
+and ignored files cannot be overwritten by the fast-forward. Existing databases,
+resumes and `.env` stay on the server.
+
+The first rollout of this migration-aware deployment script needs a one-time
+bootstrap because the currently installed host copy may still reject migrations.
+In its dedicated Bash console, confirm `git status --short` is clean, then run
+`git pull --ff-only origin main`. Leave the web app running and rerun the failed
+Deploy PythonAnywhere workflow for the same current `main` commit. The updated
+host script then backs up, migrates, verifies, and requests the reload. Stop if
+the checkout is dirty or the fast-forward fails; do not reset or discard changes.
 
 The workflow shares the scheduled workers' concurrency group. The hosted update
 also takes the existing pipeline lock. It polls one private, atomic result file
