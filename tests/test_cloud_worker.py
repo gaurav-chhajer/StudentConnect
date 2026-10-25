@@ -757,10 +757,27 @@ class LocalHostedWatcherTests(unittest.TestCase):
                 patch.object(runner, 'fetch_and_score', return_value=0) as matching, \
                 patch.object(runner.time, 'monotonic', return_value=0), \
                 patch.object(runner, 'send_emails', return_value=0) as email:
-            self.assertEqual(watcher.run_cycle(), 0)
-        matching.assert_called_once_with(client, runner.MATCHING_SECONDS)
+            self.assertEqual(watcher.run_cycle("groq"), 0)
+        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=False, provider="groq")
         email.assert_called_once_with(client, runner.EMAIL_SECONDS, immediate=True)
         client.close.assert_called_once()
+
+    def test_fetch_only_cycle_skips_comparison_and_email(self):
+        client = MagicMock()
+        with patch.object(runner, 'HostedClient', return_value=client), \
+                patch.object(runner, 'fetch_and_score', return_value=0) as matching, \
+                patch.object(runner.time, 'monotonic', return_value=0), \
+                patch.object(runner, 'send_emails') as email:
+            self.assertEqual(watcher.run_cycle(fetch_only=True), 0)
+        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=True, provider="similarity")
+        email.assert_not_called()
+        client.close.assert_called_once()
+
+    def test_fetch_only_flag_reaches_each_run_cycle(self):
+        with patch.object(watcher, 'exclusive_cycle'), \
+                patch.object(watcher, 'run_cycle', return_value=0) as cycle:
+            self.assertEqual(watcher.main(['--run', '--fetch-only', '--once']), 0)
+        cycle.assert_called_once_with("similarity", fetch_only=True)
 
     def test_failed_matching_never_sends_and_always_closes(self):
         for failure in (1, requests.Timeout('private')):

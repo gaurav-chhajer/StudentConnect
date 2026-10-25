@@ -38,7 +38,7 @@ def google_account(conn, claims, now, linking_user=None, linking_version=None):
             if linking_user is not None and linked[0] != linking_user:
                 raise ValueError("This Google account is already linked to another profile.")
         elif linking_user is not None:
-            account = conn.execute("SELECT a.*,u.email,u.active FROM accounts a JOIN users u ON u.id=a.user_id AND a.session_version=?", (linking_user, linking_version)).fetchone()
+            account = conn.execute("SELECT a.*,u.email,u.active FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.user_id=? AND a.session_version=?", (linking_user, linking_version)).fetchone()
         else:
             if conn.execute("SELECT 1 FROM users WHERE lower(email)=?", (email,)).fetchone():
                 raise ValueError("This email already has a profile. Sign in with your password first, then open Sign in and choose Continue with Google to link it.")

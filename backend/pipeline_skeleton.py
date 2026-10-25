@@ -381,7 +381,11 @@ def filter_candidate_jobs(conn, user_row):
         """,
         (user_row["id"], user_row["id"], user_row["id"]),
     )
-    all_candidates = cur.fetchall()
+    return filter_jobs_for_user(cur.fetchall(), user_row)
+
+
+def filter_jobs_for_user(all_candidates, user_row):
+    """Apply the same preference checks to a bounded page or a full candidate list."""
     prefs = _parse_preferences(user_row)
 
     filtered = []

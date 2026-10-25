@@ -15,7 +15,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, request
 
-from backend import match_reminders, matching_tasks, pipeline_skeleton as pipeline, store
+from backend import match_reminders, matching_tasks, pipeline_skeleton as pipeline, similarity, store
 from backend.evaluation import validate_evaluation
 from scripts import run_pipeline
 
@@ -255,6 +255,74 @@ def register_routes(application, connection, database):
         if len(json.dumps(payload).encode()) > MAX_BODY_BYTES:
             raise ValueError("Work batch exceeds transfer limit")
         return payload
+
+    @routes.get("/similarity/work")
+    def similarity_work():
+        after = store.integer(request.args.get("after", "0"), 0, 2147483647)
+        job_after = store.integer(request.args.get("job_after", "0"), 0, 2147483647)
+        conn = connection()
+        if job_after:
+            user = eligible_user(conn, after)
+        else:
+            user = conn.execute("""SELECT u.id,u.resume_text,u.preferences_json FROM users u
+                JOIN accounts a ON a.user_id=u.id WHERE u.id>? AND u.active=1
+                AND a.email_verified=1 AND trim(u.resume_text)<>'' ORDER BY u.id LIMIT 1""", (after,)).fetchone()
+        if user is None:
+            if job_after:
+                return {"error": "Profile changed; restart similarity scan"}, 409
+            return {"items": [], "next": None, "job_after": 0}
+        scanned = conn.execute("""SELECT j.* FROM jobs j JOIN companies c ON c.id=j.company_id
+            WHERE j.id>? AND j.is_active=1 AND c.active=1
+            AND (NOT EXISTS(SELECT 1 FROM user_settings WHERE user_id=? AND subscriptions_configured=1)
+                 OR EXISTS(SELECT 1 FROM company_subscriptions WHERE user_id=? AND company_id=c.id))
+            ORDER BY j.id LIMIT ?""", (job_after, user["id"], user["id"], MAX_WORK_ITEMS)).fetchall()
+        eligible = {job["id"] for job in pipeline.filter_jobs_for_user(scanned, user)}
+        items, last = [], job_after
+        for job in scanned:
+            if job["id"] in eligible:
+                saved = conn.execute("""SELECT 1 FROM local_similarity WHERE user_id=? AND job_id=?
+                    AND resume_hash=? AND job_hash=? AND preferences_hash=? AND model_revision=? AND scoring_version=?""",
+                    (user["id"], job["id"], similarity.text_hash(user["resume_text"]), similarity.job_hash(job),
+                     similarity.text_hash(user["preferences_json"]), similarity.MODEL_REVISION, similarity.SCORING_VERSION)).fetchone()
+                if not saved:
+                    company = conn.execute("SELECT name FROM companies WHERE id=?", (job["company_id"],)).fetchone()
+                    item = dict(user=dict(user), job=dict(job), company_name=company[0], fingerprint=fingerprint(work_identity(user, job)))
+                    if len(json.dumps(dict(items=[*items, item]), ensure_ascii=False).encode("utf-8")) > MAX_BODY_BYTES - 1024:
+                        if not items:
+                            raise ValueError("One similarity input exceeds the transfer limit")
+                        return {"items": items, "next": user["id"], "job_after": last}
+                    items.append(item)
+            last = job["id"]
+        return {"items": items, "next": user["id"], "job_after": last if len(scanned) == MAX_WORK_ITEMS else 0}
+
+    @routes.post("/similarity")
+    def save_similarity():
+        data = body()
+        user_id, job_id = positive_id(data.get("user_id")), positive_id(data.get("job_id"))
+        conn = connection()
+        with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
+            conn.execute("BEGIN IMMEDIATE")
+            user = eligible_user(conn, user_id)
+            job = conn.execute("SELECT * FROM jobs WHERE id=? AND is_active=1", (job_id,)).fetchone()
+            if user is None or job is None or data.get("fingerprint") != fingerprint(work_identity(user, job)):
+                return {"error": "Inputs changed; result discarded"}, 409
+            if job["company_id"] not in matching_tasks.companies_for_user(conn, user_id):
+                return {"error": "Subscription changed; result discarded"}, 409
+            if not pipeline.filter_jobs_for_user([job], user):
+                return {"error": "Job is no longer eligible"}, 409
+            value = similarity.validate_result(data.get("result"), user["resume_text"], pipeline.extract_job_description(job))
+            conn.execute("""INSERT INTO local_similarity(user_id,job_id,resume_hash,job_hash,preferences_hash,
+                model_revision,scoring_version,cosine,skill_overlap,rank_score,matched_skills,jd_skills_not_mentioned,updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,job_id) DO UPDATE SET
+                resume_hash=excluded.resume_hash,job_hash=excluded.job_hash,preferences_hash=excluded.preferences_hash,
+                model_revision=excluded.model_revision,scoring_version=excluded.scoring_version,cosine=excluded.cosine,
+                skill_overlap=excluded.skill_overlap,rank_score=excluded.rank_score,matched_skills=excluded.matched_skills,
+                jd_skills_not_mentioned=excluded.jd_skills_not_mentioned,updated_at=excluded.updated_at""",
+                (user_id, job_id, similarity.text_hash(user["resume_text"]), similarity.job_hash(job),
+                 similarity.text_hash(user["preferences_json"]), value["model_revision"], value["scoring_version"],
+                 value["cosine"], value["skill_overlap"], value["rank_score"], json.dumps(value["matched_skills"]),
+                 json.dumps(value["jd_skills_not_mentioned"]), datetime.now(timezone.utc).isoformat()))
+        return {"saved": True}
 
     @routes.post("/score")
     def score():

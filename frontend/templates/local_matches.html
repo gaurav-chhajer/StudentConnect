@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+{% from 'macros.html' import pagination,company_heading with context %}
+{% block title %}Local similarity · StudentConnect{% endblock %}
+{% block content %}
+<div class="top2"><div><h1>Local similarity</h1><p class="sub">Your eligible jobs, ranked locally by document similarity and skill mentions.</p></div><a class="btn" href="{{ url_for('jobs') }}">View saved fit evaluations</a></div>
+<p class="notice">These are relevance rankings, not verified fit scores or eligibility decisions. They do not trigger fit-score email alerts. Review the full job description before applying.</p>
+{% for item in matches %}
+<section class="card">
+{{ company_heading(item.title,item.company_name,item.location or 'Not specified') }}
+<p><strong>Relevance index: {{ item.rank_score|round(1) }}/100</strong></p>
+<p class="sub">Cosine similarity: {{ item.cosine|round(3) }} · Skill mention overlap: {{ (item.skill_overlap*100)|round(1) }}%</p>
+<p>Skills mentioned in both: {{ item.matched_skills|join(', ') or 'None recognized' }}</p>
+<p>JD skills not mentioned in your resume: {{ item.jd_skills_not_mentioned|join(', ') or 'None recognized' }}</p>
+<p class="sub">A mention does not establish proficiency. Skills not mentioned are unknown, rather than confirmed missing qualifications. The index combines 70% nonnegative cosine similarity and 30% skill overlap; if no JD skills are recognized, it uses cosine similarity alone.</p>
+{% if item.url %}<a class="btn p" href="{{ item.url }}" rel="noopener noreferrer" target="_blank">Read posting and apply</a>{% endif %}
+</section>
+{% else %}<section class="card">No current local rankings yet. Select companies, save your resume, and run the local similarity worker.</section>{% endfor %}
+{{ pagination('local_matches') }}
+{% endblock %}

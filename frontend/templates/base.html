@@ -12,7 +12,7 @@
 <body><a class="skip-link" href="#main">Skip to content</a><canvas class="match-constellation" id="match-constellation" aria-hidden="true"></canvas><div class="app"><aside class="side"><a class="logo" href="{{ url_for('dashboard') }}"><i aria-hidden="true"></i>StudentConnect</a>
 <nav class="nav" aria-label="Main"><div class="cap">Menu</div>
 {% for endpoint,label in navigation %}<a {% if active == endpoint %}class="on" aria-current="page" role="link" aria-disabled="true"{% else %}href="{{ url_for(endpoint) }}"{% endif %}>{{ icon(endpoint) }}{{ 'Upload resume' if endpoint == 'resume' and not has_resume else label }}</a>
-{% if endpoint == 'jobs' %}<a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}{{ 'Select companies' if not has_companies else 'Target companies' }}</a>{% endif %}
+{% if endpoint == 'jobs' %}<a href="{{ url_for('local_matches') }}">{{ icon('jobs') }}Local similarity</a><a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}{{ 'Select companies' if not has_companies else 'Target companies' }}</a>{% endif %}
 {% if endpoint == 'applications' %}<a href="{{ url_for('settings_page') }}#email">{{ icon('email') }}Email alerts</a>{% endif %}
 {% endfor %}{% if is_account_admin %}<a href="{{ url_for('accounts.invitations') }}">Invite testers</a>{% endif %}</nav>
 {% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Sign out</button></form>{% endif %}

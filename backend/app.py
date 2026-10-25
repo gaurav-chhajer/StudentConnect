@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, store
+from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, similarity, store
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -230,6 +230,20 @@ def create_app(database_path=None, upload_dir=None):
                     application.logger.warning("Job description unavailable (job_id=%s)", data["selected"]["job_id"])
                     data["selected"]["description"] = "The saved posting has no usable description. Read the source posting before applying."
         return render("jobs", data)
+
+    @application.get("/jobs/local")
+    def local_matches():
+        data = context()
+        try:
+            page = store.integer(request.args.get("page", "1"), 1, 1000000)
+        except ValueError as error:
+            data["message"] = str(error)
+            return render("empty", data, 400)
+        data["matches"], data["pages"] = similarity.matches(connection(), data["user"]["id"], page)
+        data["page"] = page
+        for item in data["matches"]:
+            item["url"] = store.safe_url(item["url"] or "")
+        return render("local_matches", data)
 
     @application.post("/jobs/searches")
     def save_search():
