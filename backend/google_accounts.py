@@ -84,7 +84,12 @@ def register_routes(app, connection, now):
     def login():
         if not app.config["GOOGLE_LOGIN_ENABLED"]:
             return failure("Google sign-in is not configured yet.", 503)
-        if not accounts.request_allowed(connection(), "login", now()):
+        try:
+            allowed = accounts.request_allowed(connection(), "login", now())
+        except sqlite3.Error as error:
+            app.logger.error("Google sign-in storage unavailable (%s)", type(error).__name__)
+            return failure("Google sign-in is temporarily unavailable. Please try again later.", 503)
+        if not allowed:
             return failure("Too many attempts. Wait five minutes and try again.", 429)
         state, browser = accounts.secrets.token_urlsafe(32), accounts.secrets.token_urlsafe(32)
         try:
@@ -93,11 +98,15 @@ def register_routes(app, connection, now):
             app.logger.error("Google authorization unavailable (%s)", type(error).__name__)
             return failure("Google sign-in is temporarily unavailable. Try again later.", 503)
         timestamp = int(now().timestamp())
-        with connection() as conn:
-            conn.execute("DELETE FROM google_login_states WHERE expires_at<=?", (timestamp,))
-            conn.execute("INSERT INTO google_login_states(state_hash,browser_hash,nonce,code_verifier,user_id,session_version,expires_at) VALUES(?,?,?,?,?,?,?)",
-                         (accounts.token_digest(state), accounts.token_digest(browser), authorization["nonce"], authorization["code_verifier"],
-                          g.account["user_id"] if g.account else None, g.account["session_version"] if g.account else None, timestamp + STATE_SECONDS))
+        try:
+            with connection() as conn:
+                conn.execute("DELETE FROM google_login_states WHERE expires_at<=?", (timestamp,))
+                conn.execute("INSERT INTO google_login_states(state_hash,browser_hash,nonce,code_verifier,user_id,session_version,expires_at) VALUES(?,?,?,?,?,?,?)",
+                             (accounts.token_digest(state), accounts.token_digest(browser), authorization["nonce"], authorization["code_verifier"],
+                              g.account["user_id"] if g.account else None, g.account["session_version"] if g.account else None, timestamp + STATE_SECONDS))
+        except sqlite3.Error as error:
+            app.logger.error("Google sign-in state unavailable (%s)", type(error).__name__)
+            return failure("Google sign-in is temporarily unavailable. Please try again later.", 503)
         response = redirect(authorization["url"])
         response.set_cookie(COOKIE_NAME, browser, max_age=STATE_SECONDS, path=CALLBACK_PATH,
                             secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
