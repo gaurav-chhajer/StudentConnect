@@ -115,7 +115,7 @@ def create_app(database_path=None, upload_dir=None):
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            "form-action 'self' https://accounts.google.com; base-uri 'none'; frame-ancestors 'none'"
         )
         if getattr(g, "script_nonce", None):
             response.headers["Content-Security-Policy"] += (
