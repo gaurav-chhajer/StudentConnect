@@ -29,8 +29,7 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Run offline tests
         run: python -B -m unittest discover -s tests
-      - name: Upload verified release and reload
+      - name: Restore last successful WSGI entry point
         env:
           PYTHONANYWHERE_API_TOKEN: ${{ secrets.PYTHONANYWHERE_API_TOKEN }}
-          DEPLOY_SHA: ${{ github.sha }}
-        run: python -B -m scripts.deploy_pythonanywhere_api --sha "$DEPLOY_SHA"
+        run: python -B -m scripts.restore_pythonanywhere_wsgi
