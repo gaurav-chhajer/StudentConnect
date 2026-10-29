@@ -137,7 +137,10 @@ def _import_application(release):
 
 
 def _preflight(release):
-    result = subprocess.run([sys.executable, '-B', '-m', 'scripts.hosted_release', '--preflight', str(release)],
+    python = ROOT / '.venv/bin/python'
+    if not python.is_file():
+        raise ValueError('Hosted virtual environment Python is missing')
+    result = subprocess.run([str(python), '-B', '-m', 'scripts.hosted_release', '--preflight', str(release)],
                             cwd=ROOT, capture_output=True, text=True, timeout=60)
     if result.returncode != 0:
         raise RuntimeError('Release application failed its isolated startup check')
@@ -173,7 +176,8 @@ def application():
                 _migration_module(release).migrate_pending(
                     database=DATA / 'jobs.db', migration_dir=release / 'backend/migrations',
                     backup_dir=DATA / 'backups', deadline=time.time() + 90,
-                    deployment_sha=request['sha'], runtime_root=release)
+                    deployment_sha=request['sha'], runtime_root=release,
+                    python_executable=ROOT / '.venv/bin/python')
                 stage = 'startup'
                 _preflight(release)
                 importing = True

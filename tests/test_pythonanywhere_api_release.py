@@ -88,6 +88,19 @@ class ReleaseTests(unittest.TestCase):
                 module = release._migration_module(root)
                 self.assertEqual(module.migrate_pending(runtime_root=root), root)
 
+    def test_preflight_uses_configured_virtualenv_python(self):
+        with tempfile.TemporaryDirectory(dir='tests') as directory:
+            root = Path(directory)
+            python = root / '.venv/bin/python'
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b'local test executable placeholder')
+            candidate = root / '.releases' / SHA
+            with patch.object(release, 'ROOT', root), patch.object(release.subprocess, 'run') as command:
+                command.return_value.returncode = 0
+                release._preflight(candidate)
+            self.assertEqual(command.call_args.args[0][0], str(python))
+            self.assertEqual(command.call_args.kwargs['cwd'], root)
+
     def test_failed_preparation_keeps_previous_release_and_records_safe_status(self):
         with tempfile.TemporaryDirectory(dir='tests') as directory:
             root = Path(directory)
@@ -169,9 +182,11 @@ class ApiTests(unittest.TestCase):
             applied = migration.migrate_pending(database=Path('tests/jobs.db'),
                                                 migration_dir=runtime_root / 'backend/migrations',
                                                 deadline=migration.time.time() + 30,
-                                                runtime_root=runtime_root)
+                                                runtime_root=runtime_root,
+                                                python_executable=Path('tests/venv/python'))
         self.assertEqual(applied, ['013.sql'])
         self.assertEqual(command.call_args.kwargs['cwd'], runtime_root)
+        self.assertEqual(command.call_args.args[0][0], str(Path('tests/venv/python')))
 
 
 if __name__ == '__main__':

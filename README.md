@@ -1100,6 +1100,8 @@ disk and is served if extraction, migration, or the isolated startup check fails
 An unexpected failure during the final in-process import requires a new reload
 after the cause is fixed. Application data and credentials remain
 in `/home/GauravChhajer/StudentConnect`.
+The migration and startup checks run with that checkout's `.venv/bin/python`,
+because the WSGI process itself runs under uWSGI.
 
 Keep `PYTHONANYWHERE_API_TOKEN` in GitHub Actions secrets. The existing PythonAnywhere
 web app must continue to import `from wsgi import application` from that project
