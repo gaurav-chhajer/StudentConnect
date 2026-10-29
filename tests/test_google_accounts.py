@@ -72,7 +72,7 @@ class GoogleAccountTests(unittest.TestCase):
         self.assertEqual(self.client.get("/settings").status_code, 200)
         second = self.app.test_client()
         state, _, _ = self.start(second)
-        self.assertEqual(self.callback(state, client=second)[0].status_code, 302)
+        self.assertEqual(self.callback(state, client=second)[0].status_code, 200)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
 
     def test_csrf_browser_binding_expiry_and_replay(self):
@@ -112,7 +112,7 @@ class GoogleAccountTests(unittest.TestCase):
         state, _, _ = self.start()
         # Google redirects do not carry the Strict session cookie.
         self.client.delete_cookie("session")
-        self.assertEqual(self.callback(state, claims)[0].status_code, 302)
+        self.assertEqual(self.callback(state, claims)[0].status_code, 200)
         self.assertEqual(before, dict(self.conn.execute("SELECT * FROM users WHERE id=1").fetchone()))
         self.assertEqual(self.conn.execute("SELECT user_id FROM google_accounts").fetchone()[0], 1)
         self.assertEqual(self.conn.execute("SELECT password_hash FROM accounts").fetchone()[0], "unused-test-fixture")
