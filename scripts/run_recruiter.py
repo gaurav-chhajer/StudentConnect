@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import sqlite3
 from contextlib import closing
@@ -56,7 +57,15 @@ def main(argv=None):
     args=parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO,format='%(levelname)s: %(message)s')
     os.environ['PLAYWRIGHT_BROWSERS_PATH']=str(work.ROOT/'data/browser-binaries')
+    file_handler=None
     try:
+        log_path=work.ROOT/'data/recruiter.log'
+        if not log_path.resolve().is_relative_to(work.ROOT/'data'):
+            raise ValueError('Recruiter log must remain inside private data/')
+        file_handler=RotatingFileHandler(log_path,maxBytes=2*1024*1024,backupCount=3,encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s: %(message)s'))
+        logging.getLogger().addHandler(file_handler)
+        logger.info('Starting recruiter command=%s workflow=%s; progress log=data/recruiter.log',args.command,args.workflow_id)
         if args.workflow_id is not None and args.workflow_id<=0:
             raise ValueError('Workflow ID must be positive')
         if args.command=='init':
@@ -176,11 +185,17 @@ def main(argv=None):
         if isinstance(error,work.pipeline.requests.RequestException):
             status=error.response.status_code if error.response is not None else 'unavailable'
             logger.error('Provider request stopped (%s, HTTP %s); no automatic retry',type(error).__name__,status)
+            if isinstance(error,work.gemini_resume.ProviderResponseError):
+                logger.error('%s',error.safe_hint)
         elif type(error) is ValueError or isinstance(error,work.browser.NeedsReview):
             logger.error('Workflow stopped: %s',str(error))
         else:
             logger.error('Workflow stopped (%s); inspect private configuration and saved stage',type(error).__name__)
         return 1
+    finally:
+        if file_handler is not None:
+            logging.getLogger().removeHandler(file_handler)
+            file_handler.close()
 
 
 if __name__=='__main__':

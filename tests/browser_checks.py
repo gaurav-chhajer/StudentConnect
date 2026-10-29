@@ -6,6 +6,7 @@ Every request is fulfilled locally; the default suite needs no browser install.
 import os
 import json
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from playwright.sync_api import sync_playwright
@@ -57,6 +58,36 @@ class OfflineBrowserTests(unittest.TestCase):
         result=browser.submit(self.page,URL,self.content,self.answers,before)
         self.assertEqual(intent,['submitting'])
         self.assertIn('confirmation',result)
+
+    def test_agent_prepares_submits_real_form_and_restart_does_not_repeat(self):
+        from backend import personal_applications as work, recruiter_ai as ai, recruiter_workflow as flow
+        from scripts import run_recruiter_agent as agent
+        from tests import test_personal_applications as fixtures
+
+        fixture=fixtures.ApplicationWorkflowTests()
+        fixture.setUp()
+        self.addCleanup(fixture.doCleanups)
+        self.serve()
+        @contextmanager
+        def page_factory():
+            yield self.page
+        generated={'resume_text':fixtures.RESUME,'cover_note':'I build Python projects.',
+                   'change_log':[],'gaps':[],'evidence':[],'verification':{'faithful':True,'issues':[]}}
+        real_send=work.send
+        def send(conn,profile,run_id,tracker):
+            return real_send(conn,profile,run_id,tracker,page_factory=page_factory)
+        with patch.object(work.pipeline,'GROQ_API_KEY','synthetic'), \
+                patch.object(ai,'materials',return_value=generated) as generate, \
+                patch.object(work.pipeline,'score_job_for_user',return_value=fixtures.evaluation(85)), \
+                patch.object(flow,'export'),patch.object(flow,'export_materials'), \
+                patch.object(work,'send',side_effect=send) as sends:
+            first=agent.cycle(fixture.conn,fixture.profile,1,live=True)
+            self.assertEqual(first,{'status':'complete','applied':1,'blocked':0})
+            self.assertEqual(fixture.row()['state'],'applied')
+            self.assertEqual(agent.cycle(fixture.conn,fixture.profile,1,live=True),first)
+        generate.assert_called_once()
+        sends.assert_called_once()
+        self.assertEqual(fixture.conn.execute('SELECT count(*) FROM applications').fetchone()[0],1)
 
     def test_greenhouse_form_uses_its_adapter(self):
         self.serve(FORM.replace('class="application-form"','id="application_form"'))

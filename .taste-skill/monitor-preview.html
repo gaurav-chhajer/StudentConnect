@@ -1,0 +1,108 @@
+
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Workflow monitor · StudentConnect</title>
+<link rel="icon" type="image/svg+xml" href="/frontend/static/favicon.svg">
+<link rel="stylesheet" href="/frontend/static/css/sc.css">
+<link rel="stylesheet" href="/frontend/static/css/theme.css">
+<link rel="stylesheet" href="/frontend/static/css/app.css">
+<link rel="stylesheet" href="/frontend/static/css/wow.css">
+<link rel="stylesheet" href="/frontend/static/css/preferences.css">
+<script defer nonce="iNWrjzc4LkhOfIwc6IqU1su_XayEB28K_VpU3FoNg3g" src="/frontend/static/js/constellation.js"></script>
+<link rel="stylesheet" href="/frontend/static/css/workflow-monitor.css">
+<script defer nonce="iNWrjzc4LkhOfIwc6IqU1su_XayEB28K_VpU3FoNg3g" src="/frontend/static/js/workflow-monitor.js"></script>
+</head>
+<body class="monitor-page"><a class="skip-link" href="#main">Skip to content</a><canvas class="match-constellation" id="match-constellation" aria-hidden="true"></canvas><div class="app"><aside class="side"><a class="logo" href="/"><i aria-hidden="true"></i>StudentConnect</a>
+<details class="wm-mobile-nav" open><summary>Menu</summary><nav class="nav" aria-label="Main"><div class="cap">Menu</div>
+<a href="/">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"></path></svg>
+Dashboard</a>
+
+
+<a href="/jobs">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h16v11H4zM9 8V5h6v3"></path></svg>
+Job matches</a>
+<a href="/jobs/local">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h16v11H4zM9 8V5h6v3"></path></svg>
+Local similarity</a><a href="/settings#companies">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3"></path></svg>
+Target companies</a>
+
+<a href="/resume">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 3h7l4 4v14H7zM14 3v4h4"></path></svg>
+My resume</a>
+
+
+<a href="/applications">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12l4 4 10-10"></path></svg>
+Applications</a>
+
+<a href="/settings#email">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 6h18v12H3zM3 7l9 7 9-7"></path></svg>
+Email alerts</a>
+<a href="/analytics">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6"></path></svg>
+Analytics</a>
+
+
+<a href="/settings">
+
+<svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 8v8M8 12h8M4 4h16v16H4z"></path></svg>
+Settings</a>
+
+
+<a href="/admin/workflow-monitor" class="on" aria-current="page">Workflow monitor</a><a href="/accounts/invitations">Invite testers</a></nav></details>
+<form method="post" action="/logout"><input type="hidden" name="csrf_token" value="88cU9YmwBx3NiLArYN8N6SLXt5jWJ0xx-EvoFiCK_Ek"><button class="btn" type="submit">Sign out</button></form>
+<div class="me"><div class="av">O</div><div><strong>Owner</strong><div class="co"></div></div></div>
+</aside><main class="main" id="main" tabindex="-1">
+
+
+
+
+
+
+<div class="wm-head"><div><p class="wm-scope">StudentConnect / Your admin workspace</p><h1>Workflow monitor</h1><p class="wm-muted">Every opening, every check, every confirmed application.</p></div><div class="wm-refresh"><button type="button" id="wm-refresh">Refresh now</button><button type="button" id="wm-auto" aria-pressed="true">Auto-refresh on</button><p id="wm-refresh-status" role="status">Checks for updates every 10 seconds.</p></div></div>
+<form class="wm-filters" method="get">
+<label>Workstream<select name="workflow" aria-label="Workstream"><option value="0">Local discovery, scoring &amp; email</option><option value="1" selected>Workflow 1 · materials ready</option></select></label>
+<label>Jobs<select name="stage" aria-label="Jobs"><option value="all" selected>All saved jobs</option><option value="scored" >Scored</option><option value="prepared" >Resume prepared</option><option value="applied" >Applied</option><option value="review" >Needs review</option></select></label>
+<label>Activity<select name="severity" aria-label="Activity"><option value="all" selected>All events</option><option value="error" >Errors</option><option value="warning" >Needs attention</option><option value="info" >Progress</option></select></label>
+<button type="submit">Show workstream</button></form>
+<div id="monitor-live" data-updated="2026-10-29T10:17:33.953692+00:00">
+
+<section class="wm-workers" aria-label="Last reported worker status">
+<article><div class="wm-worker-label"><h2>Job discovery</h2><span class="wm-state waiting">waiting</span></div><p>Openings saved</p><small>Last reported: <time datetime="2026-10-29T10:17:33.948691+00:00">2026-10-29T10:17:33.948691+00:00</time></small></article><article><div class="wm-worker-label"><h2>Local scoring</h2><span class="wm-state idle">idle</span></div><p>Scoring check finished</p><small>Last reported: <time datetime="2026-10-29T10:17:33.949691+00:00">2026-10-29T10:17:33.949691+00:00</time></small></article><article><div class="wm-worker-label"><h2>Email delivery</h2><span class="wm-state idle">idle</span></div><p>Email check finished</p><small>Last reported: <time datetime="2026-10-29T10:17:33.949691+00:00">2026-10-29T10:17:33.949691+00:00</time></small></article><article><div class="wm-worker-label"><h2>Application agent</h2><span class="wm-state error">error</span></div><p>Gemini settings are missing</p><small>Last reported: <time datetime="2026-10-29T10:17:33.949691+00:00">2026-10-29T10:17:33.949691+00:00</time></small></article>
+</section>
+<p class="wm-freshness">Snapshot <time datetime="2026-10-29T10:17:33.953692+00:00">2026-10-29T10:17:33.953692+00:00</time> · Updates older than 15 minutes are marked stale. A schedule does not prove a process is running.</p>
+<section class="wm-problem"><div><span class="wm-state error">Application agent</span><h2>Gemini settings are missing</h2><p>This worker process cannot see both the Gemini key and model.</p></div><p><strong>What to do</strong><br>Set GEMINI_API_KEY and GEMINI_MODEL in the same terminal that starts the agent. Never paste the key into this page.</p></section>
+
+<div class="wm-summary">
+<section class="wm-panel"><div class="wm-section-title"><h2>Saved workflow progress</h2><span class="wm-state">1 jobs</span></div>
+<div class="wm-progress" aria-label="Saved job counts">
+<div class="wm-progress-row"><span>Verified / saved</span><div class="wm-track"><span style="width:100.0%"></span></div><strong>1</strong></div><div class="wm-progress-row"><span>Scored</span><div class="wm-track"><span style="width:100.0%"></span></div><strong>1</strong></div><div class="wm-progress-row"><span>Resume prepared</span><div class="wm-track"><span style="width:100.0%"></span></div><strong>1</strong></div><div class="wm-progress-row"><span>Applied</span><div class="wm-track"><span style="width:0.0%"></span></div><strong>0</strong></div>
+</div><p class="wm-muted">Counts overlap as jobs move through stages. Counts describe this saved workstream.</p></section>
+<section class="wm-panel wm-checks"><h2>Submission rules</h2><div class="wm-rule"><span>Original fit score</span><strong>&gt; 60</strong></div><div class="wm-rule"><span>Final document minimum</span><strong>80 / 100</strong></div><div class="wm-rule"><span>Target for originals at 80–89</span><strong>90 / 100</strong></div><div class="wm-rule"><span>Needs review</span><strong>0</strong></div><div class="wm-rule"><span>Included in email history</span><strong>0</strong></div><p class="wm-muted">Local relevance and AI fit are different measures. Neither predicts hiring probability.</p></section>
+</div>
+<section class="wm-panel wm-jobs" aria-labelledby="wm-jobs-title"><div class="wm-section-title"><h2 id="wm-jobs-title">Job journey</h2><span>1 matching jobs · page 1 of 1</span></div>
+<div class="wm-table-wrap"><table><thead><tr><th>Job &amp; source</th><th class="wm-number">Original fit</th><th class="wm-number">Final fit</th><th>Resume</th><th>Application</th></tr></thead><tbody>
+<tr><td><details id="wm-job-1"><summary><strong>Python Engineer</strong><span>Test company · Lever · #1</span></summary><div class="wm-job-detail"><p>No confirmed application yet.</p><dl><dt>Fetched / verified</dt><dd><time datetime="2026-10-29T00:00:00+00:00">2026-10-29T00:00:00+00:00</time></dd><dt>Local relevance</dt><dd>Not scored locally</dd><dt>Notion</dt><dd>No prepared application</dd><dt>Email history</dt><dd>No sent digest recorded in this view</dd></dl><a href="https://jobs.lever.co/test/one" target="_blank" rel="noopener noreferrer">Open original posting ↗</a></div></details></td><td class="wm-number">75</td><td class="wm-number"><span class="wm-score-good">85</span><small>+10 vs original</small></td><td>Revised resume</td><td><span class="wm-state ">Not selected</span></td></tr>
+
+</tbody></table></div>
+<div class="wm-pagination"></div></section>
+<div class="wm-bottom">
+<section class="wm-panel"><div class="wm-section-title"><h2>Activity log</h2><span>Newest first · safe events only</span></div><ol class="wm-events">
+<li class="error"><time datetime="2026-10-29T10:17:33.949691+00:00">2026-10-29T10:17:33.949691+00:00</time><div><strong>Gemini settings are missing</strong><p>This worker process cannot see both the Gemini key and model.</p><details id="wm-event-4"><summary>How to resolve</summary><p>Set GEMINI_API_KEY and GEMINI_MODEL in the same terminal that starts the agent. Never paste the key into this page.</p><small>Event code: <code>missing_gemini</code></small></details></div></li><li class="info"><time datetime="2026-10-29T10:17:33.949691+00:00">2026-10-29T10:17:33.949691+00:00</time><div><strong>Email check finished</strong><p>The scheduled digest check finished. Sent jobs appear in job history.</p><details id="wm-event-3"><summary>Next step</summary><p>No action needed.</p><small>Event code: <code>email_idle</code></small></details></div></li><li class="info"><time datetime="2026-10-29T10:17:33.949691+00:00">2026-10-29T10:17:33.949691+00:00</time><div><strong>Scoring check finished</strong><p>The local scoring pass finished. New eligible work remains queued.</p><details id="wm-event-2"><summary>Next step</summary><p>No action needed.</p><small>Event code: <code>score_idle</code></small></details></div></li><li class="info"><time datetime="2026-10-29T10:17:33.948691+00:00">2026-10-29T10:17:33.948691+00:00</time><div><strong>Openings saved</strong><p>The company-board results were saved locally. Recorded value: 16.0.</p><details id="wm-event-1"><summary>Next step</summary><p>Open a job below to inspect its saved stages.</p><small>Event code: <code>fetch_done</code></small></details></div></li>
+</ol></section>
+<section class="wm-panel"><h2>Source coverage</h2><p class="wm-muted">Select an application workflow to inspect its saved source coverage. Local board checks appear in the activity log.</p><p class="wm-muted">Unavailable sources are incomplete coverage. Zero results never mean every source was searched successfully.</p></section>
+</div>
+</div>
+
+<p class="sub">Fit scores estimate resume compatibility, not hiring probability. This workspace is local to your computer.</p>
+</main></div></body></html>

@@ -1,16 +1,18 @@
 """Persistent six-stage local workflow with an explicit post-search approval gate."""
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from backend import application_browser as browser, gemini_resume as gemini
+from backend import application_browser as browser, gemini_resume as gemini, workflow_monitor as monitor
 from backend import personal_applications as work, recruiter_ai as ai, recruiter_export, recruiter_sources
 from backend.evaluation import validate_evaluation
 from backend.cloud_worker import INDIA
 
 MIN_ANNUAL_INR=800000
+logger=logging.getLogger(__name__)
 
 
 def utc_now():
@@ -118,22 +120,32 @@ def assess(posting,clock):
 
 def search(conn,profile,workflow_id,page_factory=recruiter_sources.research_page,clock=None):
     user,workflow=load(conn,profile,workflow_id)
-    if workflow['state'] not in ('analyzed','searching'):
+    has_rows=conn.execute('SELECT 1 FROM recruiter_jobs WHERE workflow_id=?',(workflow_id,)).fetchone()
+    if workflow['state'] not in ('analyzed','searching') and not (workflow['state']=='awaiting_approval' and not has_rows):
         raise ValueError('Search is frozen after the spreadsheet approval checkpoint')
-    if conn.execute('SELECT 1 FROM recruiter_jobs WHERE workflow_id=?',(workflow_id,)).fetchone():
+    if has_rows:
         raise ValueError('Existing search records must not be overwritten')
     analysis=json.loads(workflow['analysis_json'])
     targets=[row['title'] for row in analysis['titles'][:10]]
     with conn:
         conn.execute("UPDATE recruiter_workflows SET state='searching',updated_at=? WHERE id=?",(work.now(),workflow_id))
+        monitor.record(conn,user['id'],'agent','search_start',workflow_id=workflow_id)
+    logger.info('Workflow=%s opening research browser',workflow_id)
     with page_factory() as page:
         postings,coverage=recruiter_sources.discover(conn,targets,page)
+    logger.info('Workflow=%s discovery returned %s verified postings; evaluating eligibility next',workflow_id,len(postings))
+    if not postings:
+        with conn:
+            conn.execute('UPDATE recruiter_workflows SET coverage_json=?,updated_at=? WHERE id=?',
+                         (json.dumps(coverage),work.now(),workflow_id))
+        raise ValueError('No postings could be verified. Search is incomplete; inspect data/recruiter.log. No approval workbook was created.')
     clock=utc_now() if clock is None else clock
     if clock.tzinfo is None:
         raise ValueError('Search clock must be timezone-aware')
     records=[]
     identities=set()
-    for posting in postings:
+    for index,posting in enumerate(postings,1):
+        logger.info('Workflow=%s checking eligibility posting=%s/%s',workflow_id,index,len(postings))
         identity=recruiter_sources.public_url(posting.get('apply_url') or posting['url'])
         if identity in identities:
             continue
@@ -141,6 +153,9 @@ def search(conn,profile,workflow_id,page_factory=recruiter_sources.research_page
         facts=assess(posting,clock)
         evaluation={}
         if facts['search_status']=='shortlisted':
+            logger.info('Workflow=%s scoring posting=%s with Groq',workflow_id,index)
+            with conn:
+                monitor.record(conn,user['id'],'agent','fit_start',workflow_id=workflow_id)
             evaluation=work.pipeline.score_job_for_user(user,posting_job(posting),posting['company_name'])
             validate_evaluation(evaluation,user['resume_text'],posting['description'])
         records.append((posting,facts,evaluation))
@@ -150,8 +165,13 @@ def search(conn,profile,workflow_id,page_factory=recruiter_sources.research_page
         for number,(posting,facts,evaluation) in enumerate(records,1):
             conn.execute('''INSERT INTO recruiter_jobs(workflow_id,number,posting_json,facts_json,evaluation_json)
                 VALUES(?,?,?,?,?)''',(workflow_id,number,json.dumps(posting),json.dumps(facts),json.dumps(evaluation)))
+            monitor.record(conn,user['id'],'agent','job_verified',workflow_id=workflow_id,number=number)
+            if evaluation:
+                monitor.record(conn,user['id'],'agent','fit_done',workflow_id=workflow_id,number=number,value=evaluation['fit_score'])
         conn.execute("UPDATE recruiter_workflows SET state='awaiting_approval',coverage_json=?,updated_at=? WHERE id=?",
                      (json.dumps(coverage),work.now(),workflow_id))
+        monitor.record(conn,user['id'],'agent','approval_wait',workflow_id=workflow_id,state='waiting')
+    logger.info('Workflow=%s saved %s records; awaiting your job selection',workflow_id,len(records))
     return records
 
 
@@ -246,6 +266,8 @@ def build_materials(conn,profile,workflow_id):
         original=json.loads(row['evaluation_json'])
         if review['verdict']=='Skip':
             continue
+        with conn:
+            monitor.record(conn,user['id'],'agent','resume_start',workflow_id=workflow_id,number=row['number'])
         generated=(ai.cover_materials(user['resume_text'],posting) if original['fit_score']>=90
                    else ai.materials(user['resume_text'],posting))
         baseline_content,baseline_text=gemini.document(user['resume_text'])
@@ -265,6 +287,7 @@ def build_materials(conn,profile,workflow_id):
                 for index,line in enumerate(selected_text.splitlines(),1) if line.strip()]
         generated['resume_text']=selected_text
         generated['final_score']=evaluation['fit_score']
+        generated['resume_changed']=selected_text!=baseline_text
         generated['submission']='manual_handoff'
         load(conn,profile,workflow_id)
         if original['hard_blockers'] or original['unknown_eligibility']:
@@ -311,6 +334,8 @@ def build_materials(conn,profile,workflow_id):
         with conn:
             conn.execute('UPDATE recruiter_jobs SET materials_json=? WHERE workflow_id=? AND number=?',
                          (json.dumps(generated),workflow_id,row['number']))
+            monitor.record(conn,user['id'],'agent','resume_changed' if generated['resume_changed'] else 'resume_retained',
+                           workflow_id=workflow_id,number=row['number'],value=evaluation['fit_score'])
     with conn:
         conn.execute("UPDATE recruiter_workflows SET state='materials_ready',updated_at=? WHERE id=?",(work.now(),workflow_id))
 

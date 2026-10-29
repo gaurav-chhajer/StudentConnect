@@ -1,4 +1,4 @@
-"""Background sign-in task: independent fetching and queued Groq/email delivery."""
+"""Background sign-in task: local fetching, offline similarity, and local SMTP."""
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -21,10 +21,10 @@ def main():
     root_logger.addHandler(handler)
     try:
         load_hosted_environment(PROJECT_ROOT / ".env")
-        from scripts import watch_hosted_jobs
+        from scripts import local_worker
 
-        logger.info("Sign-in worker starting: independent five-minute fetching and queued Groq/email delivery.")
-        status = watch_hosted_jobs.run_queued()
+        logger.info("Sign-in worker starting: local database, five-minute fetching, offline similarity, SMTP; email threshold=60/100.")
+        status = local_worker.run()
         logger.info("Sign-in worker stopped; result_code=%s", status)
         return status
     except Exception as error:

@@ -370,6 +370,65 @@ class ResumeTailoringTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             gemini.bounded_json(response)
 
+    def test_http_error_diagnostics_never_echo_provider_content(self):
+        response=MagicMock()
+        response.status_code=400
+        response.raise_for_status.side_effect=requests.HTTPError(response=response)
+        response.iter_content.return_value=[json.dumps({'error':{'status':'INVALID_ARGUMENT',
+            'message':'API key not valid: synthetic-private-key; synthetic-resume-text',
+            'details':[{'reason':'API_KEY_INVALID','metadata':{'key':'synthetic-private-key'}}]}}).encode()]
+        with self.assertRaises(gemini.ProviderResponseError) as caught:
+            gemini.bounded_json(response)
+        self.assertIs(caught.exception.response,response)
+        self.assertIn('invalid or expired',caught.exception.safe_hint)
+        self.assertNotIn('synthetic-private-key',str(caught.exception))
+        self.assertNotIn('synthetic-resume-text',str(caught.exception))
+
+    def test_request_logs_structure_but_no_key_or_prompt(self):
+        key='synthetic-private-key'
+        with self.assertLogs('backend.gemini_resume',level='INFO') as logs:
+            gemini.log_request_diagnostics(key,'test-model',{'type':'object'},'private resume context','private resume input',16000)
+        rendered=' '.join(logs.output)
+        self.assertNotIn(key,rendered)
+        self.assertNotIn('private resume context',rendered)
+        self.assertNotIn('private resume input',rendered)
+        for expected in ('generationConfig','key_characters','maxOutputTokens','credits','endpoint'):
+            self.assertIn(expected,rendered)
+
+    def test_response_logs_generic_html_and_redacts_keys_and_sensitive_headers(self):
+        response=requests.Response()
+        response.status_code=400
+        response.request=requests.Request('POST','https://generativelanguage.googleapis.com/v1beta/models/test:generateContent',
+            headers={'x-goog-api-key':'synthetic-private-key'}).prepare()
+        response.headers.update({'Content-Type':'text/html; charset=UTF-8','Server':'synthetic-private-key',
+                                 'Set-Cookie':'synthetic-private-session','Authorization':'synthetic-private-auth'})
+        with self.assertLogs('backend.gemini_resume',level='INFO') as logs:
+            gemini.log_response_diagnostics(response,b'<html><body>Bad Request: invalid header field value</body></html>',True)
+            gemini.log_response_diagnostics(response,b'<html>synthetic-private-resume</html>',True)
+        rendered=' '.join(logs.output)
+        for secret in ('synthetic-private-key','synthetic-private-session','synthetic-private-auth','synthetic-private-resume'):
+            self.assertNotIn(secret,rendered)
+        self.assertIn('Bad Request: invalid header field value',rendered)
+        self.assertIn('received_bytes',rendered)
+
+    def test_http_error_categories_distinguish_configuration_from_schema(self):
+        for message,expected in (('Please enable billing','billing'),
+                ('Invalid responseJsonSchema','schema'),('maxOutputTokens exceeds the limit','token limit'),
+                ('Model is not supported','model'),('User location is not supported','location')):
+            with self.subTest(message=message):
+                self.assertIn(expected,gemini.provider_error_hint({'error':{'message':message}}))
+        self.assertNotIn('synthetic-private',gemini.provider_error_hint({'error':{'message':'synthetic-private'}}))
+
+    def test_unreadable_or_oversized_http_error_remains_an_http_failure(self):
+        for payload in (b'not JSON synthetic-private',b'x'*(gemini.MAX_RESPONSE_BYTES+1)):
+            response=MagicMock()
+            response.status_code=400
+            response.raise_for_status.side_effect=requests.HTTPError(response=response)
+            response.iter_content.return_value=[payload]
+            with self.assertRaises(requests.HTTPError) as caught:
+                gemini.bounded_json(response)
+            self.assertNotIn('synthetic-private',str(caught.exception))
+
 
 class FormAndTrackerTests(unittest.TestCase):
     def controls(self):

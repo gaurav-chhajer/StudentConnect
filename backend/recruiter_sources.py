@@ -1,6 +1,7 @@
 """Read-only browser discovery and source verification; never bypass site gates."""
 
 import json
+import logging
 import re
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -12,6 +13,39 @@ ROOTS=('linkedin.com','licdn.com','indeed.com','indeed.co.in','indeed.net','well
        'greenhouse.io','lever.co','ashbyhq.com')
 SITES=('LinkedIn','Indeed','Wellfound','Greenhouse','Lever','Ashby')
 MAX_DISCOVERED=1000
+logger=logging.getLogger(__name__)
+
+
+def failure_reason(error):
+    reasons={'Posting or search page is unavailable':'http_page_unavailable',
+        'Site requires login or verification; search was not completed':'login_or_verification_required',
+        'Wellfound keyword search is unavailable without further user interaction':'wellfound_search_box_not_found',
+        'No accessible posting links found; search coverage is unverified':'no_accessible_job_links',
+        'A single verifiable JobPosting record is required':'missing_or_ambiguous_jobposting_data',
+        'Posting contains invalid structured data':'invalid_jobposting_json',
+        'Research URL is outside the supported public job sites':'unsupported_destination',
+        'Posting lacks a title, employer, or usable description':'missing_posting_fields'}
+    return reasons.get(str(error),'unclassified_'+type(error).__name__)
+
+
+def ensure_browser_open(page,error=None):
+    # Playwright can report a closed target before its cached status updates.
+    target_closed=error is not None and type(error).__name__=='TargetClosedError'
+    if target_closed or page.is_closed() or not page.context.browser.is_connected():
+        raise ValueError('Research browser/session closed or crashed. Search stopped; no jobs were approved. Keep its window open; if it was already open, the browser failure needs investigation.') from error
+
+
+def monitor_browser(browser,context,page):
+    """Record lifecycle events without page content, URLs, or browser stderr."""
+    state={'cleanup':False}
+    def record(event):
+        level=logging.INFO if state['cleanup'] else logging.WARNING
+        logger.log(level,'Research browser event=%s expected_cleanup=%s',event,state['cleanup'])
+    browser.on('disconnected',lambda *_:record('browser_disconnected'))
+    context.on('close',lambda *_:record('context_closed'))
+    page.on('close',lambda *_:record('page_closed'))
+    page.on('crash',lambda *_:record('page_crashed'))
+    return state
 
 
 def public_url(value):
@@ -55,9 +89,15 @@ def research_page():
                 else:
                     route.continue_()
             context.route('**/*',restrict)
+            lifecycle=None
             try:
-                yield context.new_page()
+                page=context.new_page()
+                lifecycle=monitor_browser(browser,context,page)
+                logger.info('Research browser started engine=chromium version=%s',browser.version)
+                yield page
             finally:
+                if lifecycle is not None:
+                    lifecycle['cleanup']=True
                 context.close()
         finally:
             browser.close()
@@ -219,8 +259,10 @@ def discover(conn,titles,page):
     links={}
     coverage={site:{'status':'not_searched','discovered':0,'verified':0,'issues':[]} for site in SITES}
     for site in ('LinkedIn','Indeed','Wellfound'):
+        ensure_browser_open(page)
         completed=0
-        for title in titles[:10]:
+        for title_index,title in enumerate(titles[:10],1):
+            logger.info('Searching source=%s title=%s/%s',site,title_index,len(titles[:10]))
             try:
                 found=portal_links(page,site,title)
                 for link in found:
@@ -228,8 +270,11 @@ def discover(conn,titles,page):
                         links.setdefault(link,site)
                 coverage[site]['discovered']+=len(found)
                 completed+=1
+                logger.info('Source=%s title=%s found=%s posting links',site,title_index,len(found))
             except Exception as error:
-                coverage[site]['issues'].append('Search unavailable ('+type(error).__name__+'); no bypass attempted')
+                ensure_browser_open(page,error)
+                coverage[site]['issues'].append('search:'+failure_reason(error))
+                logger.warning('Source=%s search stopped (%s) reason=%s; continuing with other sources',site,type(error).__name__,failure_reason(error))
                 break
         coverage[site]['status']='searched' if completed==len(titles[:10]) else 'partial' if completed else 'unavailable'
     boards=conn.execute("SELECT * FROM companies WHERE active=1 AND career_source IS NULL ORDER BY id LIMIT 1000").fetchall()
@@ -239,6 +284,7 @@ def discover(conn,titles,page):
             if company['ats_type']!=ats:
                 continue
             try:
+                logger.info('Fetching source=%s company_id=%s',site,company['id'])
                 jobs=pipeline.fetch_jobs_for_company(company)
                 for job in jobs:
                     title=job.get('title','').casefold()
@@ -249,13 +295,16 @@ def discover(conn,titles,page):
                 searched+=1
             except Exception as error:
                 coverage[site]['issues'].append('Configured board unavailable ('+type(error).__name__+')')
+                logger.warning('Source=%s company_id=%s fetch failed (%s)',site,company['id'],type(error).__name__)
         coverage[site]['status']='configured_boards_only' if searched else 'unavailable'
         coverage[site]['boards_searched']=searched
         if not searched:
             coverage[site]['issues'].append('No accessible configured board; no claim of global ATS coverage')
     postings=[]
     verified=set()
-    for url,site in links.items():
+    for index,(url,site) in enumerate(links.items(),1):
+        ensure_browser_open(page)
+        logger.info('Verifying posting=%s/%s source=%s',index,len(links),site)
         try:
             posting=read_posting(page,url)
             if posting['url'] not in verified:
@@ -263,10 +312,13 @@ def discover(conn,titles,page):
                 postings.append(posting)
                 coverage[site]['verified']+=1
         except Exception as error:
-            coverage[site]['issues'].append('Posting could not be verified ('+type(error).__name__+')')
+            ensure_browser_open(page,error)
+            coverage[site]['issues'].append('posting:'+failure_reason(error))
+            logger.warning('Posting=%s source=%s verification failed (%s) reason=%s',index,site,type(error).__name__,failure_reason(error))
     for value in coverage.values():
         value['issues']=list(dict.fromkeys(value['issues']))
         value['limits']='One accessible search result page per title; at most 1000 discovered links; configured ATS boards only'
+    logger.info('Discovery finished: verified=%s discovered=%s',len(postings),len(links))
     return postings,coverage
 
 

@@ -594,7 +594,7 @@ writes or sends. Review local/hosted logs before restarting. If delivery is
 paused, reconcile Gmail and hosted send records before clearing the hosted
 pause marker. Existing daily cloud commands retain their scheduled behavior.
 
-To start independent fetching and queued Groq scoring/email delivery automatically
+To start the complete local flow (fetching, offline similarity, and Gmail SMTP)
 when the current Windows user signs in, install its startup task:
 
 ```powershell
@@ -605,27 +605,57 @@ Start-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
 
 The installer refuses to overwrite an existing task. It uses the repository's
 `pythonw.exe` and private `.env`, preserving existing environment values, and
-runs without a terminal window or administrator privileges. Configure the hosted
-HTTPS origin, worker key, and Groq key first. Disable the separate GitHub daily
-automation workflow before starting this full worker to avoid competing schedulers.
+runs without a terminal window or administrator privileges. The launcher loads
+the private `.env` before importing credential-reading modules. Configure local
+`DIGEST_FROM_EMAIL` and `GMAIL_APP_PASSWORD`, prepare the downloaded model as above,
+and use the existing migrated `data/jobs.db`. It never calls Groq or hosted worker
+APIs, even if their credentials remain configured. No model is downloaded at runtime.
+The public website, hosted database, and GitHub workflows are separate and are
+not synchronized or changed by this local flow. Existing local accounts, resumes,
+subscriptions, job history, and sent-job records are retained.
 The worker starts at sign-in, runs on battery too, and needs an awake, online
 laptop. Sleep pauses execution; opening the lid resumes a healthy running worker.
 Fetching starts every five minutes measured from the previous fetch's start,
 without waiting for Groq or emails. A fetch taking more than five minutes finishes
 before the next starts; fetches never overlap. Successful snapshots immediately
-enter the existing hosted database, which is the durable queue. New or changed
+enter the existing local SQLite database, which is the durable queue. New or changed
 eligible jobs remain pending across restarts; current scores are excluded.
-One independent consumer scores bounded batches and checks qualifying emails
-after each healthy batch, waking on a saved snapshot or polling every 30 seconds.
-Budget-limited backlog continues in the next batch. Hosted writes are serialized
-between the two loops; ATS downloads and Groq requests run independently.
-If refreshing changes an in-flight scoring input, the server rejects that stale
-result and its latest version remains queued. Other failed or uncertain writes
-stop the affected loop for inspection, leaving the other loop independent.
-The task can remain Running with one loop stopped; inspect both loops' progress
-in `data/hosted_worker.log` (2 MB plus three rotated backups) and hosted logs before
-manually restarting. No migration, new service, or extra dependency is needed.
-Email opt-outs, thresholds, deduplication, and uncertain-send protection still apply.
+One independent consumer uses the installed CPU model to score bounded batches,
+waking on a saved snapshot or polling every 30 seconds. It sends up to five unsent
+jobs per verified active account per batch at the explicitly selected minimum
+**60/100 local similarity** (`MIN_EMAIL_SIMILARITY` in `scripts/local_worker.py`).
+These emails label similarity as a relevance ranking, never a fit percentage.
+This separate threshold does not reinterpret the Groq minimum-fit setting.
+As with the previous immediate-alert worker, Daily/Weekly timing is overridden;
+Off, company subscriptions, current result hashes, and gap-display preferences
+are honored. The existing `sent_log` email channel prevents repeat job alerts.
+Budget-limited backlog continues in the next batch. Writes use the existing
+pipeline lock; downloads and inference run outside SQLite write transactions.
+Changed inputs are rechecked before saving; stale results are discarded.
+Temporary board-read failures preserve jobs and do not cancel the next scheduled
+fetch. Model or database errors stop the affected loop for inspection. A failed
+email attempt disables emails for that process while scoring/fetching continue.
+An uncertain SMTP send or sent-history failure leaves `data/email_schedule.paused`;
+inspect Gmail and sent history before clearing it and restarting. No automatic
+retry of uncertain emails occurs. SMTP acceptance does not prove inbox delivery.
+Inspect both loops in `data/hosted_worker.log` (2 MB plus three rotated backups):
+the task can remain Running with a failed loop. No new migration or dependency
+is required. Resume and job text stay on the laptop for inference; ATS requests
+and Gmail delivery still require the internet. No-alert reminder emails remain
+a separate hosted feature and are not sent by the local similarity flow.
+
+The local website reads the same database; rankings appear under `/jobs/local`.
+To run it with private email settings while selecting localhost, use a separate
+PowerShell terminal:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -c "import os; os.environ['STUDENTCONNECT_BASE_URL'] = ''; from backend.app import app; app.run(host='127.0.0.1', port=5000, debug=False)"
+```
+
+Open `http://127.0.0.1:5000/jobs/local` and sign in with a local account. The existing
+worker key in `.env` keeps the web app's legacy Groq background matcher disabled;
+keep it configured when using this separate local worker. Website startup itself
+is manual; the five-minute automation task starts automatically at Windows sign-in.
 
 Use Windows Task Scheduler to inspect **StudentConnect Five Minute Worker**, or:
 
@@ -1105,6 +1135,109 @@ does not verify site health; check the website and PythonAnywhere error log.
 
 ## Personal local application worker
 
+### Admin workflow monitor
+
+Administrators have a **Workflow monitor** navigation tab at
+`/admin/workflow-monitor`. The route requires an authenticated admin account and
+only reads that account's workflows, scoring, application, and email history.
+Changing the workflow ID cannot reveal another account's workflow. It does not
+start workers, approve jobs, edit credentials, or send applications from the web.
+
+The monitor separates local discovery, local relevance scoring, email delivery,
+and the personal application agent. Select a workstream to see saved jobs,
+original/final AI fit scores, whether a prepared resume was revised or retained,
+confirmed application states, Notion states, and email history. Local relevance
+is labelled separately from AI fit. Older materials without a recorded revision
+flag say that the revision status was not recorded rather than guessing.
+Local job history is limited to the latest 1,000 openings from the account's
+configured target companies (or the existing all-companies default); counts
+describe that window. Job lists page 20 at a time, and activity pages scan at most
+100 events. Severity filtering applies to that event window; older activity is
+available separately. Workflow source coverage remains limited by the original
+search adapters.
+
+Migration `015_workflow_monitor.sql` adds independent worker events and last-report
+tables without changing existing job or application rows. Back up and apply it
+with the existing initializer before restarting the workers:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter init --run
+```
+
+Restart the website and existing workers to load the updated code. Worker starts
+remain explicit; the monitor does not alter Windows startup tasks. New structured
+events include fetch results, local scores, sent-digest jobs, fit evaluations,
+resume changes, approval waits, and confirmed agent submissions. Old raw text logs
+are not imported. Events store allowlisted codes, resource IDs, numeric metrics,
+and UTC timestamps; no keys, raw exception messages, resumes, or provider payloads
+are exposed. Read-only page polling occurs every 10 seconds, can be paused, and
+preserves open details. A failed refresh retains the last snapshot.
+
+Status reports show the last observed stage, not proof a process is alive. Reports
+older than 15 minutes are marked stale unless a terminal state was reported.
+Scheduled next checks are estimates. Errors use fixed explanations and recovery
+steps; unknown causes are explicitly unknown. Monitoring writes follow existing
+SQLite transactions and local worker locks. A telemetry database failure is not
+silently ignored. These audit tables grow with recorded activity; no automatic
+deletion or retention policy is introduced.
+
+Monitor checks:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest tests.test_workflow_monitor
+.\.venv\Scripts\python.exe -B -m unittest tests.monitor_browser_checks
+```
+
+### Five-minute Lever agent
+
+The first autonomous submission path is `scripts.run_recruiter_agent`. It uses
+the saved workflow, profile, scoring/rewrite checks, application states, and
+optional Notion tracker. There are no new dependencies; apply the monitoring
+migration above before starting the updated agent. Configure
+the process credentials described below and create a workflow with `analyze`
+first. Preview is read-only and makes no external calls:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter_agent --workflow-id 1
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter_agent --workflow-id 1 --run
+```
+
+`--run` authorizes discovery/scoring, preparation, and actual submission of the
+explicitly selected Lever jobs in that workflow. The agent searches an analyzed
+workflow once, exports the spreadsheet, and waits for numbered approval. In a
+second terminal, inspect the workbook and select only Lever rows, for example:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter approve --workflow-id 1 --numbers 2,5
+```
+
+The next check prepares reviewed materials and submits ready selected jobs.
+Checks start every 300 seconds, or after the previous check finishes if it took
+longer. One process owns the agent lock; each cycle also takes the existing
+application lock. Approval remains possible between cycles. `--once --run`
+performs one cycle and exits, including when waiting for approval. Ctrl+C stops
+the worker; it does not install startup tasks or change the separate local
+fetch/similarity/email worker.
+
+Original scores must exceed 60; the final validated document must score at least
+80, with 90 as the target for originals scoring 80-89. Existing factuality,
+eligibility, freshness, salary, red-flag, answer, and duplicate checks remain in
+force. Non-Lever selections stop this agent before preparation. Unknown required
+answers and other review states are never guessed. Applied runs are skipped on
+restart; failed, submitting, unknown, or uncertain Notion writes require manual
+reconciliation. Any raised error stops the process without automatic retries.
+Below-threshold or otherwise blocked materials produce exit code 2 for review.
+Confirmed submissions are saved locally before optional Notion synchronization.
+Diagnostics go to the existing private rotating `data/recruiter.log`.
+
+This milestone processes one approval batch and exits when complete. It does not
+automatically create new approval batches, continuously rescan a frozen workbook,
+or fix portal access/structured-data limitations. Start a new analysis/workflow
+for another search. Recruiter outreach/follow-up drafting remains available through
+the six-stage commands below. The browser agent uses the tested Lever adapter;
+free-form AI browser planning and other ATS submission paths are outside this
+first milestone.
+
 ### Complete six-stage workflow
 
 Use `scripts.run_recruiter` for the complete flow. It runs locally, uses the
@@ -1129,8 +1262,25 @@ and excluded sheets. Numbering is frozen after search; refreshes require a new
 workflow so approvals cannot silently move to different jobs. Spreadsheet strings
 are inline text, preventing formula injection; posting URLs are clickable links.
 
-Discovery attempts LinkedIn, Indeed, and Wellfound through public browser pages,
-and Greenhouse, Lever, and Ashby through configured active company boards. Each
+Discovery attempts LinkedIn, Indeed, and Wellfound through public browser pages
+and Greenhouse, Lever, and Ashby through configured active company boards,
+printing progress for each source, configured board, posting verification, and
+AI eligibility/scoring stage. The same diagnostics are retained privately in
+`data/recruiter.log` (2 MB plus three rotated backups). If a command exits before
+printing the workbook path, inspect the final log lines rather than assuming the
+browser's last page identifies the failure. An interrupted `searching` workflow
+with no saved rows can restart using the same workflow ID; it repeats discovery
+and may repeat AI calls completed before the interruption.
+Keep the research browser window open until discovery finishes. A closed browser
+stops the search immediately. Verification warnings include safe reason codes;
+zero verified postings leave the workflow incomplete without creating an approval
+workbook. An older empty `awaiting_approval` workflow can also retry the same
+search command; its old empty workbook contains no jobs to approve.
+Browser lifecycle diagnostics distinguish page crashes, page/context closure,
+and browser disconnects. `expected_cleanup=False` identifies events before normal
+cleanup; the browser version is logged without page content or browser stderr.
+
+Each
 source's coverage, failures, and limits are recorded in the workbook. This is
 not a claim of exhaustive global coverage: search is one accessible result page
 per title, at most 1000 discovered links, and configured boards for ATS feeds.
@@ -1276,6 +1426,21 @@ $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) 'data/browser-binaries'
 Use process environment variables for `GROQ_API_KEY`, `GEMINI_API_KEY`, and an
 explicit supported `GEMINI_MODEL`. This local worker does not load `.env`
 automatically. Keep keys private; never put them in the profile or frontend.
+If a provider request fails, the CLI prints the HTTP code and a fixed safe
+diagnostic for recognized key, billing, model, token-limit, or schema errors.
+It never prints the provider's raw response, request, resume, or credential.
+Full recruiter workflow requests also log the endpoint/model, redacted authentication, key length and
+format checks, detected-proxy flag, generation configuration, and input sizes.
+Responses log status, selected non-cookie headers and byte count. Only recognized
+generic error text is printed; arbitrary response text and successful bodies are
+withheld. Credit balances are not supplied by generateContent: verify billing in
+Google AI Studio rather than interpreting these logs as a credit-balance check.
+After a failed `analyze`, correct the reported issue and rerun `analyze --run`;
+do not repeat `init` just to diagnose a provider error. No retry is automatic.
+Full recruiter generation requests allow 10 seconds to connect and 180 seconds
+of read inactivity (previously 90 seconds), to accommodate thinking-model latency.
+Both limits appear in request diagnostics. A timeout does not confirm whether
+Google processed or billed the request; check the project before repeating calls.
 The full workflow sends the complete saved resume to Gemini for analysis,
 rewriting and factual auditing, alongside the relevant job/contact evidence.
 The older section-ordering-only call withholds its first identity block. Groq

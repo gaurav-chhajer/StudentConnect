@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, similarity, store
+from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -121,6 +121,8 @@ def create_app(database_path=None, upload_dir=None):
             response.headers["Content-Security-Policy"] += (
                 f"; script-src 'nonce-{g.script_nonce}'; script-src-attr 'none'"
             )
+        if request.endpoint == 'workflow_monitor_page':
+            response.headers['Content-Security-Policy'] += "; connect-src 'self'"
         return response
 
     @application.errorhandler(413)
@@ -420,6 +422,28 @@ def create_app(database_path=None, upload_dir=None):
             WHERE a.user_id=? ORDER BY a.updated_at DESC,a.id DESC LIMIT 200""", (user_id,)).fetchall()
         data["application_rows"] = [dict(row, url=store.safe_url(row["url"] or "")) for row in rows]
         return render("applications", data)
+
+    @application.get('/admin/workflow-monitor')
+    def workflow_monitor_page():
+        if not g.account['is_admin']:
+            return 'Administrator access required.',403
+        data=context()
+        try:
+            workflow_id=store.integer(request.args.get('workflow','0'),0,9223372036854775807)
+            page=store.integer(request.args.get('page','1'),1,1000000)
+            before=store.integer(request.args.get('before','0'),0,9223372036854775807)
+            stage=request.args.get('stage','all')
+            severity=request.args.get('severity','all')
+            if stage not in ('all','scored','prepared','applied','review') or severity not in ('all','info','warning','error'):
+                raise ValueError('Invalid monitor filter')
+        except ValueError:
+            return 'Choose valid workflow monitor filters.',400
+        try:
+            monitor=workflow_monitor.snapshot(connection(),g.user['id'],workflow_id,page=page,
+                stage=stage,severity=severity,before=before,now=utc_now())
+        except LookupError:
+            return 'Workflow not found.',404
+        return render('workflow_monitor',dict(data,monitor=monitor))
 
     @application.get("/analytics")
     def analytics():

@@ -102,6 +102,21 @@ class RecruiterWorkflowTests(unittest.TestCase):
         with patch.object(ai,'classify',return_value=result):
             self.assertEqual(flow.assess(posting(),NOW)['search_status'],'unverified')
 
+    def test_empty_search_remains_incomplete_and_can_be_retried(self):
+        workflow_id=self.create()
+        with self.conn:
+            self.conn.execute("UPDATE recruiter_workflows SET state='awaiting_approval' WHERE id=?",(workflow_id,))
+        coverage={'Indeed':{'status':'unavailable','verified':0}}
+        with patch.object(sources,'discover',return_value=([],coverage)), \
+                patch.object(ai,'classify') as classify, \
+                self.assertRaisesRegex(ValueError,'No postings could be verified'):
+            flow.search(self.conn,self.profile,workflow_id,page_factory=page_factory,clock=NOW)
+        classify.assert_not_called()
+        row=self.conn.execute('SELECT state,coverage_json FROM recruiter_workflows WHERE id=?',(workflow_id,)).fetchone()
+        self.assertEqual(row['state'],'searching')
+        self.assertEqual(json.loads(row['coverage_json']),coverage)
+        self.assertEqual(flow.rows(self.conn,workflow_id),[])
+
     def test_salary_currency_period_and_range_are_not_guessed(self):
         for value in (None,{}, {'currency':'USD','value':{'value':100000,'unitText':'YEAR'}},
                       {'currency':'INR','value':{'value':100000,'unitText':'MONTH'}},
@@ -281,6 +296,88 @@ class RecruiterWorkflowTests(unittest.TestCase):
 
 
 class RecruiterAIAndExportTests(unittest.TestCase):
+    def test_source_failure_progress_is_visible_without_private_error_text(self):
+        connection=MagicMock()
+        connection.execute.return_value.fetchall.return_value=[]
+        page=MagicMock()
+        page.is_closed.return_value=False
+        page.context.browser.is_connected.return_value=True
+        with patch.object(sources,'portal_links',side_effect=ValueError('synthetic-private-page-content')), \
+                self.assertLogs('backend.recruiter_sources',level='INFO') as logs:
+            postings,coverage=sources.discover(connection,['Software Engineer'],page)
+        self.assertEqual(postings,[])
+        self.assertEqual(coverage['Wellfound']['status'],'unavailable')
+        output=' '.join(logs.output)
+        self.assertIn('source=Wellfound',output)
+        self.assertIn('Discovery finished',output)
+        self.assertNotIn('synthetic-private-page-content',output)
+
+    def test_closed_browser_stops_discovery_immediately(self):
+        page=MagicMock()
+        page.is_closed.return_value=True
+        with patch.object(sources,'portal_links') as links, \
+                self.assertRaisesRegex(ValueError,'browser/session closed'):
+            sources.discover(MagicMock(),['Software Engineer'],page)
+        links.assert_not_called()
+
+    def test_browser_lifecycle_diagnostics_distinguish_crash_from_cleanup(self):
+        browser,context,page=MagicMock(),MagicMock(),MagicMock()
+        state=sources.monitor_browser(browser,context,page)
+        page_events=dict(page.on.call_args_list[index].args for index in range(2))
+        with self.assertLogs('backend.recruiter_sources',level='WARNING') as logs:
+            page_events['crash'](page)
+        self.assertIn('event=page_crashed expected_cleanup=False',logs.output[0])
+        state['cleanup']=True
+        with self.assertLogs('backend.recruiter_sources',level='INFO') as logs:
+            browser.on.call_args.args[1](browser)
+            context.on.call_args.args[1](context)
+            page_events['close'](page)
+        self.assertEqual(len(logs.output),3)
+        self.assertTrue(all('INFO:' in entry and 'expected_cleanup=True' in entry for entry in logs.output))
+
+    def test_failure_reason_is_safe_and_identifies_known_validation_error(self):
+        self.assertEqual(sources.failure_reason(ValueError('A single verifiable JobPosting record is required')),
+                         'missing_or_ambiguous_jobposting_data')
+        self.assertEqual(sources.failure_reason(ValueError('synthetic-private-page-content')),'unclassified_ValueError')
+
+    def test_target_closed_stops_even_when_browser_status_is_stale(self):
+        target_closed=type('TargetClosedError',(Exception,),{})
+        for phase in ('search','verification'):
+            with self.subTest(phase=phase):
+                page=MagicMock()
+                page.is_closed.return_value=False
+                page.context.browser.is_connected.return_value=True
+                connection=MagicMock()
+                connection.execute.return_value.fetchall.return_value=[]
+                with patch.object(sources,'portal_links',side_effect=target_closed('private detail') if phase=='search' else None,
+                                  return_value=['https://jobs.lever.co/synthetic/new']) as links, \
+                        patch.object(sources,'read_posting',side_effect=target_closed('private detail')) as read, \
+                        self.assertRaisesRegex(ValueError,'browser/session closed or crashed') as caught:
+                    sources.discover(connection,['Software Engineer'],page)
+                self.assertNotIn('private detail',str(caught.exception))
+                if phase=='search':
+                    links.assert_called_once()
+                    read.assert_not_called()
+                    connection.execute.assert_not_called()
+                else:
+                    read.assert_called_once()
+
+    def test_generate_uses_bounded_extended_timeout_without_retrying(self):
+        response=MagicMock()
+        response.__enter__.return_value=response
+        response.iter_content.return_value=[json.dumps({'candidates':[{'finishReason':'STOP',
+            'content':{'parts':[{'text':'{"ok": true}'}]}}]}).encode()]
+        with patch.object(ai.gemini,'configuration',return_value=('synthetic-key','test-model')), \
+                patch.object(ai.requests,'post',return_value=response) as post:
+            self.assertEqual(ai.generate('Connection fixture',{},ai.object_schema({'ok':{'type':'boolean'}})),{'ok':True})
+        self.assertEqual(post.call_args.kwargs['timeout'],(10,180))
+        post.assert_called_once()
+        with patch.object(ai.gemini,'configuration',return_value=('synthetic-key','test-model')), \
+                patch.object(ai.requests,'post',side_effect=requests.ReadTimeout) as post, \
+                self.assertRaises(requests.ReadTimeout):
+            ai.generate('Connection fixture',{},ai.object_schema({'ok':{'type':'boolean'}}))
+        post.assert_called_once()
+
     def test_analysis_requires_twenty_evidence_supported_titles(self):
         with patch.object(ai,'generate',return_value=analysis()):
             value=ai.analyze(fixtures.RESUME)
