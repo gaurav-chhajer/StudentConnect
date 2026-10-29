@@ -108,10 +108,27 @@ class RemoteTests(unittest.TestCase):
             self.assertEqual(sum(call.args[0] == 'POST' for call in session.request.call_args_list), 1)
             self.assertNotIn('private-token', ' '.join(logs.output))
 
+    def test_remote_failure_reports_safe_stage_reason_and_http_status(self):
+        success = self.response(result=dict(run_id=RUN_ID, sha=SHA, success=True))
+        cases = (
+            ([self.response(403)], 'stage=console_input reason=http_rejected http_status=403'),
+            ([self.response(), self.response(500)], 'stage=confirmation reason=http_rejected http_status=500'),
+            ([self.response(), success, self.response(502)], 'stage=web_reload reason=http_rejected http_status=502'),
+            ([deploy.requests.Timeout('private-token')], 'stage=console_input reason=network_error http_status=unavailable'),
+        )
+        for responses, expected in cases:
+            with self.subTest(expected=expected), self.assertLogs(deploy.logger, level='ERROR') as logs:
+                result, _ = self.run_deploy(responses)
+            self.assertEqual(result, 1)
+            self.assertIn(expected, ' '.join(logs.output))
+            self.assertNotIn('private-token', ' '.join(logs.output))
+
     def test_polling_is_bounded_and_never_reloads_without_confirmation(self):
-        result, session = self.run_deploy([self.response()] + [self.response(404) for _ in range(36)])
+        with self.assertLogs(deploy.logger, level='ERROR') as logs:
+            result, session = self.run_deploy([self.response()] + [self.response(404) for _ in range(36)])
         self.assertEqual(result, 1)
         self.assertEqual(session.request.call_count, 37)
+        self.assertIn('stage=confirmation reason=deadline_expired', ' '.join(logs.output))
 
     def test_invalid_configuration_and_sha_make_no_calls(self):
         with patch.dict(os.environ, PYTHONANYWHERE_API_TOKEN='', PYTHONANYWHERE_CONSOLE_ID='bad'), \

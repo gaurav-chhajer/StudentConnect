@@ -1133,6 +1133,13 @@ automatic retries. If confirmation times out, inspect the hosted checkout before
 retrying: an update may have completed without a reload. Reload acknowledgement
 does not verify site health; check the website and PythonAnywhere error log.
 
+CI reports a safe `stage`, `reason`, and HTTP status for API failures without
+printing the token or response body. `console_input` means check that the dedicated
+Bash console is running and idle; `confirmation` means inspect that console and
+`data/deployment-status.json` on the host; `web_reload` means check the web app
+reload status. A `deadline_expired` confirmation is uncertain: inspect the hosted
+checkout before triggering another deployment.
+
 ## Personal local application worker
 
 ### Admin workflow monitor

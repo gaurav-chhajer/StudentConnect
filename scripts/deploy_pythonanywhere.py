@@ -24,6 +24,18 @@ STATUS = ROOT / 'data/deployment-status.json'
 logger = logging.getLogger(__name__)
 MAX_BACKUP_SECONDS = 60
 MAX_MIGRATION_SECONDS = 90
+
+
+class RemoteDeploymentError(RuntimeError):
+    """A fixed, non-sensitive explanation of a hosted API failure."""
+
+    def __init__(self, stage, reason, http_status=None):
+        super().__init__(reason)
+        self.stage = stage
+        self.reason = reason
+        self.http_status = http_status
+
+
 SAFE_RUNTIME_FAILURES = {
     'Unexpected deployment directory': 'unexpected_deployment_directory',
     'Deployment requires a clean main checkout': 'dirty_or_non_main_checkout',
@@ -221,48 +233,56 @@ def deploy(sha):
     with requests.Session() as session:
         session.headers.update(Authorization='Token ' + token)
 
-        def call(method, path, **kwargs):
-            response = session.request(method, API + path, timeout=(10, 20),
+        def call(method, path, stage, **kwargs):
+            try:
+                return session.request(method, API + path, timeout=(10, 20),
                                        allow_redirects=False, stream=True, **kwargs)
-            return response
+            except requests.RequestException as error:
+                raise RemoteDeploymentError(stage, 'network_error') from error
 
         # Mutations are sent once. A timeout is uncertain and must stop deployment.
-        with call('POST', f'consoles/{console}/send_input/', data={'input': command}) as response:
+        with call('POST', f'consoles/{console}/send_input/', 'console_input', data={'input': command}) as response:
             if response.status_code != 200:
-                raise RuntimeError('Console input was not accepted')
+                raise RemoteDeploymentError('console_input', 'http_rejected', response.status_code)
         for _ in range(36):
             if time.time() >= deadline:
                 break
-            with call('GET', 'files/path' + str(STATUS)) as response:
+            with call('GET', 'files/path' + str(STATUS), 'confirmation') as response:
                 if response.status_code == 200:
                     chunks, size = [], 0
-                    for chunk in response.iter_content(1024):
-                        size += len(chunk)
-                        if size > 1024:
-                            raise ValueError('Deployment status exceeds its limit')
-                        chunks.append(chunk)
-                    result = json.loads(b''.join(chunks))
+                    try:
+                        for chunk in response.iter_content(1024):
+                            size += len(chunk)
+                            if size > 1024:
+                                raise RemoteDeploymentError('confirmation', 'invalid_status')
+                            chunks.append(chunk)
+                    except requests.RequestException as error:
+                        raise RemoteDeploymentError('confirmation', 'network_error') from error
+                    try:
+                        result = json.loads(b''.join(chunks))
+                    except (UnicodeError, ValueError) as error:
+                        raise RemoteDeploymentError('confirmation', 'invalid_status') from error
                     if not isinstance(result, dict):
-                        raise ValueError('Invalid deployment status')
+                        raise RemoteDeploymentError('confirmation', 'invalid_status')
                     if result.get('run_id') == run_id:
                         if result.get('sha') != sha:
-                            raise RuntimeError('Hosted update failed; reload withheld')
+                            raise RemoteDeploymentError('confirmation', 'revision_mismatch')
                         if result.get('success') is not True:
                             stage, error_code = result.get('stage'), result.get('error_code')
                             if (stage not in ('lock', 'checkout', 'migrations') or not isinstance(error_code, str) or
                                     not re.fullmatch(r'[a-z][a-z0-9_]{1,60}', error_code)):
-                                raise RuntimeError('Hosted update failed; reload withheld')
+                                raise RemoteDeploymentError('confirmation', 'invalid_status')
                             logger.error('Hosted update failed stage=%s error_code=%s; reload withheld', stage, error_code)
                             return 1
-                        with call('POST', f'webapps/{DOMAIN}/reload/') as reload_response:
+                        with call('POST', f'webapps/{DOMAIN}/reload/', 'web_reload') as reload_response:
                             if reload_response.status_code != 200:
-                                raise RuntimeError('Web reload was not acknowledged')
+                                raise RemoteDeploymentError('web_reload', 'http_rejected', reload_response.status_code)
                         logger.info('Updated requested commit and requested web reload')
                         return 0
                 elif response.status_code != 404:
-                    raise RuntimeError('Could not read deployment status')
+                    raise RemoteDeploymentError('confirmation', 'http_rejected', response.status_code)
             time.sleep(5)
-    raise RuntimeError('No deployment confirmation before deadline; reload withheld')
+    raise RemoteDeploymentError('confirmation', 'deadline_expired')
 
 
 def main(argv=None):
@@ -276,6 +296,10 @@ def main(argv=None):
             sha, run_id, deadline = args.hosted
             return hosted(sha, run_id, int(deadline))
         return deploy(args.sha or '')
+    except RemoteDeploymentError as error:
+        logger.error('Deployment stopped stage=%s reason=%s http_status=%s; no automatic retry',
+                     error.stage, error.reason, error.http_status if error.http_status is not None else 'unavailable')
+        return 1
     except (OSError, ValueError, RuntimeError, requests.RequestException) as error:
         logger.error('Deployment stopped (%s); no automatic retry', type(error).__name__)
         return 1
