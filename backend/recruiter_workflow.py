@@ -481,10 +481,10 @@ def export(conn,profile,workflow_id):
                          '; '.join(detail.get('issues',[]))+' '+detail.get('limits','')])
     content=recruiter_export.workbook([('Shortlist',shortlist),('Resume analysis',analysis),('Source coverage',coverage),('Unverified and excluded',unverified)])
     directory=work.ROOT/'data/recruiter-workflows'
-    if not directory.parent.resolve().is_relative_to(work.ROOT):
+    if directory.parent.resolve() != (work.ROOT/'data').resolve():
         raise ValueError('Workflow export must stay inside the repository')
     directory.mkdir(exist_ok=True)
-    if not directory.resolve().is_relative_to(work.ROOT/'data'):
+    if not directory.resolve().is_relative_to((work.ROOT/'data').resolve()):
         raise ValueError('Workflow export points outside private data')
     path=directory/('workflow-'+str(workflow_id)+'-'+work.digest(content)[:16]+'.xlsx')
     if not path.exists():
@@ -510,7 +510,7 @@ def export_materials(conn,profile,workflow_id):
             content,_=gemini.document(value['resume_text'])
             directory=work.ROOT/'data/application-documents'
             directory.mkdir(exist_ok=True)
-            if not directory.resolve().is_relative_to(work.ROOT/'data'):
+            if not directory.resolve().is_relative_to((work.ROOT/'data').resolve()):
                 raise ValueError('Private resume export path is invalid')
             resume_path=directory/('workflow-'+str(workflow_id)+'-'+str(row['number'])+'-'+work.digest(content)[:16]+'.docx')
             if not resume_path.exists():

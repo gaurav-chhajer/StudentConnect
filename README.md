@@ -1089,63 +1089,34 @@ Official setup: [Flask WSGI](https://help.pythonanywhere.com/pages/Flask/) and
 
 ## Automatic PythonAnywhere deployment from main
 
-`.github/workflows/deploy-pythonanywhere.yml` runs the offline tests on pushes to
-`main`, then updates `/home/GauravChhajer/StudentConnect` and requests a web reload.
-It uses the official [PythonAnywhere API](https://help.pythonanywhere.com/pages/API/)
-and works with an already running dedicated Bash console on the free account.
-Creating a console through the API does not start its process. If PythonAnywhere
-restarts or kills that console, reopen it in a browser before deploying again.
+The deployment workflow tests the exact commit, uploads a bounded release archive
+through the [PythonAnywhere Files API](https://help.pythonanywhere.com/pages/API/),
+and reloads the web app. It does not use a Bash console. On reload, the root WSGI
+loader verifies the archive, extracts it into `.releases/<commit>`, links the
+existing private `data/` and `.env`, takes the pipeline lock, backs up the SQLite
+database before pending migrations, checks application startup in a separate
+process, and then records the active revision. The previous release remains on
+disk and is served if extraction, migration, or the isolated startup check fails.
+An unexpected failure during the final in-process import requires a new reload
+after the cause is fixed. Application data and credentials remain
+in `/home/GauravChhajer/StudentConnect`.
 
-One-time setup after pushing these files:
+Keep `PYTHONANYWHERE_API_TOKEN` in GitHub Actions secrets. The existing PythonAnywhere
+web app must continue to import `from wsgi import application` from that project
+directory, and its virtual environment must already contain `requirements.txt`.
+The workflow compares the hosted requirements file with the tested commit and stops
+if they differ; dependency installation still requires a separate reviewed step.
+Push to `main` or run **Actions > Deploy PythonAnywhere > Run workflow**. No console
+ID or console opening is needed. The first API deployment uploads the loader and
+WSGI entry point before reloading, so the old checkout need not be pulled manually.
 
-1. Manually update the existing PythonAnywhere checkout once so it contains
-   `scripts/deploy_pythonanywhere.py`. Review `git status --short` first, then use
-   `git pull --ff-only origin main` from `/home/GauravChhajer/StudentConnect`.
-2. In PythonAnywhere **Account > API token**, generate a token. Store it only in
-   GitHub **Settings > Secrets and variables > Actions > Secrets** as
-   `PYTHONANYWHERE_API_TOKEN`. Do not paste it into code, chat or console commands.
-3. Open a dedicated **Bash** console and leave it at an empty prompt, with no
-   running command, partial input, virtual environment activation requirement or
-   interactive program. Get its numeric ID from its browser URL. In GitHub's
-   Actions **Variables**, add `PYTHONANYWHERE_CONSOLE_ID` with that number.
-   Keep this console dedicated to deployment; do not use it for other work.
-4. Run **Actions > Deploy PythonAnywhere > Run workflow**, selecting `main`.
-   Later pushes to `main` trigger deployment automatically. The initial push may
-   fail until the console, token and bootstrap checkout update are configured.
-
-Deployment accepts only the exact tested commit if it is still remote `main`.
-The hosted checkout must be clean, on `main`, and able to fast-forward. The script
-never resets, stashes, or merges divergent history. For pending SQL migrations it
-checks applied checksums, creates a uniquely named SQLite backup, verifies the
-backup, runs `python -B -m backend.migrate` with a timeout, and verifies that all
-migrations applied before permitting a web reload. A failed backup or migration
-withholds the reload and reports the failure stage. Changes to `requirements.txt`
-still require manual dependency installation. Private runtime paths are blocked,
-and ignored files cannot be overwritten by the fast-forward. Existing databases,
-resumes and `.env` stay on the server.
-
-The first rollout of this migration-aware deployment script needs a one-time
-bootstrap because the currently installed host copy may still reject migrations.
-In its dedicated Bash console, confirm `git status --short` is clean, then run
-`git pull --ff-only origin main`. Leave the web app running and rerun the failed
-Deploy PythonAnywhere workflow for the same current `main` commit. The updated
-host script then backs up, migrates, verifies, and requests the reload. Stop if
-the checkout is dirty or the fast-forward fails; do not reset or discard changes.
-
-The workflow shares the scheduled workers' concurrency group. The hosted update
-also takes the existing pipeline lock. It polls one private, atomic result file
-at `data/deployment-status.json` for up to three minutes and reloads only after
-the exact run and commit report success. Failed or uncertain requests stop without
-automatic retries. If confirmation times out, inspect the hosted checkout before
-retrying: an update may have completed without a reload. Reload acknowledgement
-does not verify site health; check the website and PythonAnywhere error log.
-
-CI reports a safe `stage`, `reason`, and HTTP status for API failures without
-printing the token or response body. `console_input` means check that the dedicated
-Bash console is running and idle; `confirmation` means inspect that console and
-`data/deployment-status.json` on the host; `web_reload` means check the web app
-reload status. A `deadline_expired` confirmation is uncertain: inspect the hosted
-checkout before triggering another deployment.
+The workflow shares the scheduled worker concurrency group. It waits up to three
+minutes for `data/deployment-status.json` to report the exact run and commit. A
+failed or uncertain API request stops without retrying mutations. Check that file,
+the website, and the PythonAnywhere error log before retrying a timeout. Releases
+are retained for rollback and use the free account's disk allowance; remove old
+releases only after a separate backup and review. Private `data/boards` in the
+existing checkout remains the board source for the web app.
 
 ## Personal local application worker
 

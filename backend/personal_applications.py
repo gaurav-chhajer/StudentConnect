@@ -24,7 +24,7 @@ def digest(value):
 
 def load_profile(path):
     path = Path(path).resolve()
-    if not path.is_relative_to(ROOT / 'data') or path.stat().st_size > 65536:
+    if not path.is_relative_to((ROOT / 'data').resolve()) or path.stat().st_size > 65536:
         raise ValueError('Application profile must be a bounded private file inside data/')
     value = json.loads(path.read_text(encoding='utf-8-sig'))
     if not isinstance(value, dict) or set(value) != {'user_id', 'email', 'answers', 'history_checked'}:
@@ -230,10 +230,10 @@ def export_document(conn, user_id, run_id, *, document_hash=None):
     if row is None or not row['document'] or digest(row['document']) != row['document_hash']:
         raise ValueError('No intact prepared document for this personal run')
     directory = ROOT / 'data/application-documents'
-    if not directory.parent.resolve().is_relative_to(ROOT):
+    if directory.parent.resolve() != (ROOT / 'data').resolve():
         raise ValueError('Resume exports must stay inside the repository')
     directory.mkdir(exist_ok=True)
-    if not directory.resolve().is_relative_to(ROOT / 'data'):
+    if not directory.resolve().is_relative_to((ROOT / 'data').resolve()):
         raise ValueError('Resume export directory points outside private data/')
     path = directory / (str(run_id) + '-' + row['document_hash'] + '.docx')
     if path.exists():

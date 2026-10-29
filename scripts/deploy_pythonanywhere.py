@@ -134,7 +134,8 @@ def backup_database(database, label, deadline, backup_dir=None):
     return backup
 
 
-def migrate_pending(database=None, migration_dir=None, backup_dir=None, deadline=None, deployment_sha=None):
+def migrate_pending(database=None, migration_dir=None, backup_dir=None, deadline=None, deployment_sha=None,
+                    runtime_root=None):
     database = Path(database or ROOT / 'data/jobs.db')
     migration_dir = Path(migration_dir or ROOT / 'backend/migrations')
     deadline = deadline if deadline is not None else time.time() + MAX_MIGRATION_SECONDS
@@ -149,7 +150,7 @@ def migrate_pending(database=None, migration_dir=None, backup_dir=None, deadline
         raise RuntimeError('Deployment deadline expired before migrations')
     timeout = min(MAX_MIGRATION_SECONDS, remaining)
     try:
-        subprocess.run([sys.executable, '-B', '-m', 'backend.migrate'], cwd=ROOT, check=True,
+        subprocess.run([sys.executable, '-B', '-m', 'backend.migrate'], cwd=runtime_root or ROOT, check=True,
                        capture_output=True, text=True, timeout=timeout)
     except subprocess.SubprocessError as error:
         raise RuntimeError('Database migration command failed; reload withheld') from error
