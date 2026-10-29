@@ -28,6 +28,10 @@ CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
 GROQ_EVALUATION_RESERVE = 240  # Status reports, one evaluation, hosted save and headroom.
 
 
+class HostedInputsChanged(ValueError):
+    """The server rejected a stale input fingerprint before applying the write."""
+
+
 class HostedOperationError(RuntimeError):
     def __init__(self, status):
         self.status = status
@@ -121,7 +125,7 @@ class HostedClient:
                                   timeout=(10, 20) if path == "groq-status" else (10, 90),
                                   allow_redirects=False, stream=True) as response:
             if response.status_code == 409:
-                raise ValueError("Hosted inputs changed; work deferred")
+                raise HostedInputsChanged("Hosted inputs changed; work deferred")
             if response.status_code != 200:
                 raise HostedOperationError(response.status_code)
             chunks, size = [], 0
@@ -169,7 +173,7 @@ def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
             pool.publish("complete" if result == 0 else "deferred")
 
 
-def _fetch_and_score(client, deadline, fetch_only, pool):
+def _fetch_and_score(client, deadline, fetch_only, pool, stop=None):
     if not fetch_only and not pipeline.GROQ_API_KEY.strip():
         raise ValueError("Configure Groq before matching")
     companies = client.call("companies").get("companies")
@@ -178,6 +182,8 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
     successful = set()
     failed = False
     for company in companies:
+        if stop is not None and stop.is_set():
+            return 1
         if time.monotonic() >= deadline - 120:
             logger.error("Fetching time budget reached; unfinished work waits until the next scheduled run")
             return 1
@@ -221,11 +227,33 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
         raise RuntimeError("No boards fetched successfully")
     if fetch_only:
         return int(failed)
+    return _score_pending(client, deadline, pool, successful, failed)
+
+
+def score_pending(client, deadline, stop):
+    """Consume persisted pending jobs without fetching; bounded batches keep email moving."""
+    pool = GroqKeyPool(client, deadline)
+    result = 1
+    try:
+        result = _score_pending(client, deadline, pool, stop=stop)
+        return result
+    finally:
+        if not pool.reporting_failed and not stop.is_set():
+            pool.publish("complete" if result == 0 else "deferred")
+
+
+def _score_pending(client, deadline, pool, successful=None, failed=False, stop=None):
+    queued = successful is None
     after, scores, accounts, skipped = 0, 0, 0, 0
     saved, candidate_failures = 0, 0
-    company_query = "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
+    company_query = "" if queued else "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
     for _ in range(MAX_ACCOUNTS):
+        if stop is not None and stop.is_set():
+            return 1
         if time.monotonic() >= deadline - 120:
+            if queued:
+                logger.info("Queue batch time budget reached; pending jobs remain stored for the next batch.")
+                return int(failed)
             logger.error("Matching time budget reached; remaining scores deferred")
             return 1
         payload = client.call("work?after=" + str(after) + company_query)
@@ -244,7 +272,12 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
         after = next_id
         accounts += 1
         for item in items:
+            if stop is not None and stop.is_set():
+                return 1
             if scores >= MAX_SCORES or time.monotonic() >= deadline - 120:
+                if queued:
+                    logger.info("Queue batch budget reached; pending jobs remain stored for the next batch.")
+                    return int(failed)
                 logger.error("Scoring budget reached; remaining scores deferred")
                 return 1
             if (not isinstance(item, dict) or not isinstance(item.get("user"), dict) or
@@ -254,7 +287,7 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
                     not isinstance(item.get("company_name"), str) or
                     not isinstance(item.get("fingerprint"), str) or len(item["fingerprint"]) != 64):
                 raise ValueError("Invalid scoring work item")
-            if item["job"]["company_id"] not in successful:
+            if not queued and item["job"]["company_id"] not in successful:
                 skipped += 1
                 continue
             scores += 1
@@ -296,6 +329,10 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
                 response = error.response if isinstance(error, requests.RequestException) else None
                 status = (response.status_code if response is not None else
                           error.status if isinstance(error, HostedOperationError) else None)
+                if queued and isinstance(error, HostedInputsChanged) and stage in ("description", "save"):
+                    logger.info("Queue inputs changed: user_id=%s job_id=%s stage=%s; rejected result discarded, latest job remains pending.",
+                                after, item["job"]["id"], stage)
+                    continue
                 # Only known evaluation rejections are local to this candidate.
                 # Hosted writes and service availability failures remain stop conditions.
                 candidate_failure = stage == "evaluation" and (
@@ -310,6 +347,9 @@ def _fetch_and_score(client, deadline, fetch_only, pool):
                     candidate_failures += 1
                     continue
                 return 1
+    if queued:
+        logger.info("Queue account budget reached; remaining work stays stored for the next batch.")
+        return int(failed)
     logger.error("Account budget reached; remaining work deferred")
     return 1
 

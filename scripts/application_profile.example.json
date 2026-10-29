@@ -1,0 +1,11 @@
+{
+  "user_id": 0,
+  "email": "your-verified-account@example.com",
+  "history_checked": false,
+  "answers": {
+    "Full name": "Your full name",
+    "First name": "Your first name",
+    "Last name": "Your last name",
+    "Phone": "Your phone number"
+  }
+}

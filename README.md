@@ -584,13 +584,56 @@ eligible unsent matches from today's refreshed companies may also be sent on
 the first run. The website's displayed daily/weekly settings still describe
 scheduled digests, not this opt-in worker's immediate mode.
 
-The next check starts five minutes **after the previous cycle completes**.
+For the manual `scripts.watch_hosted_jobs` commands above, the next check starts
+five minutes **after the previous cycle completes**. The Windows sign-in worker
+below instead fetches independently on a five-minute schedule.
 Large boards, description downloads, scoring budgets and Groq limits can delay
 alerts substantially; this does not guarantee detection within five minutes.
 The worker stops on an incomplete cycle or error rather than retrying uncertain
 writes or sends. Review local/hosted logs before restarting. If delivery is
 paused, reconcile Gmail and hosted send records before clearing the hosted
 pause marker. Existing daily cloud commands retain their scheduled behavior.
+
+To start independent fetching and queued Groq scoring/email delivery automatically
+when the current Windows user signs in, install its startup task:
+
+```powershell
+.\scripts\install_worker_startup.ps1 -WhatIf
+.\scripts\install_worker_startup.ps1 -Confirm:$false
+Start-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
+```
+
+The installer refuses to overwrite an existing task. It uses the repository's
+`pythonw.exe` and private `.env`, preserving existing environment values, and
+runs without a terminal window or administrator privileges. Configure the hosted
+HTTPS origin, worker key, and Groq key first. Disable the separate GitHub daily
+automation workflow before starting this full worker to avoid competing schedulers.
+The worker starts at sign-in, runs on battery too, and needs an awake, online
+laptop. Sleep pauses execution; opening the lid resumes a healthy running worker.
+Fetching starts every five minutes measured from the previous fetch's start,
+without waiting for Groq or emails. A fetch taking more than five minutes finishes
+before the next starts; fetches never overlap. Successful snapshots immediately
+enter the existing hosted database, which is the durable queue. New or changed
+eligible jobs remain pending across restarts; current scores are excluded.
+One independent consumer scores bounded batches and checks qualifying emails
+after each healthy batch, waking on a saved snapshot or polling every 30 seconds.
+Budget-limited backlog continues in the next batch. Hosted writes are serialized
+between the two loops; ATS downloads and Groq requests run independently.
+If refreshing changes an in-flight scoring input, the server rejects that stale
+result and its latest version remains queued. Other failed or uncertain writes
+stop the affected loop for inspection, leaving the other loop independent.
+The task can remain Running with one loop stopped; inspect both loops' progress
+in `data/hosted_worker.log` (2 MB plus three rotated backups) and hosted logs before
+manually restarting. No migration, new service, or extra dependency is needed.
+Email opt-outs, thresholds, deduplication, and uncertain-send protection still apply.
+
+Use Windows Task Scheduler to inspect **StudentConnect Five Minute Worker**, or:
+
+```powershell
+Get-ScheduledTaskInfo -TaskName 'StudentConnect Five Minute Worker'
+Stop-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
+Disable-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
+```
 
 #### No-alert reminders
 
@@ -1059,6 +1102,275 @@ the exact run and commit report success. Failed or uncertain requests stop witho
 automatic retries. If confirmation times out, inspect the hosted checkout before
 retrying: an update may have completed without a reload. Reload acknowledgement
 does not verify site health; check the website and PythonAnywhere error log.
+
+## Personal local application worker
+
+### Complete six-stage workflow
+
+Use `scripts.run_recruiter` for the complete flow. It runs locally, uses the
+existing private profile and provider configuration below, and adds no package
+dependencies beyond the already optional browser installation. Existing database
+records and the master resume are preserved. Initialize with a verified backup
+before the additive `014_recruiter_workflow.sql` migration:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter init --run
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter analyze --run
+# Use the workflow ID printed by analyze.
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter search --workflow-id 1 --run
+```
+
+`analyze` produces 20 evidence-referenced titles, grouped by Strong fit, Stretch,
+and Adjacent pivot, with 8–10 keywords per title and missing-evidence flags.
+`search` searches the first ten titles and stops after exporting a ranked XLSX
+workbook to private `data/recruiter-workflows/`. It prints the top ten matches.
+The workbook contains Shortlist, Resume analysis, Source coverage, and Unverified
+and excluded sheets. Numbering is frozen after search; refreshes require a new
+workflow so approvals cannot silently move to different jobs. Spreadsheet strings
+are inline text, preventing formula injection; posting URLs are clickable links.
+
+Discovery attempts LinkedIn, Indeed, and Wellfound through public browser pages,
+and Greenhouse, Lever, and Ashby through configured active company boards. Each
+source's coverage, failures, and limits are recorded in the workbook. This is
+not a claim of exhaustive global coverage: search is one accessible result page
+per title, at most 1000 discovered links, and configured boards for ATS feeds.
+Login gates, CAPTCHA, inaccessible pages, missing JobPosting structured data, and
+unverifiable dates are reported. No bypass, private login session, or invented
+listing is used. Every shortlisted URL was visited successfully at search time;
+this does not guarantee that a listing remains open later.
+
+Only the original `JobPosting.datePosted`, within the preceding seven days,
+establishes recency; an ATS last-updated or republished timestamp is not substituted.
+Explicit India/India-eligible remote and fresher/up-to-one-year evidence is
+required. Salary below 8 LPA is excluded when annual INR data establishes it.
+Missing salary, another currency, an unclear period, or a range crossing 8 LPA
+remains unconfirmed. Such jobs can be reviewed, but are Caution and cannot be
+automatically submitted. AI source-quote checks support these decisions; they are
+not independent certification of the employer's claims.
+
+After inspecting the spreadsheet, explicitly choose its job numbers. The following
+commands are separate stages; `search` never automatically calls them:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter approve --workflow-id 1 --numbers 1,3,7
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter review --workflow-id 1 --run
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter materials --workflow-id 1 --run
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter export --workflow-id 1
+```
+
+Review covers all discovered rows, not just selected jobs, and assigns Apply,
+Caution, or Skip with source-backed concerns. Market-pay comparisons remain
+explicitly unverified without independent current evidence; the 8 LPA personal
+minimum is enforced separately. Materials are generated only for selected jobs
+with original scores above 60. They include a source-grounded resume rewrite,
+a cover note under 120 words, changes, and gaps. One separate factual audit checks
+the rewrite and cover note; a failed audit stops preparation. Real claims can
+still require human review. Only a score-improving validated rewrite replaces the
+original for this job; the master resume stays unchanged. An original score of
+80–89 targets 90, with 80 remaining the submission floor. Originals already at 90+
+keep their resume. Export produces numbered private DOCX/JSON materials, with the
+exact upload document, score, cover note, changes, gaps and eventual outreach draft.
+New preparation versions archive earlier documents and evaluations; confirmed or
+uncertain submissions cannot be replaced. Saved-only tracking entries can be
+submitted after approval and retain their existing personal notes.
+
+Submit selected ready jobs using their spreadsheet numbers:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter submit --workflow-id 1 --numbers 1,3 --run
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter outreach --workflow-id 1 --run
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter export --workflow-id 1
+```
+
+Submission requires your selected workflow, an unchanged resume/document, a
+current seven-day posting, Apply verdict, confirmed 8 LPA pay, resolved eligibility,
+and a score of at least 80. Deselecting a job revokes its submission eligibility.
+There is no daily count limit. Supported Greenhouse/Lever/Ashby forms are handled
+sequentially; other sites produce a manual handoff with materials. Unknown form
+questions and site verification pause. Cover-note text is available to explicitly
+labeled cover-letter/note fields. File attachments or custom forms needing further
+input pause rather than receiving guessed answers. Confirmed submissions appear
+in Applications and synchronize to the configured existing Notion tracker with
+the spreadsheet number. Timeouts after submission intent are unknown and never
+automatically retried. The older `run_applications` commands also enforce the new
+selection, reviewed-material, and submission gates; old prepared runs are not
+grandfathered into automatic submission.
+
+Outreach searches for a verifiable contact on the posting or in accessible LinkedIn
+company-recruiter profiles. It distinguishes a company recruiter from proven
+ownership of a vacancy. Missing or inaccessible contacts are explicitly reported.
+Messages are under 90 words and end with a question. They mention applying only
+when the local tracker has an applied/interview/offer/rejection history for that
+job; otherwise they express interest. These are drafts, never sent by this worker.
+
+For follow-ups, configure the persistent Notion integration described below and
+use its existing due dates. Without that integration, explicitly schedule local
+dates; the worker never invents a follow-up schedule:
+
+```powershell
+# Local tracking only; use an actual confirmed application ID, not a spreadsheet number.
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter schedule --application-id 1 --date 2026-11-02
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter followups --run
+.\.venv\Scripts\python.exe -B -m scripts.run_recruiter sync-notion --run
+```
+
+`followups` writes exact message drafts for saved due dates in the current Monday
+through Sunday week in India (UTC+05:30, matching Asia/Kolkata). With Notion enabled,
+manage follow-up dates in the existing Notion database; local `schedule` does not
+modify Notion. It never sends messages or changes contact history. Failed/uncertain
+Notion writes retain local submission records and never cause resubmission.
+
+Offline verification:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest tests.test_recruiter_workflow tests.test_personal_applications
+.\.venv\Scripts\python.exe -B -m unittest tests.browser_checks
+```
+
+Live source compatibility, generated resume layout, and real provider/account
+connectivity still need verification before unattended use. All automated checks
+use synthetic inputs and intercepted browser pages.
+
+### Configuration and supporting browser commands
+
+The optional worker uses a visible local Chromium browser for direct Greenhouse,
+Lever and Ashby postings. It is separate from the existing fetch/scoring workers and
+does not change your master resume or its saved match scores. Other sites and
+unrecognized forms pause for review. Live site compatibility has not yet been
+verified; passing local fixtures does not establish support for every ATS form.
+
+Rules: only original Groq scores strictly above 60 are candidates. A validated
+upload document must score at least 80 before submission. Originals from 80 to 89
+get a 90 target, with 80 still the submission minimum. Originals already at 90 or
+higher retain the original resume. The full recruiter workflow generates one
+rewrite proposal with source-line references, checks for invented numbers, and
+runs a separate factual audit against the original. Unsupported claims stop
+preparation. A rewrite is retained only if its validated score improves;
+score improvements are not guaranteed. The original and revised documents are scored with the same configured
+Groq model/rubric; the best validated document is kept. Local similarity rankings
+are not accepted as application fit scores.
+
+Editable recruiter instructions live in `backend/recruiter_instructions.md`.
+The complete file is loaded into each scoped Gemini request: your recruiter
+context and all six workflow stages, including the stop after the search
+spreadsheet and explicit selection of jobs before later stages. This includes
+India or India-eligible remote, fresher/up to one year, an 8 LPA annual minimum,
+and resume-evidence constraints. Keep the `## Workflow` separator intact. A final
+scope instruction limits each call to its own JSON response. Python owns search,
+files, approvals, submission, and tracking. The full workflow below implements
+those stages and enforces its own India/India-eligible remote, up-to-one-year,
+seven-day posting and annual INR 8 LPA checks. Saved dashboard preferences are
+not overwritten. An explicitly selected workflow posting can come from a company
+outside existing subscriptions; that selection does not subscribe the account.
+
+Install the optional dependency and its browser inside the repository:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m pip install -r requirements-browser.txt
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Get-Location) 'data/browser-binaries'
+.\.venv\Scripts\python.exe -B -m playwright install chromium
+.\.venv\Scripts\python.exe -B -m pip check
+.\.venv\Scripts\python.exe -B -m unittest tests.browser_checks
+```
+
+Use process environment variables for `GROQ_API_KEY`, `GEMINI_API_KEY`, and an
+explicit supported `GEMINI_MODEL`. This local worker does not load `.env`
+automatically. Keep keys private; never put them in the profile or frontend.
+The full workflow sends the complete saved resume to Gemini for analysis,
+rewriting and factual auditing, alongside the relevant job/contact evidence.
+The older section-ordering-only call withholds its first identity block. Groq
+receives the complete resume for scoring. Review provider data handling before use;
+Google's unpaid-service terms prohibit submitting personal or confidential
+information. Select an appropriate billing-enabled project for personal resume
+processing. See [Gemini terms](https://ai.google.dev/gemini-api/terms).
+
+Copy `scripts/application_profile.example.json` to the ignored private path
+`data/application-profile.json`, only if that destination does not already exist.
+Replace its placeholders with your explicit local user ID, matching verified
+email, and approved answers. It intentionally starts with invalid user ID 0.
+Use exact visible form labels as answer keys, with string values. Consent
+checkbox answers must be explicit `yes` or `no`; the worker never guesses consent,
+work authorization, salary, sensitive demographic answers, or other questions.
+Missing required answers, login, CAPTCHA, OTP, radio controls, and changed forms
+pause before submission. Recognizable headings such as Education, Skills,
+Experience, and Projects are needed for automatic section ordering. Review the
+source resume's extracted text and layout first.
+
+Notion is optional. Create a private Notion integration, share your existing
+tracker with it, and configure both `STUDENTCONNECT_NOTION_TOKEN` and
+`STUDENTCONNECT_NOTION_SOURCE`. For the existing Gaurav Job Applications tracker,
+the data-source ID is `8e2b84c2-a7e8-4e6c-9194-44ee3e849f28` (distinct from the
+database page ID). The chat's connector credentials cannot be reused by the
+unattended local worker. The adapter preserves the existing schema: Company,
+Role, Job link, Match score, Contact status, Application date, and Listing group.
+It checks job links before applying and blocks records with existing history or
+a Skip verdict. It updates/creates an Applied record only after browser
+confirmation. No follow-up messages are sent and other tracker fields stay intact.
+
+Without a Notion integration, use the existing StudentConnect Applications page.
+First reconcile your previous Notion applications there, including uncertain
+submissions, so they cannot be submitted twice. Only then set `history_checked`
+to `true` in the private profile. A `false` value prevents live work without
+Notion. Notion failures never silently disable duplicate checks.
+
+After reviewing the additive migration, initialize the worker. This command
+creates and verifies a uniquely named private SQLite backup before migrating:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_applications init --run
+.\.venv\Scripts\python.exe -B -m scripts.run_applications preview
+```
+
+Preview is offline and does not create application records. Test preparation
+without opening application forms, then inspect results:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_applications prepare --job-id 123 --run
+.\.venv\Scripts\python.exe -B -m scripts.run_applications status
+.\.venv\Scripts\python.exe -B -m scripts.run_applications export --run-id 1
+```
+
+Export writes the exact upload document into private `data/application-documents/`
+without overwriting an existing changed file. Inspect its layout before enabling
+unattended submissions; automated text checks do not verify visual layout.
+
+`--run` authorizes the command's real Gemini/Groq, browser, and configured Notion
+operations. Replace example IDs with your own. To submit one prepared resume or
+run continuously for your chosen account:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.run_applications submit --run-id 1 --run
+.\.venv\Scripts\python.exe -B -m scripts.run_applications run --run --watch
+```
+
+There is no daily application cap. Jobs are processed sequentially in bounded
+database pages. Watch mode checks every 60 seconds and stops with Ctrl+C. It
+does not fetch jobs; keep your existing matching process running against the
+same local database. Hosted-only matches are not automatically downloaded into
+the local database. Provider failures stop work without automatic retries.
+
+Every job gets a durable run record. Confirmed submissions appear in the existing
+Applications screen; its badge still reflects the master-resume match, while
+notes record the uploaded resume's score and run ID. The CLI status command
+shows paused/failed work, targets, final scores, and Notion synchronization state.
+A pre-submission form pause with a validated 80+ document can be resumed after
+fixing its cause with `resume --run-id 1 --run`, then `submit --run-id 1 --run`.
+Preparation failures without a validated document require diagnosis; this version
+does not automatically regenerate or erase an existing run.
+
+`submitting` after interruption or `unknown` after a timeout means the employer
+may have received the application. Check the employer's confirmation before any
+manual action; these states cannot be resumed or automatically retried. Notion
+write uncertainty is recorded separately as `unknown`; inspect the tracker before
+reconciling it manually. `sync-notion --run` handles pending confirmed records,
+but never retries uncertain writes. Local records remain authoritative for
+preventing another submission. Browser traffic is restricted to the supported
+ATS hosts and required listed resources; no site protection is bypassed.
+
+The default offline suite includes the workflow/provider tests. The optional
+browser suite above fulfills every browser request locally and submits only
+synthetic forms. No real applications, paid-provider calls, or Notion writes are
+needed for either suite.
 
 ## Remaining work
 
