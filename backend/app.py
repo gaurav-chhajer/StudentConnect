@@ -92,8 +92,8 @@ def create_app(database_path=None, upload_dir=None):
             if account:
                 g.account = dict(account)
                 g.user = dict(connection().execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone())
-        public = {"accounts.login", "accounts.register", "accounts.forgot", "accounts.reset",
-                  "google_accounts.login", "google_accounts.callback", "static"}
+        public = {"accounts.login", "accounts.register", "accounts.registration_code", "accounts.forgot", "accounts.reset",
+                  "google_accounts.login", "google_accounts.callback", "google_accounts.complete_link", "static"}
         if request.url_rule is not None and request.endpoint not in public and g.user is None:
             if request.method == "GET":
                 return redirect(url_for("accounts.login"))

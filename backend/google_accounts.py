@@ -10,16 +10,19 @@ from flask import Blueprint, g, redirect, render_template, request, session, url
 from joserfc.errors import JoseError
 from requests.exceptions import RequestException
 
-from backend import accounts
+from backend import accounts, pipeline_skeleton as pipeline
 from backend.hosting import site_origin
 
 STATE_SECONDS = 300
 COOKIE_NAME = "sc_google_login"
 CALLBACK_PATH = "/auth/google/callback"
+LINK_PATH = "/auth/google/link"
+LINK_COOKIE_NAME = "sc_google_link"
+LINK_SECONDS = 10 * 60
 
 
-def google_account(conn, claims, now, linking_user=None, linking_version=None):
-    """Use a validated Google subject; linking an existing profile needs its session."""
+def verified_identity(claims):
+    """Validate the identity claims returned by the configured OIDC client."""
     if not isinstance(claims, dict) or claims.get("email_verified") is not True:
         raise ValueError("Google must verify your email address before sign-in.")
     subject, email, name = claims.get("sub"), claims.get("email"), claims.get("name")
@@ -30,6 +33,12 @@ def google_account(conn, claims, now, linking_user=None, linking_version=None):
     email = accounts.email_address(email)
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
         raise ValueError("Google must provide a name of at most 100 characters.")
+    return subject, email, name.strip()
+
+
+def google_account(conn, claims, now, linking_user=None, linking_version=None):
+    """Use a validated Google subject; linking an existing profile needs its session."""
+    subject, email, name = verified_identity(claims)
     with conn:
         conn.execute("BEGIN IMMEDIATE")
         linked = conn.execute("SELECT user_id FROM google_accounts WHERE subject=?", (subject,)).fetchone()
@@ -42,7 +51,7 @@ def google_account(conn, claims, now, linking_user=None, linking_version=None):
         else:
             if conn.execute("SELECT 1 FROM users WHERE lower(email)=?", (email,)).fetchone():
                 raise ValueError("This email already has a profile. Sign in with your password first, then open Sign in and choose Continue with Google to link it.")
-            user_id = conn.execute("INSERT INTO users(name,email,resume_text,preferences_json) VALUES(?,?,'','{}')", (name.strip(), email)).lastrowid
+            user_id = conn.execute("INSERT INTO users(name,email,resume_text,preferences_json) VALUES(?,?,'','{}')", (name, email)).lastrowid
             conn.execute("INSERT INTO user_settings(user_id,subscriptions_configured) VALUES(?,1)", (user_id,))
             # A Google account has no usable password until its owner requests recovery.
             random_password = accounts.secrets.token_urlsafe(48)
@@ -77,6 +86,39 @@ def register_routes(app, connection, now):
 
     def failure(message, status=400):
         response = app.make_response((render_template("account.html", mode="login", message=message), status))
+        response.delete_cookie(COOKIE_NAME, path=CALLBACK_PATH, secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
+        return response
+
+    def link_page(message=None, status=200):
+        return app.make_response((render_template("google_link.html", message=message), status))
+
+    def begin_link(subject, email, now_value):
+        browser, code = accounts.secrets.token_urlsafe(32), accounts.secrets.token_urlsafe(32)
+        timestamp = int(now_value.timestamp())
+        with connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            user = conn.execute("SELECT id,active FROM users WHERE lower(email)=?", (email,)).fetchone()
+            if (user is None or not user["active"] or
+                    conn.execute("SELECT 1 FROM google_accounts WHERE user_id=?", (user["id"],)).fetchone()):
+                raise ValueError("This profile is unavailable for Google sign-in. Use your existing sign-in method or contact the owner.")
+            account = conn.execute("SELECT email_verified,locked_until FROM accounts WHERE user_id=?", (user["id"],)).fetchone()
+            if account and (not account["email_verified"] or account["locked_until"] > timestamp):
+                raise ValueError("This profile is unavailable for Google sign-in. Use your existing sign-in method or contact the owner.")
+            conn.execute("DELETE FROM google_link_challenges WHERE expires_at<=?", (timestamp,))
+            conn.execute("INSERT INTO google_link_challenges(browser_hash,code_hash,subject,email,user_id,expires_at) VALUES(?,?,?,?,?,?)",
+                         (accounts.token_digest(browser), accounts.token_digest(code), subject, email, user["id"], timestamp + LINK_SECONDS))
+        delivery_error = False
+        try:
+            pipeline.deliver_account_email(email, "StudentConnect Google link code",
+                "Enter this one-time code on the StudentConnect page to connect Google to your existing profile. "
+                "It expires in 10 minutes. If you did not request this, ignore it.\n\n" + code)
+        except (OSError, RuntimeError, ValueError) as error:
+            app.logger.error("Google link code delivery unconfirmed (%s); inspect delivery before retrying", type(error).__name__)
+            delivery_error = True
+        response = (link_page("Delivery was not confirmed. Check your inbox; if the code arrived, you can enter it here.", 503)
+                    if delivery_error else redirect(url_for("google_accounts.complete_link")))
+        response.set_cookie(LINK_COOKIE_NAME, browser, max_age=LINK_SECONDS, path=LINK_PATH,
+                            secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
         response.delete_cookie(COOKIE_NAME, path=CALLBACK_PATH, secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
         return response
 
@@ -140,6 +182,12 @@ def register_routes(app, connection, now):
             app.logger.error("Google sign-in verification failed (%s)", type(error).__name__)
             return failure("Google sign-in could not be verified. Start again or try later.")
         try:
+            subject, email, _ = verified_identity(claims)
+            if pending["user_id"] is None:
+                existing = connection().execute("SELECT id FROM users WHERE lower(email)=?", (email,)).fetchone()
+                linked = connection().execute("SELECT user_id FROM google_accounts WHERE subject=?", (subject,)).fetchone()
+                if existing and not linked:
+                    return begin_link(subject, email, now())
             account = google_account(connection(), claims, now(), pending["user_id"], pending["session_version"])
         except ValueError as error:
             return failure(str(error))
@@ -151,6 +199,56 @@ def register_routes(app, connection, now):
         response = app.make_response(render_template(
             "google_complete.html", dashboard_url=url_for("dashboard")))
         response.delete_cookie(COOKIE_NAME, path=CALLBACK_PATH, secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
+        return response
+
+    @routes.route(LINK_PATH, methods=["GET", "POST"])
+    def complete_link():
+        try:
+            browser_hash = accounts.token_digest(request.cookies.get(LINK_COOKIE_NAME, ""))
+        except ValueError:
+            return link_page("This Google link expired. Start again from Sign in.", 400)
+        timestamp = int(now().timestamp())
+        challenge = connection().execute("SELECT * FROM google_link_challenges WHERE browser_hash=? AND expires_at>?",
+                                         (browser_hash, timestamp)).fetchone()
+        if challenge is None:
+            return link_page("This Google link expired. Start again from Sign in.", 400)
+        if request.method == "GET":
+            return link_page()
+        if not accounts.request_allowed(connection(), "login", now()):
+            return link_page("Too many attempts. Wait five minutes and try again.", 429)
+        try:
+            code_hash = accounts.token_digest(request.form.get("code", "").strip())
+        except ValueError:
+            return link_page("The code is invalid or expired.", 400)
+        try:
+            with connection() as conn:
+                conn.execute("BEGIN IMMEDIATE")
+                challenge = conn.execute("SELECT * FROM google_link_challenges WHERE browser_hash=? AND code_hash=? AND expires_at>?",
+                                         (browser_hash, code_hash, timestamp)).fetchone()
+                if challenge is None:
+                    raise ValueError("The code is invalid or expired.")
+                user = conn.execute("SELECT id,name,email,active FROM users WHERE id=? AND lower(email)=?",
+                                    (challenge["user_id"], challenge["email"])).fetchone()
+                if user is None or not user["active"]:
+                    raise ValueError("This profile is unavailable for Google sign-in.")
+                account = conn.execute("SELECT * FROM accounts WHERE user_id=?", (user["id"],)).fetchone()
+                if account is None:
+                    random_password = accounts.secrets.token_urlsafe(48)
+                    hashed = accounts.password_hash(random_password, random_password)
+                    conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(?,?,?)",
+                                 (user["id"], hashed, now().isoformat()))
+                elif not account["email_verified"] or account["locked_until"] > timestamp:
+                    raise ValueError("This profile is unavailable for Google sign-in.")
+                conn.execute("INSERT INTO google_accounts(subject,user_id) VALUES(?,?)", (challenge["subject"], user["id"]))
+                conn.execute("DELETE FROM google_link_challenges WHERE browser_hash=?", (browser_hash,))
+                account = conn.execute("SELECT * FROM accounts WHERE user_id=?", (user["id"],)).fetchone()
+        except (ValueError, sqlite3.IntegrityError) as error:
+            return link_page(str(error) if isinstance(error, ValueError) else "This profile is already linked. Use Sign in.", 400)
+        session.clear()
+        session.permanent = True
+        session["user_id"], session["session_version"] = account["user_id"], account["session_version"]
+        response = app.make_response(render_template("google_complete.html", dashboard_url=url_for("dashboard")))
+        response.delete_cookie(LINK_COOKIE_NAME, path=LINK_PATH, secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
         return response
 
     app.register_blueprint(routes)

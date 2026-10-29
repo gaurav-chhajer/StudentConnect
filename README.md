@@ -82,7 +82,7 @@ the page before submitting. These local session settings are not a production
 deployment configuration. Accounts expire after eight hours without cookie
 refresh. Sign-out and password reset revoke all existing sessions for that account.
 
-### Public Google signup and existing accounts
+### Email and Google signup
 
 Google signup lets anyone with a Google account join without an invitation code.
 Existing password login and invitation links remain available. Google signup
@@ -104,25 +104,28 @@ public signup; owner bootstrap requires that no accounts exist yet.
 4. Install `requirements.txt`, back up the existing SQLite database, then run
    `.\.venv\Scripts\python.exe -B -m backend.migrate` (Windows) or
    `.venv/bin/python -B -m backend.migrate` (hosting). The additive
-   `011_google_accounts.sql` migration adds identity and temporary callback-state
-   tables. Reload the application after configuration and migration.
+   `011_google_accounts.sql` adds identity and temporary callback-state tables;
+   `016_google_link_challenges.sql` adds short-lived email-code challenges for
+   connecting an existing profile. Reload after configuration and migration.
 
 Choose **Continue with Google** on Sign in or Sign up. Google verifies the email;
 new accounts start with empty private profiles and no company subscriptions.
-Existing profiles are never automatically claimed by an email match. To link an
-existing password account, sign in with its password, open `/login`, then choose
-**Continue with Google** with the same email. This preserves the original profile,
-password, settings and administrator status. A linked Google identity cannot be
-reassigned to another profile. Google-only users can use password recovery to set
-a password if the existing recovery mail service is configured.
+If that verified email already has a profile, Google sign-in sends a separate
+one-time code to the email before connecting the Google identity. The code is
+browser-bound, expires after 10 minutes and is consumed once. You can also sign
+in with a password, open `/login`, and connect Google with the same email. Both
+methods then open the same profile, resume and applications. A linked Google
+identity cannot be reassigned to another profile. Google-only users can use
+password recovery to set a password if mail delivery is configured. Different
+email addresses remain separate profiles.
 
 The flow validates the signed ID token, issuer, audience, expiry and nonce through
 Authlib, and requires a verified email. Callback state expires after five minutes,
 is consumed once, uses PKCE, and is bound to a separate HttpOnly callback cookie.
 That temporary cookie uses SameSite=Lax for Google's redirect; authenticated
 sessions retain SameSite=Strict. Google tokens are not saved. Existing login
-limits and CSRF checks still apply. With credentials absent, password/invitation
-access continues and the Google button is hidden.
+limits and CSRF checks still apply. With Google credentials absent, verified-email
+signup and password access continue and the Google button is hidden.
 
 Test signup, returning login, cancelled consent and existing-account linking on
 the actual hosted site before announcing public access. Outbound Google discovery,
@@ -152,9 +155,11 @@ confirm `SEND` to send a real invitation. Open `/register`, enter the emailed
 43-character code, your email/name, and a new 12–128-character password. Ownership
 is verified by access to that email. Registration links the existing user ID
 without replacing profile data. The first owner can use **Invite testers** to
-send invitations; testers cannot invite others. Public Google signup is available
-when the Google credentials above are configured; password signup still requires
-an invitation.
+send invitations; testers cannot invite others. Anyone can also request a public
+email sign-up code on `/register`. It expires after 30 minutes and creates a
+non-admin account only after the email, name and password are submitted together.
+Existing invitations retain their 48-hour lifetime and owner permissions. Public
+Google signup is available when Google credentials are configured.
 
 Invitations expire after 48 hours. Recovery is available from **Forgot password**;
 enter its code on **Enter recovery code** within 30 minutes. Codes work once, are
@@ -164,13 +169,15 @@ Verified account emails cannot be changed in Settings. New users initially follo
 no companies; they must choose companies and upload their own resume.
 
 Five failed logins lock an account for 15 minutes. The local beta also limits all
-login/registration attempts to 50 and recovery/reset requests to 20 per five-minute
+login/registration attempts to 50 and recovery/reset/sign-up-code requests to 20 per five-minute
 window across accounts. Recovery mail has a five-minute per-account cooldown.
 Recovery responses deliberately do not reveal whether an email has an account;
 delivery errors are logged without private message contents. Uncertain invitation
 delivery retains the pending code; inspect Gmail before attempting another send.
 No invitation or recovery emails are automatically retried. An owner invitation
-cannot be issued while another unexpired owner invitation or any account exists.
+cannot be issued while another unexpired owner invitation or an owner account
+exists. Public non-admin signups do not block owner setup; use an email that does
+not already have an account for the first owner invitation.
 
 ## Connected flows
 

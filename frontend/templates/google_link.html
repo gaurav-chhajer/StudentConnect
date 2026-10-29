@@ -1,0 +1,29 @@
+{% from 'macros.html' import csrf %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connect Google - StudentConnect</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/wow.css') }}">
+</head>
+<body>
+<div class="app auth-app"><main class="auth-complete"><section class="card auth-card">
+<span class="tag">One-time check</span>
+<h1>Connect Google to your profile</h1>
+<p class="sub">We found a profile using this email. Enter the code sent to your inbox to keep your resume, jobs, and applications together.</p>
+{% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
+<form method="post" action="{{ url_for('google_accounts.complete_link') }}" class="page-form">
+{{ csrf() }}
+<div class="fields spaced"><label class="field"><span class="inputbox"><input name="code" type="password" minlength="43" maxlength="43" autocomplete="one-time-code" required placeholder=" "><span class="input-label">Emailed code</span><i aria-hidden="true"></i></span></label></div>
+<div class="actions"><button class="btn p" type="submit">Connect and sign in</button></div>
+</form>
+<p class="sub">The code expires in 10 minutes. If you did not receive it, start a new sign-in after it expires.</p>
+<nav class="actions auth-links"><a href="{{ url_for('accounts.login') }}">Back to Sign in</a></nav>
+</section></main></div>
+</body>
+</html>

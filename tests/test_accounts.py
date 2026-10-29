@@ -43,7 +43,7 @@ class AccountTests(unittest.TestCase):
 
     def post(self,path,data,client=None):
         client=client or self.client
-        response=client.get("/settings" if path=="/logout" else path)
+        response=client.get("/settings" if path=="/logout" else "/register" if path=="/register/code" else path)
         token=re.search(rb'name="csrf_token" value="([^"]+)"',response.data)
         self.assertIsNotNone(token)
         result=client.post(path,data=dict(data,csrf_token=token.group(1).decode()))
@@ -69,6 +69,59 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(self.post("/register",self.form("tester@example.test",code)).status_code,400)
         self.assertEqual(self.login().status_code,302)
         self.assertEqual(self.client.get("/").status_code,200)
+
+    def test_public_email_signup_requires_emailed_code_and_can_sign_in(self):
+        self.assertIn(b"Email me a code", self.client.get("/register").data)
+        self.assertEqual(self.post("/register/code", {"email": "tester@example.test"}).status_code, 200)
+        code = self.mail.call_args.args[2].split("\n\n")[-1]
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 0)
+        self.assertEqual(self.post("/register", self.form("tester@example.test", code)).status_code, 302)
+        self.assertEqual(self.login().status_code, 302)
+        account = self.conn.execute("SELECT is_admin,email_verified FROM accounts").fetchone()
+        self.assertEqual(tuple(account), (0, 1))
+        self.assertEqual(self.post("/register", self.form("tester@example.test", code)).status_code, 400)
+
+    def test_public_code_request_does_not_reveal_existing_account(self):
+        code = self.invitation()
+        self.assertEqual(self.post("/register", self.form("tester@example.test", code)).status_code, 302)
+        sent = self.mail.call_count
+        response = self.post("/register/code", {"email": "tester@example.test"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"If this email is eligible", response.data)
+        self.assertEqual(self.mail.call_count, sent)
+
+    def test_public_signup_code_expires_without_creating_an_account(self):
+        self.assertEqual(self.post("/register/code", {"email": "tester@example.test"}).status_code, 200)
+        code = self.mail.call_args.args[2].split("\n\n")[-1]
+        with self.assertRaises(ValueError):
+            accounts.redeem_invitation(self.conn, self.form("tester@example.test", code), NOW + timedelta(minutes=30))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0], 0)
+
+    def test_public_signup_reports_unavailable_mail_configuration(self):
+        self.configuration.side_effect = ValueError("private configuration")
+        with self.assertLogs(level="ERROR") as logs:
+            response = self.post("/register/code", {"email": "tester@example.test"})
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("private configuration", " ".join(logs.output))
+        self.mail.assert_not_called()
+
+    def test_public_signup_does_not_retry_uncertain_mail(self):
+        self.mail.side_effect = ValueError("private delivery detail")
+        with self.assertLogs(level="ERROR") as logs:
+            response = self.post("/register/code", {"email": "tester@example.test"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Check your inbox", response.data)
+        self.assertNotIn("private delivery detail", " ".join(logs.output))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM account_tokens WHERE purpose='invite'").fetchone()[0], 1)
+        self.assertEqual(self.mail.call_count, 1)
+
+    def test_public_member_does_not_block_first_owner_invitation(self):
+        self.assertEqual(self.post("/register/code", {"email": "tester@example.test"}).status_code, 200)
+        member_code = self.mail.call_args.args[2].split("\n\n")[-1]
+        self.assertEqual(self.post("/register", self.form("tester@example.test", member_code)).status_code, 302)
+        owner_code = self.invitation("owner@example.test", owner=True)
+        self.assertEqual(self.post("/register", self.form("owner@example.test", owner_code)).status_code, 302)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM accounts WHERE is_admin=1").fetchone()[0], 1)
 
     def test_account_pages_load_local_assets_with_restricted_script_nonce(self):
         for route in ("/login", "/register", "/forgot-password", "/reset-password"):

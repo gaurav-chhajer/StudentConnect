@@ -28,6 +28,9 @@ class GoogleAccountTests(unittest.TestCase):
     def setUp(self):
         with patch.dict(os.environ, ENV):
             WebFlowTests.setUp(self)
+        delivery = patch.object(accounts.pipeline, "deliver_account_email")
+        self.delivery = delivery.start()
+        self.addCleanup(delivery.stop)
         clock = patch("backend.app.utc_now", return_value=NOW)
         clock.start()
         self.addCleanup(clock.stop)
@@ -100,22 +103,97 @@ class GoogleAccountTests(unittest.TestCase):
                 self.assertEqual(self.callback(state, dict(CLAIMS, **overrides))[0].status_code, 400)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 0)
 
-    def test_existing_profile_requires_authenticated_link_and_preserves_data(self):
+    def test_existing_profile_requires_email_code_and_preserves_data(self):
         WebFlowTests.seed_user(self)
+        password = "Synthetic linked password 123"
+        hashed = accounts.password_hash(password, password)
+        self.conn.execute("UPDATE accounts SET password_hash=? WHERE user_id=1", (hashed,))
+        self.conn.commit()
         before = dict(self.conn.execute("SELECT * FROM users WHERE id=1").fetchone())
         claims = dict(CLAIMS, email="owner@example.test")
         anonymous = self.app.test_client()
         state, _, _ = self.start(anonymous)
         response, _, _ = self.callback(state, claims, anonymous)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn(b"Sign in with your password first", response.data)
+        self.assertEqual((response.status_code, response.location), (302, google_accounts.LINK_PATH))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM google_accounts").fetchone()[0], 0)
+        code = self.delivery.call_args.args[2].split("\n\n")[-1]
+        page = anonymous.get(google_accounts.LINK_PATH)
+        self.assertEqual(page.status_code, 200)
+        csrf = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
+        wrong = anonymous.post(google_accounts.LINK_PATH, data={"csrf_token": csrf, "code": "a" * 43})
+        self.assertEqual(wrong.status_code, 400)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM google_accounts").fetchone()[0], 0)
+        finished = anonymous.post(google_accounts.LINK_PATH, data={"csrf_token": csrf, "code": code})
+        self.assertEqual(finished.status_code, 200)
+        self.assertIn(b"Google sign-in complete", finished.data)
+        self.assertEqual(anonymous.get("/settings").status_code, 200)
+        self.assertEqual(before, dict(self.conn.execute("SELECT * FROM users WHERE id=1").fetchone()))
+        self.assertEqual(self.conn.execute("SELECT user_id FROM google_accounts").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT password_hash FROM accounts").fetchone()[0], hashed)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM google_link_challenges").fetchone()[0], 0)
+        replay = anonymous.get(google_accounts.LINK_PATH)
+        self.assertEqual(replay.status_code, 400)
+        password_client = self.app.test_client()
+        login_page = password_client.get("/login")
+        login_csrf = re.search(rb'name="csrf_token" value="([^"]+)"', login_page.data).group(1).decode()
+        signed_in = password_client.post("/login", data={"csrf_token": login_csrf, "email": "owner@example.test", "password": password})
+        self.assertEqual(signed_in.status_code, 302)
+        with password_client.session_transaction() as session:
+            self.assertEqual(session["user_id"], 1)
+        returning = self.app.test_client()
+        state, _, _ = self.start(returning)
+        self.assertEqual(self.callback(state, claims, returning)[0].status_code, 200)
+        with returning.session_transaction() as session:
+            self.assertEqual(session["user_id"], 1)
+        self.assertEqual(self.delivery.call_count, 1)
+
+    def test_link_code_is_bound_to_browser_and_expires(self):
+        WebFlowTests.seed_user(self)
+        claims = dict(CLAIMS, email="owner@example.test")
+        anonymous = self.app.test_client()
+        state, _, _ = self.start(anonymous)
+        self.assertEqual(self.callback(state, claims, anonymous)[0].status_code, 302)
+        stranger = self.app.test_client()
+        self.assertEqual(stranger.get(google_accounts.LINK_PATH).status_code, 400)
+        with patch("backend.app.utc_now", return_value=NOW + timedelta(minutes=10)):
+            self.assertEqual(anonymous.get(google_accounts.LINK_PATH).status_code, 400)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM google_accounts").fetchone()[0], 0)
+
+    def test_authenticated_password_owner_can_link_without_second_code(self):
+        WebFlowTests.seed_user(self)
         state, _, _ = self.start()
         # Google redirects do not carry the Strict session cookie.
         self.client.delete_cookie("session")
+        claims = dict(CLAIMS, email="owner@example.test")
         self.assertEqual(self.callback(state, claims)[0].status_code, 200)
-        self.assertEqual(before, dict(self.conn.execute("SELECT * FROM users WHERE id=1").fetchone()))
+        self.delivery.assert_not_called()
         self.assertEqual(self.conn.execute("SELECT user_id FROM google_accounts").fetchone()[0], 1)
-        self.assertEqual(self.conn.execute("SELECT password_hash FROM accounts").fetchone()[0], "unused-test-fixture")
+
+    def test_legacy_profile_links_by_code_without_losing_resume(self):
+        self.conn.execute("INSERT INTO users(id,name,email,resume_text) VALUES(7,'Legacy','legacy@example.test','Private resume')")
+        self.conn.commit()
+        visitor = self.app.test_client()
+        state, _, _ = self.start(visitor)
+        claims = dict(CLAIMS, email="legacy@example.test")
+        self.assertEqual(self.callback(state, claims, visitor)[0].status_code, 302)
+        code = self.delivery.call_args.args[2].split("\n\n")[-1]
+        page = visitor.get(google_accounts.LINK_PATH)
+        csrf = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
+        self.assertEqual(visitor.post(google_accounts.LINK_PATH, data={"csrf_token": csrf, "code": code}).status_code, 200)
+        self.assertEqual(self.conn.execute("SELECT user_id FROM google_accounts").fetchone()[0], 7)
+        self.assertEqual(self.conn.execute("SELECT resume_text FROM users WHERE id=7").fetchone()[0], "Private resume")
+
+    def test_uncertain_link_email_keeps_challenge_without_leaking_details(self):
+        WebFlowTests.seed_user(self)
+        visitor = self.app.test_client()
+        state, _, _ = self.start(visitor)
+        with patch.object(accounts.pipeline, "deliver_account_email", side_effect=RuntimeError("private mail detail")), \
+                self.assertLogs(self.app.logger, level="ERROR") as logs:
+            response, _, _ = self.callback(state, dict(CLAIMS, email="owner@example.test"), visitor)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("private mail detail", " ".join(logs.output))
+        self.assertEqual(visitor.get(google_accounts.LINK_PATH).status_code, 200)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM google_accounts").fetchone()[0], 0)
 
     def test_revoked_link_session_and_wrong_email_are_rejected(self):
         WebFlowTests.seed_user(self)

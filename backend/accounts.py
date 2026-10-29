@@ -14,6 +14,7 @@ from backend.hosting import site_origin
 
 INVITE_LIFETIME_SECONDS = 48 * 60 * 60
 RESET_LIFETIME_SECONDS = 30 * 60
+SIGNUP_LIFETIME_SECONDS = 30 * 60
 RECOVERY_COOLDOWN_SECONDS = 5 * 60
 LOGIN_LOCK_SECONDS = 15 * 60
 PASSWORD_METHOD = "pbkdf2:sha256:600000"
@@ -40,7 +41,7 @@ def token_digest(token):
     return hashlib.sha256(token.encode("ascii")).hexdigest()
 
 
-def issue_invitation(conn, email, now, owner=False):
+def issue_invitation(conn, email, now, owner=False, self_service=False):
     """Persist an invitation before sending; callers must not retry uncertain mail."""
     email = email_address(email)
     registration_url = site_origin() + "/register"
@@ -48,7 +49,7 @@ def issue_invitation(conn, email, now, owner=False):
     timestamp = int(now.timestamp())
     with conn:
         conn.execute("BEGIN IMMEDIATE")
-        if owner and (conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] or
+        if owner and (conn.execute("SELECT COUNT(*) FROM accounts WHERE is_admin=1").fetchone()[0] or
                       conn.execute("SELECT COUNT(*) FROM account_tokens WHERE is_admin=1 AND consumed_at IS NULL AND expires_at>?", (timestamp,)).fetchone()[0]):
             raise ValueError("Owner setup is already complete or an owner invitation is pending")
         existing = conn.execute("SELECT id FROM users WHERE lower(email)=?", (email,)).fetchone()
@@ -59,11 +60,20 @@ def issue_invitation(conn, email, now, owner=False):
         if pending:
             raise ValueError("An invitation is already pending; check delivery before trying again")
         token = secrets.token_urlsafe(32)
+        lifetime = SIGNUP_LIFETIME_SECONDS if self_service else INVITE_LIFETIME_SECONDS
         conn.execute("INSERT INTO account_tokens(token_hash,purpose,email,user_id,is_admin,expires_at,created_at) VALUES(?,'invite',?,?,?,?,?)",
-                     (token_digest(token),email,user_id,int(owner),timestamp+INVITE_LIFETIME_SECONDS,timestamp))
-    pipeline.deliver_account_email(email,"StudentConnect invitation",
-        "You were invited to StudentConnect. Open " + registration_url + " and enter this code with this email address. "
-        "The invitation expires in 48 hours and can be used once.\n\n" + token)
+                     (token_digest(token),email,user_id,int(owner),timestamp+lifetime,timestamp))
+    try:
+        if self_service:
+            pipeline.deliver_account_email(email, "StudentConnect sign-up code",
+                "Open " + registration_url + " and enter this code to verify your email. "
+                "It expires in 30 minutes and can be used once.\n\n" + token)
+        else:
+            pipeline.deliver_account_email(email,"StudentConnect invitation",
+                "You were invited to StudentConnect. Open " + registration_url + " and enter this code with this email address. "
+                "The invitation expires in 48 hours and can be used once.\n\n" + token)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise RuntimeError("Registration code delivery unconfirmed; check mail before requesting another") from error
 
 
 def redeem_invitation(conn, form, now):
@@ -203,6 +213,24 @@ def register_routes(app, connection, context, now):
             flash("Account created and email verified. Sign in to continue.")
             return redirect(url_for("accounts.login"))
         return page("register")
+
+    @routes.post("/register/code")
+    def registration_code():
+        if not request_allowed(connection(), "reset", now()):
+            return page("register", "Too many code requests. Wait five minutes.", 429)
+        try:
+            pipeline.validate_email_configuration()
+        except ValueError as error:
+            app.logger.error("Registration code delivery unavailable (%s)", type(error).__name__)
+            return page("register", "Email codes are temporarily unavailable. Please try again later.", 503)
+        try:
+            issue_invitation(connection(), request.form.get("email", ""), now(), self_service=True)
+        except ValueError:
+            # Account existence and pending invitations must not be disclosed.
+            return page("register", "If this email is eligible, a sign-up code has been sent. Check your inbox before requesting another.")
+        except (OSError, RuntimeError) as error:
+            app.logger.error("Registration code delivery unconfirmed (%s); inspect delivery before retrying", type(error).__name__)
+        return page("register", "If this email is eligible, a sign-up code has been sent. Check your inbox before requesting another.")
 
     @routes.route("/forgot-password",methods=["GET","POST"])
     def forgot():

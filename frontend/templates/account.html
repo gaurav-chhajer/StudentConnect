@@ -31,9 +31,9 @@
 <ul class="hero-points"><li>Choose your target companies</li><li>See a match score for every job</li><li>Get new matches by email</li></ul>
 </aside>
 <main class="main auth-main" id="content"><section class="card auth-card">
-<span class="tag">{{ 'Student access' if config.GOOGLE_LOGIN_ENABLED else 'Invitation-only access' }}</span>
+<span class="tag">Student access</span>
 <h1>{{ {'login':'Sign in','register':'Create an account','forgot':'Recover your account','reset':'Set a new password'}[mode] }}</h1>
-<p class="sub">{% if config.GOOGLE_LOGIN_ENABLED %}Anyone can join with Google. No invitation code needed. Existing members can also sign in with a password.{% else %}Google signup is not configured yet. You can still use an existing account or invitation.{% endif %}</p>
+<p class="sub">Sign up with a verified email and password{% if config.GOOGLE_LOGIN_ENABLED %}, or continue with Google{% endif %}. If both methods use the same email, they connect to one profile after a one-time check.</p>
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
 {% if config.GOOGLE_LOGIN_ENABLED and mode in ['login','register'] %}
@@ -41,7 +41,12 @@
 <form method="post" action="{{ url_for('google_accounts.login') }}" class="google-auth-form">{{ csrf() }}<button class="btn google-signin" type="submit"><svg viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.7c3.9-3.6 6-8.8 6-15Z"/><path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.8l-6.7-5.1c-1.8 1.2-4 1.9-6.8 1.9-5.2 0-9.6-3.5-11.2-8.2H5.9v5.2A20 20 0 0 0 24 44Z"/><path fill="#FBBC05" d="M12.8 27.8a12 12 0 0 1 0-7.6V15H5.9a20 20 0 0 0 0 17.9l6.9-5.1Z"/><path fill="#EA4335" d="M24 12.1c3 0 5.7 1 7.8 3.1l5.8-5.8C34.1 6 29.5 4 24 4A20 20 0 0 0 5.9 15l6.9 5.2c1.6-4.7 6-8.1 11.2-8.1Z"/></svg><span>Continue with Google</span></button></form>
 <div class="oauth-divider" aria-hidden="true"><span>or continue with email</span></div>
 </div>
-{% if mode == 'register' %}<details><summary>Have an invitation? Register with a password</summary>{% endif %}
+{% endif %}
+{% if mode == 'register' %}
+<form method="post" action="{{ url_for('accounts.registration_code') }}" class="page-form">{{ csrf() }}
+<div class="fields spaced"><label class="field"><span class="inputbox"><input name="email" type="email" maxlength="254" autocomplete="email" required placeholder=" "><span class="input-label">Email for your sign-up code</span><i aria-hidden="true"></i></span></label></div>
+<div class="actions"><button class="btn" type="submit">Email me a code</button></div></form>
+<p class="sub">Already have an invitation? Enter its code below. Already use Google? Use password recovery to add a password.</p>
 {% endif %}
 <form method="post" class="page-form">{{ csrf() }}<div class="fields spaced">
 <label class="field"><span class="inputbox"><input name="email" type="email" maxlength="254" autocomplete="email" required placeholder=" "><span class="input-label">Email</span><i aria-hidden="true"></i></span></label>
@@ -50,6 +55,5 @@
 {% if mode != 'forgot' %}<label class="field"><span class="inputbox"><input name="password" type="password" minlength="{{ 1 if mode=='login' else 12 }}" maxlength="128" autocomplete="{{ 'current-password' if mode=='login' else 'new-password' }}" required placeholder=" "><span class="input-label">Password</span><i aria-hidden="true"></i></span></label>{% endif %}
 {% if mode in ['register','reset'] %}<label class="field"><span class="inputbox"><input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required placeholder=" "><span class="input-label">Confirm password</span><i aria-hidden="true"></i></span></label><p class="sub">Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
 </div><div class="actions"><button class="btn p" type="submit"><span>{{ 'Send recovery instructions' if mode=='forgot' else 'Continue' }}</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div></form>
-{% if config.GOOGLE_LOGIN_ENABLED and mode == 'register' %}</details>{% endif %}
 <nav class="actions auth-links" aria-label="Account links"><a href="{{ url_for('accounts.login') }}"{% if mode=='login' %} aria-current="page"{% endif %}>Sign in</a><a href="{{ url_for('accounts.register') }}"{% if mode=='register' %} aria-current="page"{% endif %}>Sign up</a><a href="{{ url_for('accounts.forgot') }}"{% if mode=='forgot' %} aria-current="page"{% endif %}>Forgot password</a><a href="{{ url_for('accounts.reset') }}"{% if mode=='reset' %} aria-current="page"{% endif %}>Enter recovery code</a></nav>
 </section></main></div></body></html>
