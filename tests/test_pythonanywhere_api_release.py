@@ -78,6 +78,16 @@ class ReleaseTests(unittest.TestCase):
             self.assertFalse((root / '.releases' / SHA).exists())
             self.assertFalse((root / 'outside.py').exists())
 
+    def test_migration_helper_comes_from_release_not_old_host_checkout(self):
+        with tempfile.TemporaryDirectory(dir='tests') as directory:
+            root = Path(directory)
+            helper = root / 'scripts/deploy_pythonanywhere.py'
+            helper.parent.mkdir()
+            helper.write_text('def migrate_pending(*, runtime_root):\n    return runtime_root\n', encoding='utf-8')
+            with patch.object(api.legacy, 'migrate_pending', side_effect=AssertionError('old host helper used')):
+                module = release._migration_module(root)
+                self.assertEqual(module.migrate_pending(runtime_root=root), root)
+
     def test_failed_preparation_keeps_previous_release_and_records_safe_status(self):
         with tempfile.TemporaryDirectory(dir='tests') as directory:
             root = Path(directory)

@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import hashlib
+import importlib.util
 import json
 import logging
 import os
@@ -142,6 +143,18 @@ def _preflight(release):
         raise RuntimeError('Release application failed its isolated startup check')
 
 
+def _migration_module(release):
+    path = release / 'scripts/deploy_pythonanywhere.py'
+    if not path.is_file() or path.is_symlink():
+        raise ValueError('Release migration helper is missing')
+    spec = importlib.util.spec_from_file_location('_verified_release_migrations', path)
+    if spec is None or spec.loader is None:
+        raise ValueError('Release migration helper cannot be loaded')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def application():
     active = _metadata(_json_file(ACTIVE)) if ACTIVE.exists() else None
     request = _metadata(_json_file(REQUEST), request=True) if REQUEST.exists() else None
@@ -157,10 +170,10 @@ def application():
             with _pipeline_lock():
                 release = _extract(request)
                 stage = 'migrations'
-                from scripts.deploy_pythonanywhere import migrate_pending
-                migrate_pending(database=DATA / 'jobs.db', migration_dir=release / 'backend/migrations',
-                                backup_dir=DATA / 'backups', deadline=time.time() + 90,
-                                deployment_sha=request['sha'], runtime_root=release)
+                _migration_module(release).migrate_pending(
+                    database=DATA / 'jobs.db', migration_dir=release / 'backend/migrations',
+                    backup_dir=DATA / 'backups', deadline=time.time() + 90,
+                    deployment_sha=request['sha'], runtime_root=release)
                 stage = 'startup'
                 _preflight(release)
                 importing = True
@@ -169,7 +182,8 @@ def application():
                 _atomic_json(STATUS, {'run_id': request['run_id'], 'sha': request['sha'],
                                       'success': True, 'stage': None})
                 return app
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
+        except (OSError, ValueError, RuntimeError, TypeError, ImportError,
+                subprocess.SubprocessError, zipfile.BadZipFile) as error:
             logger.error('Release activation failed stage=%s error=%s', stage, type(error).__name__)
             _atomic_json(STATUS, {'run_id': request['run_id'], 'sha': request['sha'],
                                   'success': False, 'stage': stage, 'error_code': type(error).__name__})

@@ -1089,12 +1089,6 @@ Official setup: [Flask WSGI](https://help.pythonanywhere.com/pages/Flask/) and
 
 ## Automatic PythonAnywhere deployment from main
 
-**Temporary recovery mode:** the deployment workflow currently restores the last
-successful WSGI entry point after the first Files API release caused an HTTP 500.
-Automatic release activation is paused until the hosted startup error is diagnosed.
-The design below describes the intended workflow, which is still in the repository
-but is not the active GitHub Actions step.
-
 The deployment workflow tests the exact commit, uploads a bounded release archive
 through the [PythonAnywhere Files API](https://help.pythonanywhere.com/pages/API/),
 and reloads the web app. It does not use a Bash console. On reload, the root WSGI
@@ -1123,6 +1117,10 @@ the website, and the PythonAnywhere error log before retrying a timeout. Release
 are retained for rollback and use the free account's disk allowance; remove old
 releases only after a separate backup and review. Private `data/boards` in the
 existing checkout remains the board source for the web app.
+The verified migration helper is loaded from the release archive, so the older
+host checkout does not need a console update. If a release causes a startup error,
+`scripts.restore_pythonanywhere_wsgi` remains available as an emergency recovery
+command in GitHub Actions after switching the workflow step for a reviewed rollback.
 
 ## Personal local application worker
 
