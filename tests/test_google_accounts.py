@@ -64,6 +64,7 @@ class GoogleAccountTests(unittest.TestCase):
         response, exchange, verify = self.callback(state)
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Google sign-in complete", response.data)
+        self.assertIn(b'id="match-constellation"', response.data)
         self.assertIn(b'href="/"', response.data)
         self.assertIn("SameSite=Strict", " ".join(response.headers.getlist("Set-Cookie")))
         exchange.assert_called_once_with(redirect_uri=params["redirect_uri"][0], code="synthetic-code", code_verifier=pending["code_verifier"])
@@ -178,6 +179,8 @@ class GoogleAccountTests(unittest.TestCase):
         self.assertEqual(self.callback(state, claims, visitor)[0].status_code, 302)
         code = self.delivery.call_args.args[2].split("\n\n")[-1]
         page = visitor.get(google_accounts.LINK_PATH)
+        self.assertIn(b'id="match-constellation"', page.data)
+        self.assertIn(b'js/constellation.js', page.data)
         csrf = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
         self.assertEqual(visitor.post(google_accounts.LINK_PATH, data={"csrf_token": csrf, "code": code}).status_code, 200)
         self.assertEqual(self.conn.execute("SELECT user_id FROM google_accounts").fetchone()[0], 7)

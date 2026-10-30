@@ -170,8 +170,8 @@ def reset_password(conn, form, now):
 def register_routes(app, connection, context, now):
     routes = Blueprint("accounts",__name__)
 
-    def page(mode, message=None, status=200):
-        return render_template("account.html",mode=mode,message=message),status
+    def page(mode, message=None, status=200, registration_step="request"):
+        return render_template("account.html",mode=mode,message=message,registration_step=registration_step),status
 
     @routes.route("/login",methods=["GET","POST"])
     def login():
@@ -208,11 +208,11 @@ def register_routes(app, connection, context, now):
             try:
                 redeem_invitation(connection(),request.form,now())
             except (ValueError,sqlite3.IntegrityError):
-                return page("register","Registration failed. Check the code, email, name and password requirements.",400)
+                return page("register","Registration failed. Check the code, email, name and password requirements.",400,"complete")
             session.clear()
             flash("Account created and email verified. Sign in to continue.")
             return redirect(url_for("accounts.login"))
-        return page("register")
+        return page("register",registration_step="complete" if request.args.get("step")=="complete" else "request")
 
     @routes.post("/register/code")
     def registration_code():
@@ -227,10 +227,10 @@ def register_routes(app, connection, context, now):
             issue_invitation(connection(), request.form.get("email", ""), now(), self_service=True)
         except ValueError:
             # Account existence and pending invitations must not be disclosed.
-            return page("register", "If this email is eligible, a sign-up code has been sent. Check your inbox before requesting another.")
+            return page("register", "If this email is eligible, a sign-up code has been sent. Check your inbox before requesting another.", registration_step="complete")
         except (OSError, RuntimeError) as error:
             app.logger.error("Registration code delivery unconfirmed (%s); inspect delivery before retrying", type(error).__name__)
-        return page("register", "If this email is eligible, a sign-up code has been sent. Check your inbox before requesting another.")
+        return page("register", "If this email is eligible, a sign-up code has been sent. Check your inbox before requesting another.", registration_step="complete")
 
     @routes.route("/forgot-password",methods=["GET","POST"])
     def forgot():

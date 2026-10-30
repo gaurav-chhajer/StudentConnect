@@ -33,7 +33,7 @@
 <main class="main auth-main" id="content"><section class="card auth-card">
 <span class="tag">Student access</span>
 <h1>{{ {'login':'Sign in','register':'Create an account','forgot':'Recover your account','reset':'Set a new password'}[mode] }}</h1>
-<p class="sub">Sign up with a verified email and password{% if config.GOOGLE_LOGIN_ENABLED %}, or continue with Google{% endif %}. If both methods use the same email, they connect to one profile after a one-time check.</p>
+<p class="sub">{% if mode == 'login' %}Sign in with your email and password{% if config.GOOGLE_LOGIN_ENABLED %}, or continue with Google{% endif %}.{% elif mode == 'register' and registration_step == 'request' %}Enter your email to get a one-time sign-up code. You can also use Google to create an account.{% elif mode == 'register' %}Enter the code from your email to finish creating your account.{% else %}Use your verified email to recover access to your account.{% endif %}</p>
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message %}<p class="notice" role="status">{{ message }}</p>{% endif %}
 {% if config.GOOGLE_LOGIN_ENABLED and mode in ['login','register'] %}
@@ -42,12 +42,13 @@
 <div class="oauth-divider" aria-hidden="true"><span>or continue with email</span></div>
 </div>
 {% endif %}
-{% if mode == 'register' %}
+{% if mode == 'register' and registration_step == 'request' %}
 <form method="post" action="{{ url_for('accounts.registration_code') }}" class="page-form">{{ csrf() }}
 <div class="fields spaced"><label class="field"><span class="inputbox"><input name="email" type="email" maxlength="254" autocomplete="email" required placeholder=" "><span class="input-label">Email for your sign-up code</span><i aria-hidden="true"></i></span></label></div>
 <div class="actions"><button class="btn" type="submit">Email me a code</button></div></form>
-<p class="sub">Already have an invitation? Enter its code below. Already use Google? Use password recovery to add a password.</p>
+<p class="sub">Already have a sign-up or invitation code? <a href="{{ url_for('accounts.register', step='complete') }}">Enter your code</a>. Already use Google? Use password recovery to add a password.</p>
 {% endif %}
+{% if mode != 'register' or registration_step == 'complete' %}
 <form method="post" class="page-form">{{ csrf() }}<div class="fields spaced">
 <label class="field"><span class="inputbox"><input name="email" type="email" maxlength="254" autocomplete="email" required placeholder=" "><span class="input-label">Email</span><i aria-hidden="true"></i></span></label>
 {% if mode == 'register' %}<label class="field"><span class="inputbox"><input name="name" maxlength="100" autocomplete="name" required placeholder=" "><span class="input-label">Full name</span><i aria-hidden="true"></i></span></label>{% endif %}
@@ -55,5 +56,7 @@
 {% if mode != 'forgot' %}<label class="field"><span class="inputbox"><input name="password" type="password" minlength="{{ 1 if mode=='login' else 12 }}" maxlength="128" autocomplete="{{ 'current-password' if mode=='login' else 'new-password' }}" required placeholder=" "><span class="input-label">Password</span><i aria-hidden="true"></i></span></label>{% endif %}
 {% if mode in ['register','reset'] %}<label class="field"><span class="inputbox"><input name="confirmation" type="password" minlength="12" maxlength="128" autocomplete="new-password" required placeholder=" "><span class="input-label">Confirm password</span><i aria-hidden="true"></i></span></label><p class="sub">Use 12–128 characters. Codes expire and can be used once.</p>{% endif %}
 </div><div class="actions"><button class="btn p" type="submit"><span>{{ 'Send recovery instructions' if mode=='forgot' else 'Continue' }}</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div></form>
+{% if mode == 'register' %}<p class="sub">Need a code? <a href="{{ url_for('accounts.register') }}">Request one by email</a>.</p>{% endif %}
+{% endif %}
 <nav class="actions auth-links" aria-label="Account links"><a href="{{ url_for('accounts.login') }}"{% if mode=='login' %} aria-current="page"{% endif %}>Sign in</a><a href="{{ url_for('accounts.register') }}"{% if mode=='register' %} aria-current="page"{% endif %}>Sign up</a><a href="{{ url_for('accounts.forgot') }}"{% if mode=='forgot' %} aria-current="page"{% endif %}>Forgot password</a><a href="{{ url_for('accounts.reset') }}"{% if mode=='reset' %} aria-current="page"{% endif %}>Enter recovery code</a></nav>
 </section></main></div></body></html>

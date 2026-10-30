@@ -151,12 +151,13 @@ first owner invitation:
 ```
 
 Enter the email already saved in your existing profile to retain its data and
-confirm `SEND` to send a real invitation. Open `/register`, enter the emailed
-43-character code, your email/name, and a new 12–128-character password. Ownership
+confirm `SEND` to send a real invitation. Open `/register`, choose **Enter your code**,
+then enter the emailed 43-character code, your email/name, and a new 12–128-character password. Ownership
 is verified by access to that email. Registration links the existing user ID
 without replacing profile data. The first owner can use **Invite testers** to
 send invitations; testers cannot invite others. Anyone can also request a public
-email sign-up code on `/register`. It expires after 30 minutes and creates a
+email sign-up code on `/register`; the code entry form appears after requesting it.
+The code expires after 30 minutes and creates a
 non-admin account only after the email, name and password are submitted together.
 Existing invitations retain their 48-hour lifetime and owner permissions. Public
 Google signup is available when Google credentials are configured.

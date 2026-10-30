@@ -86,7 +86,8 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn("default-src 'none'", page.headers['Content-Security-Policy'].split('; '))
 
     def test_animated_fields_preserve_labels_values_and_validation(self):
-        public = {'/login': {'email', 'password'}, '/register': {'email', 'name', 'code', 'password', 'confirmation'},
+        public = {'/login': {'email', 'password'}, '/register': {'email'},
+                  '/register?step=complete': {'email', 'name', 'code', 'password', 'confirmation'},
                   '/forgot-password': {'email'}, '/reset-password': {'email', 'code', 'password', 'confirmation'}}
         for path, expected in public.items():
             with self.subTest(path=path):

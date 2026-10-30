@@ -71,8 +71,14 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(self.client.get("/").status_code,200)
 
     def test_public_email_signup_requires_emailed_code_and_can_sign_in(self):
-        self.assertIn(b"Email me a code", self.client.get("/register").data)
-        self.assertEqual(self.post("/register/code", {"email": "tester@example.test"}).status_code, 200)
+        initial = self.client.get("/register")
+        self.assertIn(b"Email me a code", initial.data)
+        self.assertNotIn(b'name="confirmation"', initial.data)
+        self.assertIn(b"Enter your code", initial.data)
+        self.assertIn(b'name="confirmation"', self.client.get("/register?step=complete").data)
+        requested = self.post("/register/code", {"email": "tester@example.test"})
+        self.assertEqual(requested.status_code, 200)
+        self.assertIn(b'name="confirmation"', requested.data)
         code = self.mail.call_args.args[2].split("\n\n")[-1]
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0], 0)
         self.assertEqual(self.post("/register", self.form("tester@example.test", code)).status_code, 302)
@@ -139,6 +145,11 @@ class AccountTests(unittest.TestCase):
                     with self.client.get(asset.decode()) as static_response:
                         self.assertEqual(static_response.status_code, 200)
         self.assertEqual(self.client.post("/login", data=dict(email="tester@example.test", password=TEST_PASSWORD)).status_code, 403)
+
+    def test_login_keeps_password_path_separate_from_signup(self):
+        response = self.client.get("/login")
+        self.assertIn(b'name="password"', response.data)
+        self.assertNotIn(b'name="confirmation"', response.data)
 
     def test_registration_requires_matching_unexpired_invitation(self):
         code=self.invitation()
