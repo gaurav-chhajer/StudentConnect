@@ -3,6 +3,7 @@
 import logging
 import json
 import time
+import requests
 
 from backend import career_sources
 from backend.local_embeddings import LocalScorer
@@ -16,7 +17,7 @@ def score_pending(client, deadline, scorer=None):
     owned = scorer is None
     scorer = LocalScorer() if owned else scorer
     try:
-        after, job_after, evaluated = 0, 0, 0
+        after, job_after, evaluated, failed = 0, 0, 0, False
         for _ in range(MAX_PAGES):
             if time.monotonic() >= deadline - 30:
                 logger.warning("Local similarity time budget reached; remaining work stays pending.")
@@ -30,7 +31,7 @@ def score_pending(client, deadline, scorer=None):
                 if items or next_job:
                     raise ValueError("Similarity work lacks a profile cursor")
                 logger.info("Local similarity completed: evaluations=%s; no Groq calls made.", evaluated)
-                return 0
+                return int(failed)
             if (type(next_user) is not int or not 0 < next_user <= 2147483647 or next_user < after or
                     (job_after and next_user != after) or
                     (next_user == after and (not job_after or next_job != 0 and next_job <= job_after))):
@@ -45,7 +46,15 @@ def score_pending(client, deadline, scorer=None):
                         not isinstance(item.get("fingerprint"), str) or len(item["fingerprint"]) != 64 or
                         not isinstance(item.get("company_name"), str)):
                     raise ValueError("Invalid similarity work item")
-                prepared = career_sources.prepare_job(item["job"], deadline - 30)
+                try:
+                    prepared = career_sources.prepare_job(item["job"], deadline - 30)
+                except (requests.RequestException, ValueError, KeyError, TypeError) as error:
+                    failed = True
+                    response = error.response if isinstance(error, requests.RequestException) else None
+                    logger.error('Hosted scoring description deferred: job_id=%s error=%s http_status=%s.',
+                                 item['job']['id'], type(error).__name__,
+                                 response.status_code if response is not None else 'unavailable')
+                    continue
                 if prepared != item["job"]:
                     raw = json.loads(prepared["raw_json"])
                     detail = client.call("description", dict(user_id=next_user, job_id=prepared["id"],

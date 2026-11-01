@@ -37,6 +37,19 @@ class ObservationEndpointTests(CloudEndpointTests):
 
 
 class SyncTests(unittest.TestCase):
+    def test_unavailable_description_does_not_block_following_hosted_score(self):
+        import requests
+        scorer, client = MagicMock(), MagicMock()
+        def item(number):
+            return dict(user={'id': 1}, job={'id': number}, company_name='Example', fingerprint='a'*64)
+        client.call.side_effect = [dict(next=1, job_after=2, items=[item(1),item(2)]),
+                                   dict(saved=True), dict(next=None, job_after=0, items=[])]
+        with patch.object(sync_hosted.run_similarity.career_sources, 'prepare_job',
+                          side_effect=[requests.HTTPError('private'), {'id':2}]), \
+                self.assertLogs(sync_hosted.run_similarity.logger):
+            self.assertEqual(sync_hosted.run_similarity.score_pending(client,time.monotonic()+300,scorer),1)
+        scorer.score.assert_called_once()
+
     def test_maps_company_identity_and_never_transmits_local_ids_or_accounts(self):
         conn = sqlite3.connect(':memory:')
         self.addCleanup(conn.close)
