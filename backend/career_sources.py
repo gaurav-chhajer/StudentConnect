@@ -19,6 +19,7 @@ MAX_LISTINGS = 10000
 MAX_PAGES = 1000
 MAX_DESCRIPTION = 250000
 SOURCES = {
+    'hsbc': ('HSBC', 'eightfold', 'https://portal.careers.hsbc.com'),
     'postman': ('Postman', 'workday', 'https://postman.wd108.myworkdayjobs.com'),
     'cvent': ('Cvent', 'jibe', 'https://careers.cvent.com'),
     'zs': ('ZS', 'jibe', 'https://jobs.zs.com'),
@@ -499,7 +500,8 @@ def _listings(feed, rows=None):
                 batch.append(job(key, identifier, item['name'], '; '.join(locations) or None,
                                  origin + path, version=item.get('postedTs'), department=item.get('department')))
         elif kind == 'eightfold':
-            payload = feed.json('/api/apply/v2/jobs', params=dict(domain='netflix.com', start=len(rows), num=10))
+            domain = 'hsbc.com' if key == 'hsbc' else 'netflix.com'
+            payload = feed.json('/api/apply/v2/jobs', params=dict(domain=domain, start=len(rows), num=10))
             count, items = total(payload['count']), payload['positions']
             batch = []
             for item in items:

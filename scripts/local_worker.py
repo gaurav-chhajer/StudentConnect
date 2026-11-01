@@ -60,9 +60,17 @@ def eligible_user(conn, user_id):
 
 
 def report(database,writes,worker,code,**details):
-    with closing(connect(database)) as conn:
-        with writing(database,writes,conn):
-            monitor.local_record(conn,worker,code,**details)
+    try:
+        with closing(connect(database)) as conn:
+            with writing(database,writes,conn):
+                monitor.local_record(conn,worker,code,**details)
+    except sqlite3.OperationalError as error:
+        sqlite_code = getattr(error, 'sqlite_errorname', 'unavailable')
+        if worker == 'fetch' and sqlite_code.startswith(('SQLITE_BUSY', 'SQLITE_LOCKED')):
+            logger.warning('Local worker health event delayed: worker=%s code=%s sqlite_code=%s.',
+                           worker, code, sqlite_code)
+            return
+        raise
 
 
 def eligible_job(conn, user, job):
@@ -100,12 +108,14 @@ def fetch_cycle(database, writes, stop, ready):
                 logger.warning('Fetch cycle interrupted or budget reached; saved jobs remain queued.')
                 break
             company = dict(row)
+            stage = 'fetch'
             try:
                 source = company['career_source']
                 jobs = (career_sources.fetch(source, deadline) if source else
                         pipeline.fetch_jobs_for_company(company))
                 mode = mode_for_source(source)
                 jobs = deduplicate(jobs, mode)
+                stage = 'save_snapshot'
                 batches = (observation_batches({}, jobs, MAX_SNAPSHOT_JOBS, MAX_SNAPSHOT_BYTES)
                            if mode == 'observed' else [dict(jobs=jobs)])
                 for batch in batches:
@@ -123,6 +133,20 @@ def fetch_cycle(database, writes, stop, ready):
                         monitor.local_record(conn,'fetch','fetch_done',value=len(batch['jobs']))
                     ready.set()
                 logger.info('Local fetch saved: company_id=%s jobs=%s', company['id'], len(jobs))
+            except sqlite3.OperationalError as error:
+                code = getattr(error, 'sqlite_errorname', 'unavailable')
+                trace = error.__traceback__
+                while trace is not None and trace.tb_next is not None:
+                    trace = trace.tb_next
+                location = ('%s:%s' % (trace.tb_frame.f_code.co_name, trace.tb_lineno)
+                            if trace is not None else 'unavailable')
+                logger.error('Local fetch storage failed: company_id=%s stage=%s sqlite_code=%s location=%s.',
+                             company['id'], stage, code, location)
+                if code.startswith(('SQLITE_BUSY', 'SQLITE_LOCKED')):
+                    # A competing reader/writer can release the database before the
+                    # next scheduled fetch. Saved snapshot rows are idempotent.
+                    continue
+                raise
             except (requests.RequestException, ValueError, KeyError, TypeError) as error:
                 # A failed read/invalid snapshot cannot replace saved jobs. The next
                 # regular fetch remains scheduled; SMTP is never retried this way.
@@ -288,7 +312,13 @@ def fetch_loop(database, writes, stop, ready):
         started = time.monotonic()
         logger.info('Local independent fetch started.')
         report(database,writes,'fetch','fetch_start')
-        fetch_cycle(database, writes, stop, ready)
+        try:
+            fetch_cycle(database, writes, stop, ready)
+        except sqlite3.OperationalError as error:
+            sqlite_code = getattr(error, 'sqlite_errorname', 'unavailable')
+            if not sqlite_code.startswith(('SQLITE_BUSY', 'SQLITE_LOCKED')):
+                raise
+            logger.error('Local fetch cycle delayed by database lock: sqlite_code=%s.', sqlite_code)
         delay = max(0, started + FETCH_INTERVAL_SECONDS - time.monotonic())
         logger.info('Local fetch cycle completed; next fetch in %.1f seconds.', delay)
         report(database,writes,'fetch','waiting',state='waiting',
@@ -337,8 +367,9 @@ def run(database=None, minimum=MIN_EMAIL_SIMILARITY):
                 matching_loop(database, writes, stop, ready, minimum)
         except Exception as error:
             statuses[index] = 1
-            logger.error('Local %s loop stopped (%s); other loop remains independent.',
-                         'fetch' if index == 0 else 'matching', type(error).__name__)
+            logger.error('Local %s loop stopped (%s sqlite_code=%s); other loop remains independent.',
+                         'fetch' if index == 0 else 'matching', type(error).__name__,
+                         getattr(error, 'sqlite_errorname', 'unavailable'))
             report(database,writes,'fetch' if index==0 else 'score',monitor.error_code(error),state='error')
 
     # Share the previous startup worker's lock so old and local modes cannot overlap.

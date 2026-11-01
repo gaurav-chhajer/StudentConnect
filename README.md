@@ -641,8 +641,12 @@ Budget-limited backlog continues in the next batch. Writes use the existing
 pipeline lock; downloads and inference run outside SQLite write transactions.
 Changed inputs are rechecked before saving; stale results are discarded.
 Temporary board-read failures preserve jobs and do not cancel the next scheduled
-fetch. Model or database errors stop the affected loop for inspection. A failed
-email attempt disables emails for that process while scoring/fetching continue.
+fetch. SQLite busy/locked writes also preserve saved jobs and leave that board
+for the next scheduled fetch; a busy fetch health-record write is noted in the
+local log. Snapshot storage errors record a safe SQLite error code and source
+location; other database errors stop the affected loop for inspection. Model
+errors stop the affected loop. A failed email attempt disables emails for that
+process while scoring/fetching continue.
 An uncertain SMTP send or sent-history failure leaves `data/email_schedule.paused`;
 inspect Gmail and sent history before clearing it and restarting. No automatic
 retry of uncertain emails occurs. SMTP acceptance does not prove inbox delivery.

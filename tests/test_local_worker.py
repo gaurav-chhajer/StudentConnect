@@ -78,6 +78,51 @@ class LocalFlowTests(unittest.TestCase):
                 local_worker.fetch_cycle(self.database, self.writes, self.stop, self.ready)
             self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM jobs WHERE is_active=1').fetchone()[0], 2)
 
+    def test_database_busy_preserves_jobs_and_next_fetch_can_recover(self):
+        posting = dict(external_id='new-local', title='Software Engineer',
+                       raw_json={'content': 'Python SQL'})
+        with patch.object(pipeline, 'fetch_jobs_for_company', return_value=[posting]), \
+                self.assertLogs(local_worker.logger) as logs:
+            self.conn.execute('BEGIN')
+            self.conn.execute('SELECT COUNT(*) FROM jobs').fetchone()
+            try:
+                local_worker.fetch_cycle(self.database, self.writes, self.stop, self.ready)
+            finally:
+                self.conn.rollback()
+        self.assertFalse(self.ready.is_set())
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM jobs').fetchone()[0], 2)
+        self.assertIn('SQLITE_BUSY', ' '.join(logs.output))
+        with patch.object(pipeline, 'fetch_jobs_for_company', return_value=[posting]):
+            local_worker.fetch_cycle(self.database, self.writes, self.stop, self.ready)
+        self.assertTrue(self.ready.is_set())
+        self.assertIsNotNone(self.conn.execute(
+            "SELECT id FROM jobs WHERE company_id=1 AND external_id='new-local'").fetchone())
+
+    def test_nonbusy_storage_error_stops_fetch_with_safe_diagnostics(self):
+        posting = dict(external_id='new-local', title='Software Engineer',
+                       raw_json={'content': 'Python SQL'})
+        failure = sqlite3.OperationalError('private storage detail')
+        failure.sqlite_errorname = 'SQLITE_FULL'
+        with patch.object(pipeline, 'fetch_jobs_for_company', return_value=[posting]), \
+                patch.object(pipeline, 'upsert_jobs', side_effect=failure), \
+                self.assertLogs(local_worker.logger) as logs, \
+                self.assertRaises(sqlite3.OperationalError):
+            local_worker.fetch_cycle(self.database, self.writes, self.stop, self.ready)
+        output = ' '.join(logs.output)
+        self.assertIn('sqlite_code=SQLITE_FULL', output)
+        self.assertIn('stage=save_snapshot', output)
+        self.assertNotIn('private storage detail', output)
+        self.assertFalse(self.ready.is_set())
+
+    def test_busy_health_write_is_logged_without_stopping_fetch(self):
+        failure = sqlite3.OperationalError('private storage detail')
+        failure.sqlite_errorname = 'SQLITE_BUSY'
+        with patch.object(local_worker, 'writing', side_effect=failure), \
+                self.assertLogs(local_worker.logger) as logs:
+            local_worker.report(self.database, self.writes, 'fetch', 'fetch_start')
+        self.assertIn('sqlite_code=SQLITE_BUSY', ' '.join(logs.output))
+        self.assertNotIn('private storage detail', ' '.join(logs.output))
+
     def test_changed_jobs_and_preferences_reenter_queue(self):
         self.assertEqual(self.score(), 2)
         self.assertEqual(self.score(), 0)
@@ -188,6 +233,20 @@ class LocalFlowTests(unittest.TestCase):
                 local_worker.fetch_loop(self.database, self.writes, stop, self.ready)
             fetch.assert_called_once()
             stop.wait.assert_called_once_with(delay)
+
+    def test_fetch_loop_survives_busy_database_before_board_query(self):
+        stop = MagicMock()
+        stop.is_set.side_effect = [False, True]
+        failure = sqlite3.OperationalError('private storage detail')
+        failure.sqlite_errorname = 'SQLITE_BUSY'
+        with patch.object(local_worker, 'fetch_cycle', side_effect=failure) as fetch, \
+                patch.object(local_worker.time, 'monotonic', side_effect=[100, 110]), \
+                self.assertLogs(local_worker.logger) as logs:
+            local_worker.fetch_loop(self.database, self.writes, stop, self.ready)
+        fetch.assert_called_once()
+        stop.wait.assert_called_once_with(290)
+        self.assertIn('sqlite_code=SQLITE_BUSY', ' '.join(logs.output))
+        self.assertNotIn('private storage detail', ' '.join(logs.output))
 
     def test_email_failure_does_not_stop_scoring_or_repeat_sends(self):
         stop = MagicMock()

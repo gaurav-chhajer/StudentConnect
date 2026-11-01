@@ -8,6 +8,21 @@ from backend import career_sources as sources
 
 
 class CareerSourceTests(unittest.TestCase):
+    def test_hsbc_uses_verified_feed_and_pagination(self):
+        item = dict(id=123, name='Analyst', locations=['Pune, India'])
+        pages = [dict(count=2, positions=[item]),
+                 dict(count=2, positions=[dict(item, id=124)])]
+        with patch.object(sources.Feed, 'json', side_effect=pages) as request:
+            jobs = sources.fetch('hsbc')
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(request.call_args.kwargs['params'],
+                         dict(domain='hsbc.com', start=1, num=10))
+        self.assertEqual(jobs[0]['url'], 'https://portal.careers.hsbc.com/careers/job/123')
+        with patch.object(sources.Feed, 'json', return_value=dict(
+                count=1, positions=[dict(item, id='../123')])):
+            with self.assertRaises(ValueError):
+                sources.fetch('hsbc')
+
     def test_postman_uses_verified_workday_tenant_and_site(self):
         payload = dict(total=1, jobPostings=[dict(title='Engineer',
                        externalPath='/job/India/Engineer_JR1', locationsText='Bangalore')])
