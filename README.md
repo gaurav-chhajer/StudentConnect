@@ -616,16 +616,27 @@ The installer refuses to overwrite an existing task. It uses the repository's
 runs without a terminal window or administrator privileges. The launcher loads
 the private `.env` before importing credential-reading modules. Configure local
 `DIGEST_FROM_EMAIL` and `GMAIL_APP_PASSWORD`, prepare the downloaded model as above,
-and use the existing migrated `data/jobs.db`. It never calls Groq or hosted worker
-APIs, even if their credentials remain configured. No model is downloaded at runtime.
-The public website, hosted database, and GitHub workflows are separate and are
-not synchronized or changed by this local flow. Existing local accounts, resumes,
-subscriptions, job history, and sent-job records are retained.
+and use the existing migrated `data/jobs.db`. No Groq calls or model downloads occur.
+After each local fetch cycle, the worker publishes bounded, additive job observations
+through the authenticated hosted worker API, then scores pending hosted work locally.
+Configure the existing HTTPS site origin and worker key before starting this flow.
+Deploy the `/internal/worker/observations` and `/internal/worker/sync-catalog`
+endpoints before restarting the worker.
+Companies are matched by career source or ATS/board identity, never local numeric IDs.
+Missing verified career sources (including HSBC) are added to the hosted catalog;
+existing company states and subscriptions are preserved. Unmatched legacy boards
+are logged and retained locally. Hosted profiles, resumes, subscriptions and
+preferences remain authoritative for hosted scores, which are recomputed from those
+inputs rather than copied across account IDs. Neither database is replaced; local
+accounts, application records and email history are not transferred. Sync does not
+send emails. Failed/deferred transfers are logged; idempotent observations and pending
+scores are checked on the next regular cycle. Local fetching/scoring remains available.
 The worker starts at sign-in, runs on battery too, and needs an awake, online
 laptop. Sleep pauses execution; opening the lid resumes a healthy running worker.
 Fetching starts every five minutes measured from the previous fetch's start,
 without waiting for Groq or emails. A fetch taking more than five minutes finishes
-before the next starts; fetches never overlap. Successful snapshots immediately
+before the next starts; fetches never overlap. Hosted sync also extends that interval.
+Successful snapshots immediately
 enter the existing local SQLite database, which is the durable queue. New or changed
 eligible jobs remain pending across restarts; current scores are excluded.
 One independent consumer uses the installed CPU model to score bounded batches,

@@ -139,6 +139,24 @@ def register_routes(application, connection, database):
             raise ValueError("Too many companies for one daily cycle")
         return {"companies": [dict(row, fingerprint=fingerprint(dict(row))) for row in rows]}
 
+    @routes.post('/sync-catalog')
+    def sync_catalog():
+        from backend.career_sources import SOURCES, UNVERIFIED_SOURCES
+        sources = body().get('sources')
+        if (not isinstance(sources, list) or len(sources) > MAX_COMPANIES or
+                any(not isinstance(key, str) or key not in SOURCES or
+                    key in UNVERIFIED_SOURCES or SOURCES[key][1] == 'blocked' for key in sources)):
+            raise ValueError('Invalid verified career sources')
+        conn = connection()
+        with run_pipeline.exclusive_cycle(Path(database).parent / 'pipeline.lock'), conn:
+            conn.execute('BEGIN IMMEDIATE')
+            for key in sources:
+                if conn.execute('SELECT 1 FROM companies WHERE career_source=?', (key,)).fetchone():
+                    continue
+                conn.execute('''INSERT INTO companies(name,ats_type,board_slug,career_source,active)
+                    VALUES(?,'greenhouse',?,?,1)''', (SOURCES[key][0], 'career-site-' + key, key))
+        return {'saved': True}
+
     @routes.post("/groq-status")
     def groq_status():
         data = body()
@@ -188,6 +206,7 @@ def register_routes(application, connection, database):
                         (state, outcome, revision, state, now, row["id"]))
         return {"saved": True, "revision": revision}
 
+    @routes.post("/observations")
     @routes.post("/snapshot")
     def snapshot():
         data = body()
@@ -220,13 +239,14 @@ def register_routes(application, connection, database):
             if company is None or data.get("fingerprint") != fingerprint(dict(company)):
                 return {"error": "Company changed; fetch again"}, 409
             from backend.job_ingestion import deduplicate, mode_for_source
-            mode = mode_for_source(company['career_source'])
+            additive = request.path.endswith('/observations')
+            mode = 'observed' if additive else mode_for_source(company['career_source'])
             if data.get('mode', mode) != mode:
                 raise ValueError('Ingestion mode does not match company configuration')
             if mode == 'snapshot' and len(seen) != len(jobs):
                 raise ValueError('Duplicate snapshot jobs')
             jobs = deduplicate(jobs, mode)
-            pipeline.upsert_jobs(conn, company_id, jobs)
+            pipeline.upsert_jobs(conn, company_id, jobs, additive=additive)
         return {"saved": len(jobs)}
 
     @routes.get("/work")

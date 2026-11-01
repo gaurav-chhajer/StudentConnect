@@ -203,12 +203,14 @@ def fetch_jobs_for_company(company_row):
     return fetcher(company_row["board_slug"])
 
 
-def upsert_jobs(conn, company_id, fetched_jobs):
+def upsert_jobs(conn, company_id, fetched_jobs, *, additive=False):
     from backend.job_ingestion import deduplicate, mode_for_source
     company = conn.execute('SELECT career_source FROM companies WHERE id=?', (company_id,)).fetchone()
     if company is None:
         raise ValueError('Unknown company')
-    mode = mode_for_source(company[0])
+    if type(additive) is not bool:
+        raise ValueError('Additive ingestion must be boolean')
+    mode = 'observed' if additive else mode_for_source(company[0])
     fetched_jobs = deduplicate(fetched_jobs, mode)
     changed = []
     with conn:

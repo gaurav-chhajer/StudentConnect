@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import requests
 
 from backend import local_embeddings, pipeline_skeleton as pipeline, similarity
-from scripts import local_worker
+from scripts import local_worker, sync_hosted
 from tests import test_local_similarity, test_web_flows
 
 
@@ -266,11 +266,13 @@ class LocalFlowTests(unittest.TestCase):
     def test_fetch_loop_uses_start_time_and_handles_overrun_without_overlap(self):
         for elapsed, delay in ((20, 280), (450, 0)):
             stop = MagicMock()
-            stop.is_set.side_effect = [False, True]
+            stop.is_set.side_effect = [False, False, True]
             with patch.object(local_worker, 'fetch_cycle') as fetch, \
+                    patch.object(sync_hosted, 'run', return_value=True) as sync, \
                     patch.object(local_worker.time, 'monotonic', side_effect=[100, 100 + elapsed]):
                 local_worker.fetch_loop(self.database, self.writes, stop, self.ready)
             fetch.assert_called_once()
+            sync.assert_called_once_with(self.database, stop)
             stop.wait.assert_called_once_with(delay)
 
     def test_fetch_loop_survives_busy_database_before_board_query(self):
@@ -330,6 +332,7 @@ class LocalFlowTests(unittest.TestCase):
             return 1
 
         with patch.object(local_worker, 'LocalScorer', return_value=MagicMock()), \
+                patch.object(sync_hosted, 'run', return_value=True), \
                 patch.object(local_worker, 'FETCH_INTERVAL_SECONDS', 0), \
                 patch.object(local_worker, 'fetch_cycle', side_effect=fetch), \
                 patch.object(local_worker, 'score_batch', side_effect=score), \

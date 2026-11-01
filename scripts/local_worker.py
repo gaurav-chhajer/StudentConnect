@@ -335,6 +335,14 @@ def fetch_loop(database, writes, stop, ready):
         report(database,writes,'fetch','fetch_start')
         try:
             fetch_cycle(database, writes, stop, ready)
+            if not stop.is_set():
+                from scripts import sync_hosted
+                try:
+                    if not sync_hosted.run(database, stop):
+                        logger.warning('Hosted job/score sync deferred; local work is retained.')
+                except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:
+                    logger.error('Hosted job/score sync failed: error=%s http_status=%s; local work is retained.',
+                                 type(error).__name__, getattr(error, 'status', 'unavailable'))
         except sqlite3.OperationalError as error:
             sqlite_code = getattr(error, 'sqlite_errorname', 'unavailable')
             if not sqlite_code.startswith(('SQLITE_BUSY', 'SQLITE_LOCKED')):
