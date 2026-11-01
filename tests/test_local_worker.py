@@ -16,6 +16,45 @@ from tests import test_local_similarity, test_web_flows
 
 
 class LocalFlowTests(unittest.TestCase):
+    def test_fetch_timeouts_are_bounded_and_career_deadline_is_honored(self):
+        from backend import career_sources
+        with patch.object(career_sources.requests, 'Session') as session, \
+                patch.object(career_sources.time, 'monotonic', return_value=100):
+            response = session.return_value.request.return_value.__enter__.return_value
+            response.status_code = 200
+            response.iter_content.return_value = [b'{}']
+            feed = career_sources.Feed('hsbc', 200)
+            try:
+                self.assertEqual(feed.request('/api/apply/v2/jobs'), '{}')
+                self.assertEqual(session.return_value.request.call_args.kwargs['timeout'], (15, 60))
+                feed.deadline = 105
+                feed.request('/api/apply/v2/jobs')
+                self.assertEqual(session.return_value.request.call_args.kwargs['timeout'], (5, 5))
+            finally:
+                feed.close()
+            session.return_value.close.assert_called_once()
+        for fetch, payload in ((pipeline._fetch_greenhouse, {'jobs': []}),
+                               (pipeline._fetch_lever, []), (pipeline._fetch_ashby, {'jobs': []})):
+            with self.subTest(fetch=fetch.__name__), patch.object(pipeline.requests, 'get') as request:
+                request.return_value.json.return_value = payload
+                self.assertEqual(fetch('example'), [])
+                self.assertEqual(request.call_args.kwargs['timeout'], (15, 60))
+
+    def test_fetch_failure_diagnostics_exclude_private_error_content(self):
+        failure = requests.HTTPError('private-token-and-body')
+        failure.response = requests.Response()
+        failure.response.status_code = 429
+        failure.__cause__ = TimeoutError('private-inner-message')
+        with patch.object(pipeline, 'fetch_jobs_for_company', side_effect=failure), \
+                self.assertLogs(local_worker.logger) as logs:
+            local_worker.fetch_cycle(self.database, self.writes, self.stop, self.ready)
+        output = ' '.join(logs.output)
+        for expected in ('host=api.lever.co', 'stage=fetch', 'elapsed_seconds=',
+                         'http_status=429', 'causes=HTTPError/TimeoutError'):
+            self.assertIn(expected, output)
+        self.assertNotIn('private-', output)
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM jobs WHERE is_active=1').fetchone()[0], 2)
+
     def setUp(self):
         test_web_flows.WebFlowTests.setUp(self)
         test_web_flows.WebFlowTests.seed_user(self)

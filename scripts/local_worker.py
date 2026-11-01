@@ -9,6 +9,7 @@ import time
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -109,6 +110,7 @@ def fetch_cycle(database, writes, stop, ready):
                 break
             company = dict(row)
             stage = 'fetch'
+            started = time.monotonic()
             try:
                 source = company['career_source']
                 jobs = (career_sources.fetch(source, deadline) if source else
@@ -150,8 +152,27 @@ def fetch_cycle(database, writes, stop, ready):
             except (requests.RequestException, ValueError, KeyError, TypeError) as error:
                 # A failed read/invalid snapshot cannot replace saved jobs. The next
                 # regular fetch remains scheduled; SMTP is never retried this way.
-                logger.error('Local board fetch failed: company_id=%s error=%s; saved jobs retained.',
-                             company['id'], type(error).__name__)
+                source = company['career_source']
+                host = (urlsplit(career_sources.SOURCES[source][2]).hostname
+                        if source in career_sources.SOURCES else
+                        {'greenhouse': 'boards-api.greenhouse.io', 'lever': 'api.lever.co',
+                         'ashby': 'api.ashbyhq.com'}.get(company['ats_type'], 'unavailable'))
+                response = error.response if isinstance(error, requests.RequestException) else None
+                chain, pending, seen = [], [error], set()
+                while pending and len(chain) < 8:
+                    cause = pending.pop(0)
+                    if id(cause) in seen:
+                        continue
+                    seen.add(id(cause))
+                    chain.append(type(cause).__name__)
+                    pending.extend(value for value in
+                                   (cause.__cause__, cause.__context__, getattr(cause, 'reason', None), *cause.args)
+                                   if isinstance(value, BaseException))
+                logger.error('Local board fetch failed: company_id=%s error=%s host=%s stage=%s '
+                             'elapsed_seconds=%.1f http_status=%s causes=%s; saved jobs retained.',
+                             company['id'], type(error).__name__, host, stage,
+                             time.monotonic() - started,
+                             response.status_code if response is not None else 'unavailable', '/'.join(chain))
                 report(database,writes,'fetch','fetch_failed',state='error')
 
 

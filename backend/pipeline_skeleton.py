@@ -29,6 +29,7 @@ from backend import matching_tasks
 from backend.evaluation import validate_evaluation, RUBRIC_VERSION
 
 DB_PATH = str(Path(__file__).resolve().parents[1] / "data" / "jobs.db")
+FETCH_TIMEOUT_SECONDS = (15, 60)
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 # Override the documented default with GROQ_MODEL when choosing another model.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
@@ -111,7 +112,7 @@ def init_db():
 
 def _fetch_greenhouse(slug):
     url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true"
-    resp = requests.get(url, timeout=15)
+    resp = requests.get(url, timeout=FETCH_TIMEOUT_SECONDS)
     resp.raise_for_status()
     payload = resp.json()
     if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
@@ -131,7 +132,7 @@ def _fetch_greenhouse(slug):
 
 def _fetch_lever(slug):
     url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
-    resp = requests.get(url, timeout=15)
+    resp = requests.get(url, timeout=FETCH_TIMEOUT_SECONDS)
     resp.raise_for_status()
     payload = resp.json()
     if not isinstance(payload, list):
@@ -160,7 +161,7 @@ def _fetch_lever(slug):
 
 def _fetch_ashby(slug):
     url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}"
-    resp = requests.get(url, timeout=15)
+    resp = requests.get(url, timeout=FETCH_TIMEOUT_SECONDS)
     resp.raise_for_status()
     payload = resp.json()
     if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):

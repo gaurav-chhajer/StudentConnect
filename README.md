@@ -641,7 +641,12 @@ Budget-limited backlog continues in the next batch. Writes use the existing
 pipeline lock; downloads and inference run outside SQLite write transactions.
 Changed inputs are rechecked before saving; stale results are discarded.
 Temporary board-read failures preserve jobs and do not cancel the next scheduled
-fetch. SQLite busy/locked writes also preserve saved jobs and leave that board
+fetch. Career and Greenhouse/Lever/Ashby requests allow 15 seconds to connect and
+60 seconds between response reads; career requests remain capped by their remaining
+cycle budget. Slow or unavailable sites can still time out. Local fetch failure logs
+include the host, stage, elapsed seconds, HTTP status when available, and exception
+types, without raw error messages, request parameters, or response bodies.
+SQLite busy/locked writes also preserve saved jobs and leave that board
 for the next scheduled fetch; a busy fetch health-record write is noted in the
 local log. Snapshot storage errors record a safe SQLite error code and source
 location; other database errors stop the affected loop for inspection. Model

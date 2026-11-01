@@ -18,6 +18,8 @@ MAX_BYTES = 8 * 1024 * 1024
 MAX_LISTINGS = 10000
 MAX_PAGES = 1000
 MAX_DESCRIPTION = 250000
+CONNECT_TIMEOUT_SECONDS = 15
+READ_TIMEOUT_SECONDS = 60
 SOURCES = {
     'hsbc': ('HSBC', 'eightfold', 'https://portal.careers.hsbc.com'),
     'postman': ('Postman', 'workday', 'https://postman.wd108.myworkdayjobs.com'),
@@ -115,7 +117,9 @@ class Feed:
         if remaining < 1:
             raise ValueError('Career feed time budget exhausted; snapshot withheld')
         with self.session.request('POST' if data is not None else 'GET', url,
-                                  json=data, params=params, timeout=(min(10, remaining), min(15, remaining)),
+                                  json=data, params=params,
+                                  timeout=(min(CONNECT_TIMEOUT_SECONDS, remaining),
+                                           min(READ_TIMEOUT_SECONDS, remaining)),
                                   allow_redirects=False, stream=True) as response:
             response.raise_for_status()
             if response.status_code != 200:
