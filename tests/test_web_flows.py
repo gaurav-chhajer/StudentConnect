@@ -125,12 +125,27 @@ class WebFlowTests(unittest.TestCase):
                     self.assertIn(b'readonly required', page.data)
                     self.assertIn(b'aria-describedby="stipend-help"', page.data)
 
+    def test_filtered_dashboard_uses_readable_match_table(self):
+        self.seed_user()
+        response=self.client.get('/?location=India&min_score=0')
+        self.assertEqual(response.status_code,200)
+        self.assertIn(b'matched-jobs-table',response.data)
+
     def test_migration_is_idempotent_and_preserves_existing_records(self):
         self.seed_user()
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 19)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 20)
+
+    def test_india_filter_includes_city_only_locations(self):
+        from backend import store
+        self.seed_user()
+        self.conn.execute("UPDATE jobs SET location='Pune' WHERE id=1")
+        self.conn.execute("UPDATE jobs SET location='Indiana, USA' WHERE id=2")
+        selected=store.filters({'location':'India'})
+        rows,pages=store.matches(self.conn,1,selected,datetime.now(timezone.utc))
+        self.assertEqual([row['job_id'] for row in rows],[1])
 
     def test_location_suggestions_use_active_posting_terms_and_escape_markup(self):
         self.seed_user()

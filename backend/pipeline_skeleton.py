@@ -13,6 +13,7 @@ requests) should reuse what you already built in ats_board_finder.py.
 """
 
 import sqlite3
+from backend.locations import matches as location_matches
 import json
 import os
 import smtplib
@@ -335,7 +336,7 @@ def _matches_location(job, locations):
         # Unknown location - don't silently drop the job, since ATS boards
         # sometimes omit location for genuinely remote/flexible roles.
         return True
-    return any(loc in job_loc for loc in locations)
+    return any(location_matches(job_loc, loc) for loc in locations)
 
 
 def _meets_min_stipend(job, min_stipend):

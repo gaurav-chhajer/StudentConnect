@@ -4,6 +4,7 @@ import json
 import re
 from datetime import timedelta
 from backend.evaluation import validate_evaluation
+from backend.locations import matches as location_matches
 from urllib.parse import urlsplit
 
 PAGE_SIZE = 20
@@ -110,6 +111,7 @@ def filters(args):
 
 
 def matches(conn, user_id, selected_filters, now):
+    conn.create_function("location_matches",2,location_matches,deterministic=True)
     params = [user_id] * 3
     where = MATCH_FROM + " AND s.fit_score>=? AND (?=0 OR c.id=?)"
     params.extend((selected_filters["min_score"], selected_filters["company"], selected_filters["company"]))
@@ -117,8 +119,8 @@ def matches(conn, user_id, selected_filters, now):
     where += " AND (j.title LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\' OR s.matched_skills LIKE ? ESCAPE '\\')"
     params.extend((pattern,) * 3)
     if selected_filters["location"]:
-        where += " AND j.location LIKE ? ESCAPE '\\'"
-        params.append(like_pattern(selected_filters["location"]))
+        where += " AND location_matches(j.location,?)=1"
+        params.append(selected_filters["location"])
     if selected_filters["days"]:
         where += " AND julianday(j.first_seen_at)>=julianday(?)"
         params.append((now - timedelta(days=selected_filters["days"])).isoformat())

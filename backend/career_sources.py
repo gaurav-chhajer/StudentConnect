@@ -21,6 +21,7 @@ MAX_DESCRIPTION = 250000
 CONNECT_TIMEOUT_SECONDS = 15
 READ_TIMEOUT_SECONDS = 60
 SOURCES = {
+    'synechron': ('Synechron', 'workday', 'https://synechron.wd1.myworkdayjobs.com'),
     'hsbc': ('HSBC', 'eightfold', 'https://portal.careers.hsbc.com'),
     'postman': ('Postman', 'workday', 'https://postman.wd108.myworkdayjobs.com'),
     'cvent': ('Cvent', 'jibe', 'https://careers.cvent.com'),
@@ -51,7 +52,7 @@ SOURCES = {
     'notion': ('Notion', 'ashby', 'https://api.ashbyhq.com'),
     'zoom': ('Zoom', 'blocked', 'https://careers.zoom.us'),
 }
-WORKDAY = {'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
+WORKDAY = {'synechron': ('synechron', 'SynechronCareers'), 'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
            'postman': ('postman', 'careers'), 'pwc': ('pwc', 'Global_Experienced_Careers'),
            'salesforce': ('salesforce', 'External_Career_Site'),
            'adobe': ('adobe', 'external_experienced'), 'slack': ('salesforce', 'Slack')}

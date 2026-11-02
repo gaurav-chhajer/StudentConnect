@@ -23,6 +23,13 @@ class CareerSourceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 sources.fetch('hsbc')
 
+    def test_synechron_uses_official_workday_board(self):
+        payload=dict(total=1,jobPostings=[dict(title='Python Developer',externalPath='/job/India/Python_JR1',locationsText='Pune, India')])
+        with patch.object(sources.Feed,'json',return_value=payload) as request:
+            jobs=sources.fetch('synechron')
+        self.assertEqual(request.call_args.args[0],'/wday/cxs/synechron/SynechronCareers/jobs')
+        self.assertEqual(jobs[0]['url'],'https://synechron.wd1.myworkdayjobs.com/en-US/SynechronCareers/job/India/Python_JR1')
+
     def test_postman_uses_verified_workday_tenant_and_site(self):
         payload = dict(total=1, jobPostings=[dict(title='Engineer',
                        externalPath='/job/India/Engineer_JR1', locationsText='Bangalore')])
