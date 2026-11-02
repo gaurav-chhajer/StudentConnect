@@ -144,8 +144,7 @@ def run_cycle(provider="similarity", fetch_only=False):
             logger.info("Job fetch completed; no comparison or email delivery was performed.")
             return 0
         if provider == "similarity":
-            logger.info("Local rankings saved. Similarity rankings do not trigger fit-score email alerts.")
-            return 0
+            return worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, similarity_only=True)
         return worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, matches_only=True)
     finally:
         client.close()

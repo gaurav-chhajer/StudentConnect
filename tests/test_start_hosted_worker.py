@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from scripts import local_worker, start_hosted_worker, watch_hosted_jobs
+from scripts import start_hosted_worker, watch_hosted_jobs
 from scripts import run_cloud_worker as runner
 from tests import test_cloud_worker, test_evaluation
 
@@ -26,11 +26,11 @@ class StartupWorkerTests(unittest.TestCase):
                 with patch.object(start_hosted_worker, 'PROJECT_ROOT', root), \
                         patch.object(start_hosted_worker, 'load_hosted_environment',
                                      side_effect=lambda path: order.append(('environment', path))), \
-                        patch.object(local_worker, 'run',
-                                     side_effect=lambda: order.append(('worker',)) or status):
+                        patch.object(watch_hosted_jobs, 'main',
+                                     side_effect=lambda args: order.append(('worker', args)) or status):
                     self.assertEqual(start_hosted_worker.main(), status)
                 self.assertEqual(order, [('environment', root / '.env'),
-                                         ('worker',)])
+                                         ('worker', ['--run', '--provider', 'similarity'])])
                 self.assertIn('result_code=' + str(status), (root / 'data' / 'hosted_worker.log').read_text())
                 self.assertEqual(logging.getLogger().handlers, handlers_before)
                 self.assertEqual(logging.getLogger().level, level_before)
@@ -42,7 +42,7 @@ class StartupWorkerTests(unittest.TestCase):
                 (root / 'data').mkdir()
                 with patch.object(start_hosted_worker, 'PROJECT_ROOT', root), \
                         patch.object(start_hosted_worker, 'load_hosted_environment') as environment, \
-                        patch.object(local_worker, 'run') as worker:
+                        patch.object(watch_hosted_jobs, 'main') as worker:
                     failing = environment if stage == 'environment' else worker
                     failing.side_effect = ValueError('private failure detail')
                     self.assertEqual(start_hosted_worker.main(), 1)

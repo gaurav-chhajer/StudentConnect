@@ -425,6 +425,7 @@ def register_routes(application, connection, database):
     @routes.post("/email")
     @routes.post("/email/immediate")
     @routes.post("/email/matches")
+    @routes.post("/email/similarity")
     def email():
         after = body().get("after", 0)
         if type(after) is not int or not 0 <= after <= 2147483647:
@@ -444,9 +445,23 @@ def register_routes(application, connection, database):
             refreshed = {row[0] for row in conn.execute("""SELECT DISTINCT company_id FROM jobs
                 WHERE is_active=1 AND last_seen_at>=? AND last_seen_at<=?""",
                 (start.isoformat(), now.isoformat()))}
-            matches = pipeline.get_unsent_top_matches(conn, user["id"], company_ids=refreshed)
-            immediate = request.path.endswith(("/email/immediate", "/email/matches"))
-            matches_only = request.path.endswith("/email/matches")
+            similarity_only = request.path.endswith("/email/similarity")
+            if similarity_only:
+                from scripts.local_worker import email_text
+
+                similarity.register_sql(conn)
+                matches = conn.execute("""SELECT s.*,j.title,j.url,j.location,j.raw_json,c.name company_name """ +
+                    similarity.current_where() + """ AND s.rank_score>=?
+                    AND NOT EXISTS(SELECT 1 FROM sent_log l WHERE l.user_id=s.user_id
+                        AND l.job_id=s.job_id AND l.channel='email')
+                    ORDER BY s.rank_score DESC,s.job_id LIMIT 5""",
+                    (user["id"], similarity.MODEL_REVISION, similarity.SCORING_VERSION,
+                     similarity.EMAIL_THRESHOLD)).fetchall()
+                matches = [dict(match) for match in matches]
+            else:
+                matches = pipeline.get_unsent_top_matches(conn, user["id"], company_ids=refreshed)
+            immediate = request.path.endswith(("/email/immediate", "/email/matches", "/email/similarity"))
+            matches_only = request.path.endswith(("/email/matches", "/email/similarity"))
             cadence = store.settings(conn, user["id"])["cadence"]
             if cadence not in ("off", "daily", "weekly"):
                 raise ValueError("Invalid cadence")
@@ -462,6 +477,19 @@ def register_routes(application, connection, database):
                     match_reminders.deliver(user)
                     match_reminders.mark_sent(conn, user['id'], now)
                     conn.commit()
+                elif similarity_only:
+                    for match in matches:
+                        result = {"model_revision": match["model_revision"],
+                            "scoring_version": match["scoring_version"], "cosine": match["cosine"],
+                            "skill_overlap": match["skill_overlap"], "rank_score": match["rank_score"],
+                            "matched_skills": json.loads(match["matched_skills"]),
+                            "jd_skills_not_mentioned": json.loads(match["jd_skills_not_mentioned"])}
+                        similarity.validate_result(result, user["resume_text"], pipeline.extract_job_description(match))
+                    text = email_text(dict(user), matches, store.settings(conn, user["id"])["include_gaps"])
+                    if len(text) > 10000:
+                        raise ValueError("Similarity digest exceeds email text limit")
+                    pipeline.deliver_account_email(user["email"], "StudentConnect: new local similarity matches", text)
+                    pipeline.mark_sent(conn, user["id"], [match["job_id"] for match in matches])
                 else:
                     pipeline.deliver_email(user, matches)
                     pipeline.mark_sent(conn, user["id"], [match["job_id"] for match in matches])

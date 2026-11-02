@@ -389,13 +389,14 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
     return 1
 
 
-def send_emails(client, deadline, immediate=False, matches_only=False):
+def send_emails(client, deadline, immediate=False, matches_only=False, similarity_only=False):
     after = 0
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 100:
             logger.error("Email time budget reached; remaining accounts deferred")
             return 1
-        path = "email/matches" if matches_only else "email/immediate" if immediate else "email"
+        path = ("email/similarity" if similarity_only else "email/matches" if matches_only else
+                "email/immediate" if immediate else "email")
         payload = client.call(path, dict(after=after))
         if "next" not in payload or type(payload.get("sent")) is not bool:
             raise ValueError("Invalid email response")

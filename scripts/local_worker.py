@@ -19,7 +19,7 @@ from backend.local_embeddings import LocalScorer
 from scripts.run_pipeline import exclusive_cycle
 
 logger = logging.getLogger(__name__)
-MIN_EMAIL_SIMILARITY = 60  # Explicitly selected for this local flow by the owner.
+MIN_EMAIL_SIMILARITY = similarity.EMAIL_THRESHOLD
 FETCH_INTERVAL_SECONDS = 300
 POLL_SECONDS = 30
 CYCLE_SECONDS = 50 * 60
@@ -273,7 +273,7 @@ def email_text(user, matches, include_gaps):
             lines.append('JD skills not mentioned in your resume: ' +
                          (', '.join(json.loads(match['jd_skills_not_mentioned'])) or '-'))
     lines.extend(['', 'Similarity is a relevance ranking, not a fit percentage or hiring probability.',
-                  'Review the full job requirements. Change preferences or turn emails Off in local StudentConnect Settings.'])
+                  'Review the full job requirements. Change preferences or turn emails Off in StudentConnect Settings.'])
     return '\n'.join(lines)
 
 

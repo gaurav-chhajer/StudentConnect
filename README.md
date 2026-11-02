@@ -499,19 +499,19 @@ Windows email-only installer remains unchanged and does not fetch or score.
 ### Run frequent hosted checks from your computer
 
 `scripts.watch_hosted_jobs` runs on your PC against the PythonAnywhere database.
-It now defaults to **local similarity**, with no Groq calls or LLM fallback.
-Use `--fetch-only` for the five-minute job-fetch worker; that mode does no
-comparison or email delivery. The separate daily comparison workflow remains
-enabled. Groq remains an explicit `--provider groq` option for comparison mode.
-This change does not deploy or restart the hosted site.
+It defaults to **local similarity**, with no Groq calls or LLM fallback. The
+model runs on your PC; jobs, resume/settings inputs, similarity results, sent
+history and email delivery use the hosted database/API. Use `--fetch-only` for
+fetching without comparison or email. Groq remains an explicit
+`--provider groq` option. This change does not deploy or restart the hosted site.
 
 Publish the reviewed source through your normal deployment process. The
 migration-aware deploy script backs up the hosted SQLite database and applies
 `012_local_similarity.sql` before reloading; existing Groq scores and evidence
 are retained. If the hosted checkout still has the older deploy script, follow
 the one-time bootstrap instructions in the deployment section below. The
-authenticated `similarity/work` and `similarity` endpoints are required; an
-older server returns 404 and the worker stops. Install only `requirements.txt`
+authenticated `similarity/work`, `similarity`, and `email/similarity` endpoints
+are required; an older server returns 404 and the worker stops. Install only `requirements.txt`
 on the host: the embedding model runs on your PC, not in PythonAnywhere's web
 process.
 
@@ -613,76 +613,57 @@ Start-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
 The installer refuses to overwrite an existing task. It uses the repository's
 `pythonw.exe` and private `.env`, preserving existing environment values, and
 runs without a terminal window or administrator privileges. The launcher loads
-the private `.env` before importing credential-reading modules. Configure local
-`DIGEST_FROM_EMAIL` and `GMAIL_APP_PASSWORD`, prepare the downloaded model as above,
-and use the existing migrated `data/jobs.db`. No Groq calls or model downloads occur.
-After each local fetch cycle, the worker publishes bounded, additive job observations
-through the authenticated hosted worker API, then scores pending hosted work locally.
-Configure the existing HTTPS site origin and worker key before starting this flow.
-Deploy the `/internal/worker/observations` and `/internal/worker/sync-catalog`
-endpoints before restarting the worker.
-Companies are matched by career source or ATS/board identity, never local numeric IDs.
-Missing verified career sources (including HSBC) are added to the hosted catalog;
-existing company states and subscriptions are preserved. Unmatched legacy boards
-are logged and retained locally. Hosted profiles, resumes, subscriptions and
-preferences remain authoritative for hosted scores, which are recomputed from those
-inputs rather than copied across account IDs. Neither database is replaced; local
-accounts, application records and email history are not transferred. Sync does not
-send emails. Failed/deferred transfers are logged; idempotent observations and pending
-scores are checked on the next regular cycle. Local fetching/scoring remains available.
+the private `.env` before importing credential-reading modules. Configure the
+existing HTTPS site origin and worker key, and prepare the downloaded model as
+above. Gmail credentials stay on the hosted website. The worker fetches from
+hosted company definitions, saves observations through the authenticated API,
+gets hosted resume/job inputs, computes similarity on your PC, then saves scores
+and requests qualifying email digests on the host. It does not read or write
+`data/jobs.db`, copy local accounts, or call Groq. Company identity is matched
+by career source or ATS/board identity, never local numeric IDs. The authenticated
+`observations`, `similarity/work`, `similarity`, and `email/similarity` endpoints
+must be deployed before this worker version runs.
 The worker starts at sign-in, runs on battery too, and needs an awake, online
 laptop. Sleep pauses execution; opening the lid resumes a healthy running worker.
-Fetching starts every five minutes measured from the previous fetch's start,
-without waiting for Groq or emails. A fetch taking more than five minutes finishes
-before the next starts; fetches never overlap. Hosted sync also extends that interval.
-Successful snapshots immediately
-enter the existing local SQLite database, which is the durable queue. New or changed
-eligible jobs remain pending across restarts; current scores are excluded.
-One independent consumer uses the installed CPU model to score bounded batches,
-waking on a saved snapshot or polling every 30 seconds. It sends up to five unsent
-jobs per verified active account per batch at the explicitly selected minimum
-**60/100 local similarity** (`MIN_EMAIL_SIMILARITY` in `scripts/local_worker.py`).
-These emails label similarity as a relevance ranking, never a fit percentage.
-This separate threshold does not reinterpret the Groq minimum-fit setting.
-As with the previous immediate-alert worker, Daily/Weekly timing is overridden;
-Off, company subscriptions, current result hashes, and gap-display preferences
-are honored. The existing `sent_log` email channel prevents repeat job alerts.
-Budget-limited backlog continues in the next batch. Writes use the existing
-pipeline lock; downloads and inference run outside SQLite write transactions.
-Changed inputs are rechecked before saving; stale results are discarded.
-Temporary board-read failures preserve jobs and do not cancel the next scheduled
+Fetching starts every five minutes measured from the previous cycle's start.
+Each cycle completes hosted fetching, local scoring, and the email check before
+the next one starts; cycles never overlap. Jobs and score queues remain in the
+hosted database across PC restarts. The worker sends up to five unsent matches per
+verified active account at **60/100 local similarity** (`EMAIL_THRESHOLD` in
+`backend/similarity.py`). These emails label similarity as a relevance ranking,
+never a fit percentage. This threshold is separate from Groq's minimum-fit score.
+Daily/Weekly timing is overridden; Off, company subscriptions, current result
+hashes, the `sent_log` email deduplication, and gap-display preferences are honored.
+The worker rechecks hosted inputs before saving; stale results are discarded.
+Temporary board-read failures preserve hosted jobs and do not cancel the next scheduled
 fetch. Career and Greenhouse/Lever/Ashby requests allow 15 seconds to connect and
 60 seconds between response reads; career requests remain capped by their remaining
 cycle budget. Slow or unavailable sites can still time out. Local fetch failure logs
 include the host, stage, elapsed seconds, HTTP status when available, and exception
 types, without raw error messages, request parameters, or response bodies.
-SQLite busy/locked writes also preserve saved jobs and leave that board
-for the next scheduled fetch; a busy fetch health-record write is noted in the
-local log. Snapshot storage errors record a safe SQLite error code and source
-location; other database errors stop the affected loop for inspection. Model
-errors stop the affected loop. A failed email attempt disables emails for that
-process while scoring/fetching continue.
-An uncertain SMTP send or sent-history failure leaves `data/email_schedule.paused`;
-inspect Gmail and sent history before clearing it and restarting. No automatic
-retry of uncertain emails occurs. SMTP acceptance does not prove inbox delivery.
+An uncertain SMTP send or sent-history failure leaves the hosted
+`data/email_schedule.paused` marker; inspect Gmail and hosted sent history before
+clearing it. No automatic retry of uncertain emails occurs. SMTP acceptance does
+not prove inbox delivery.
 Inspect both loops in `data/hosted_worker.log` (2 MB plus three rotated backups):
 the task can remain Running with a failed loop. No new migration or dependency
-is required. Resume and job text stay on the laptop for inference; ATS requests
-and Gmail delivery still require the internet. No-alert reminder emails remain
-a separate hosted feature and are not sent by the local similarity flow.
+is required. Resume and job text pass to the laptop for inference; ATS requests,
+hosted writes and Gmail delivery require the internet. No-alert reminder emails
+remain a separate hosted feature and are not sent by the local similarity flow.
 
-The local website reads the same database; rankings appear under `/jobs/local`.
-To run it with private email settings while selecting localhost, use a separate
-PowerShell terminal:
+The local Flask development website and local-only scripts still use
+`data/jobs.db`; that database is separate and is not synchronized by the hosted
+worker. For one authoritative product database, use the hosted website. The
+local similarity cache contains embeddings only, not accounts or job records.
+To run the separate local development website, use a separate PowerShell terminal:
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -c "import os; os.environ['STUDENTCONNECT_BASE_URL'] = ''; from backend.app import app; app.run(host='127.0.0.1', port=5000, debug=False)"
 ```
 
-Open `http://127.0.0.1:5000/jobs/local` and sign in with a local account. The existing
-worker key in `.env` keeps the web app's legacy Groq background matcher disabled;
-keep it configured when using this separate local worker. Website startup itself
-is manual; the five-minute automation task starts automatically at Windows sign-in.
+Open `http://127.0.0.1:5000/jobs/local` and sign in with a local account. Its
+records do not appear in the hosted website. Website startup itself is manual;
+the five-minute hosted-data worker starts automatically at Windows sign-in.
 
 Use Windows Task Scheduler to inspect **StudentConnect Five Minute Worker**, or:
 

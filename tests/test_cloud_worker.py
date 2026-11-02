@@ -219,6 +219,35 @@ class CloudEndpointTests(unittest.TestCase):
             self.assertFalse(self.call("email/matches", {"after": 0}).json["sent"])
         mail.assert_called_once()
 
+    def test_similarity_email_uses_local_threshold_and_hosted_sent_history(self):
+        from backend import similarity
+
+        self.conn.execute("INSERT INTO user_settings(user_id,cadence) VALUES(1,'weekly')")
+        user = dict(self.conn.execute("SELECT * FROM users WHERE id=1").fetchone())
+        for job_id in (1, 2):
+            job = dict(self.conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
+            description = pipeline.extract_job_description(job)
+            cosine = 1.0 if job_id == 1 else -0.5
+            result = similarity.result(cosine, user["resume_text"], description)
+            self.conn.execute("""INSERT INTO local_similarity(user_id,job_id,resume_hash,job_hash,preferences_hash,
+                model_revision,scoring_version,cosine,skill_overlap,rank_score,matched_skills,
+                jd_skills_not_mentioned,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (1, job_id, similarity.text_hash(user["resume_text"]), similarity.job_hash(job),
+                 similarity.text_hash(user["preferences_json"]), result["model_revision"], result["scoring_version"],
+                 result["cosine"], result["skill_overlap"], result["rank_score"],
+                 json.dumps(result["matched_skills"]), json.dumps(result["jd_skills_not_mentioned"]), NOW.isoformat()))
+        self.conn.commit()
+        with patch.object(cloud_worker.match_reminders, "due", return_value=True) as reminder_due, \
+                patch.object(pipeline, "validate_email_configuration"), \
+                patch.object(pipeline, "deliver_account_email") as mail:
+            self.assertTrue(self.call("email/similarity", {"after": 0}).json["sent"])
+            self.assertFalse(self.call("email/similarity", {"after": 0}).json["sent"])
+        reminder_due.assert_not_called()
+        mail.assert_called_once()
+        self.assertEqual(mail.call_args.args[0], "owner@example.test")
+        self.assertIn("Local similarity:", mail.call_args.args[2])
+        self.assertEqual([row[0] for row in self.conn.execute("SELECT job_id FROM sent_log ORDER BY job_id")], [1])
+
     def test_immediate_alerts_require_worker_authentication(self):
         self.assertEqual(self.client.post('/internal/worker/email/immediate', json=dict(after=0)).status_code, 401)
         self.assertEqual(self.call('email/immediate', dict(after=True)).status_code, 400)
@@ -789,6 +818,17 @@ class LocalHostedWatcherTests(unittest.TestCase):
         email.assert_called_once_with(client, runner.EMAIL_SECONDS, matches_only=True)
         client.close.assert_called_once()
 
+    def test_local_similarity_cycle_sends_similarity_digest_from_hosted_data(self):
+        client = MagicMock()
+        with patch.object(runner, 'HostedClient', return_value=client), \
+                patch.object(runner, 'fetch_and_score', return_value=0) as matching, \
+                patch.object(runner.time, 'monotonic', return_value=0), \
+                patch.object(runner, 'send_emails', return_value=0) as email:
+            self.assertEqual(watcher.run_cycle("similarity"), 0)
+        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=False, provider="similarity")
+        email.assert_called_once_with(client, runner.EMAIL_SECONDS, similarity_only=True)
+        client.close.assert_called_once()
+
     def test_fetch_only_cycle_skips_comparison_and_email(self):
         client = MagicMock()
         with patch.object(runner, 'HostedClient', return_value=client), \
@@ -851,6 +891,13 @@ class LocalHostedWatcherTests(unittest.TestCase):
         with patch.object(runner.time, 'monotonic', return_value=0):
             self.assertEqual(runner.send_emails(client, 420, matches_only=True), 0)
         client.call.assert_called_once_with('email/matches', dict(after=0))
+
+    def test_similarity_email_uses_distinct_hosted_route(self):
+        client = MagicMock()
+        client.call.side_effect = [dict(next=None, sent=False)]
+        with patch.object(runner.time, 'monotonic', return_value=0):
+            self.assertEqual(runner.send_emails(client, 420, similarity_only=True), 0)
+        client.call.assert_called_once_with('email/similarity', dict(after=0))
 
 
 if __name__ == "__main__":

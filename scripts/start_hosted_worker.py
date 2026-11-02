@@ -1,4 +1,4 @@
-"""Background sign-in task: local fetching, offline similarity, and local SMTP."""
+"""Background sign-in task: hosted database, local similarity, hosted email."""
 
 import logging
 from logging.handlers import RotatingFileHandler
@@ -21,10 +21,12 @@ def main():
     root_logger.addHandler(handler)
     try:
         load_hosted_environment(PROJECT_ROOT / ".env")
-        from scripts import local_worker
+        from backend.similarity import EMAIL_THRESHOLD
+        from scripts import watch_hosted_jobs
 
-        logger.info("Sign-in worker starting: local database, five-minute fetching, offline similarity, SMTP; email threshold=60/100.")
-        status = local_worker.run()
+        logger.info("Sign-in worker starting: hosted database, five-minute fetching, local similarity and thresholded email; threshold=%s/100.",
+                    EMAIL_THRESHOLD)
+        status = watch_hosted_jobs.main(["--run", "--provider", "similarity"])
         logger.info("Sign-in worker stopped; result_code=%s", status)
         return status
     except Exception as error:

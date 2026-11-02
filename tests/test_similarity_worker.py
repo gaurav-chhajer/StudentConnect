@@ -99,14 +99,15 @@ class SimilarityEndpointTests(unittest.TestCase):
 
 
 class SimilaritySelectionTests(unittest.TestCase):
-    def test_default_watcher_is_local_and_never_sends_fit_alerts(self):
+    def test_default_watcher_computes_locally_and_sends_local_similarity_alerts(self):
         client = MagicMock()
         with patch.object(runner, "HostedClient", return_value=client), \
                 patch.object(runner, "fetch_and_score", return_value=0) as score, \
-                patch.object(watcher.time, "monotonic", return_value=0), patch.object(runner, "send_emails") as email:
+                patch.object(watcher.time, "monotonic", return_value=0), \
+                patch.object(runner, "send_emails", return_value=0) as email:
             self.assertEqual(watcher.run_cycle(), 0)
         score.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=False, provider="similarity")
-        email.assert_not_called()
+        email.assert_called_once_with(client, runner.EMAIL_SECONDS, similarity_only=True)
         client.close.assert_called_once()
 
     def test_local_provider_does_not_construct_groq_pool_and_closes_scorer(self):
