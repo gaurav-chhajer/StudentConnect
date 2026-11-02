@@ -209,6 +209,7 @@ class CloudEndpointTests(unittest.TestCase):
         self.conn.commit()
         with patch.object(cloud_worker, "datetime") as clock, \
                 patch.object(cloud_worker.match_reminders, "due", return_value=True) as reminder_due, \
+                patch.object(pipeline, "validate_email_configuration"), \
                 patch.object(pipeline, "deliver_email") as mail:
             clock.now.return_value = NOW
             self.assertFalse(self.call("email/matches", {"after": 0}).json["sent"])
