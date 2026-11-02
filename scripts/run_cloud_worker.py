@@ -173,7 +173,7 @@ def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
         from scripts.run_similarity import score_pending
         scorer = LocalScorer()  # Fail before external work if the local model is unavailable.
         try:
-            status = _fetch_and_score(client, deadline, fetch_only=True, pool=None)
+            status = _fetch_and_score(client, deadline, fetch_only=True, pool=None, allow_partial=True)
             return status if status else score_pending(client, deadline, scorer)
         finally:
             scorer.close()
@@ -188,7 +188,7 @@ def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
             pool.publish("complete" if result == 0 else "deferred")
 
 
-def _fetch_and_score(client, deadline, fetch_only, pool, stop=None):
+def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_partial=False):
     if not fetch_only and not pipeline.GROQ_API_KEY.strip():
         raise ValueError("Configure Groq before matching")
     companies = client.call("companies").get("companies")
@@ -241,6 +241,9 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None):
     if not successful:
         raise RuntimeError("No boards fetched successfully")
     if fetch_only:
+        if failed and allow_partial:
+            logger.warning("Some boards failed; continuing with persisted eligible jobs for local scoring and email. Failed boards retain previous data.")
+            return 0
         return int(failed)
     return _score_pending(client, deadline, pool, successful, failed)
 

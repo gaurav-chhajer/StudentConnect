@@ -562,170 +562,50 @@ Preview without external requests:
 .\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs
 ```
 
-Start the five-minute fetch-only worker using `.env`:
+Start the unified worker using private configuration:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -m scripts.watch_hosted_jobs --run --fetch-only
+.\.venv\Scripts\python.exe -B -m scripts.start_hosted_worker
 ```
 
-The fetch-only worker does not score jobs or send emails. Leave the separate
-daily comparison workflow enabled; do not run another five-minute fetch worker.
-To run local similarity comparisons instead, omit `--fetch-only`; local rankings
-do **not** trigger fit-score email alerts: the old minimum-fit
-threshold has not been calibrated for this new metric. Local mode does not call
-the email endpoint. Existing fit evaluations remain visible in Job matches.
-To explicitly resume the previous Groq scoring and immediate-email behavior,
-configure `GROQ_API_KEY` (optional existing key slots still apply) and append
-`--provider groq` to the command above. Gmail credentials stay on PythonAnywhere.
+One local process owns independent fetching and scoring/email loops. Fetches target
+five-minute intervals measured from their start; an overrun finishes before the
+next fetch starts, without overlapping fetches. Scoring continues while boards
+are downloaded. Successful snapshots enter the hosted pending queue immediately;
+partial board failures are logged and retain previous data without blocking scoring.
+Complete fetch failure or exhausted budgets stop that loop for review.
 
-Add `--once` to perform one real cycle. Keep the terminal open and your computer
-awake and online; Ctrl+C stops the worker. Disable the GitHub daily automation
-workflow while using this worker, and run only one scheduler. No Windows task
-is installed and no existing workflow is changed by these commands.
+Groq generates and saves the best 5?7 resume-supported role families with equivalent
+title aliases. Only eligible jobs passing this title gate receive full JD/resume
+Groq evaluation. Families are reused until resume/model/profile changes. The
+local embedding model is not used by the unified worker. A batch processes up to
+five candidates per account; remaining eligible work persists for later batches.
+After a successful scoring batch, qualifying unsent matches are emailed immediately
+using each account's saved minimum fit score. Off preferences, subscriptions,
+stale-result checks, sent-history deduplication and uncertain-email pause protection
+remain enforced. No resume rewriting, applications, or no-match reminders run.
 
-In explicit Groq mode, each cycle fetches active companies and scores pending candidates with the
-existing cloud limits, then immediately sends up to five unsent matches that meet each account's
-saved minimum fit score. Immediate delivery overrides daily/weekly timing; Off, subscriptions,
-stale-score checks, sent-job tracking and uncertain-delivery pause protection still apply. This
-path sends job-match digests only, never no-match reminders. Eligible unsent matches from today's
-refreshed companies may also be sent on the first run. The website's displayed daily/weekly
-settings still describe scheduled digests, not this opt-in worker's immediate mode.
-
-For the manual `scripts.watch_hosted_jobs` commands above, the next check starts
-five minutes **after the previous cycle completes**. The Windows sign-in worker
-below instead fetches independently on a five-minute schedule.
-Large boards, description downloads, scoring budgets and Groq limits can delay
-alerts substantially; this does not guarantee detection within five minutes.
-The worker stops on an incomplete cycle or error rather than retrying uncertain
-writes or sends. Review local/hosted logs before restarting. If delivery is
-paused, reconcile Gmail and hosted send records before clearing the hosted
-pause marker. Existing daily cloud commands retain their scheduled behavior.
-
-To start the complete local flow (fetching, offline similarity, and Gmail SMTP)
-when the current Windows user signs in, install its startup task:
+Jobs, profiles, scores and email history stay in the hosted database. The PC must
+remain awake and online. Configure GROQ_API_KEY and optional GROQ_API_KEY_2/3 in
+private .env; credentials are never displayed. The sign-in installer uses the same
+launcher and refuses to overwrite an existing task:
 
 ```powershell
 .\scripts\install_worker_startup.ps1 -WhatIf
 .\scripts\install_worker_startup.ps1 -Confirm:$false
-Start-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
 ```
 
-The installer refuses to overwrite an existing task. It uses the repository's
-`pythonw.exe` and private `.env`, preserving existing environment values, and
-runs without a terminal window or administrator privileges. The launcher loads
-the private `.env` before importing credential-reading modules. Configure the
-existing HTTPS site origin and worker key, and prepare the downloaded model as
-above. Gmail credentials stay on the hosted website. The worker fetches from
-hosted company definitions, saves observations through the authenticated API,
-gets hosted resume/job inputs, computes similarity on your PC, then saves scores
-and requests qualifying email digests on the host. It does not read or write
-`data/jobs.db`, copy local accounts, or call Groq. Company identity is matched
-by career source or ATS/board identity, never local numeric IDs. The authenticated
-`observations`, `similarity/work`, `similarity`, and `email/similarity` endpoints
-must be deployed before this worker version runs.
-The worker starts at sign-in, runs on battery too, and needs an awake, online
-laptop. Sleep pauses execution; opening the lid resumes a healthy running worker.
-Fetching starts every five minutes measured from the previous cycle's start.
-Each cycle completes hosted fetching, local scoring, and the email check before
-the next one starts; cycles never overlap. Jobs and score queues remain in the
-hosted database across PC restarts. The worker sends up to five unsent matches per
-verified active account at **60/100 local similarity** (`EMAIL_THRESHOLD` in
-`backend/similarity.py`). These emails label similarity as a relevance ranking,
-never a fit percentage. This threshold is separate from Groq's minimum-fit score.
-Daily/Weekly timing is overridden; Off, company subscriptions, current result
-hashes, the `sent_log` email deduplication, and gap-display preferences are honored.
-The worker rechecks hosted inputs before saving; stale results are discarded.
-Temporary board-read failures preserve hosted jobs and do not cancel the next scheduled
-fetch. Career and Greenhouse/Lever/Ashby requests allow 15 seconds to connect and
-60 seconds between response reads; career requests remain capped by their remaining
-cycle budget. Slow or unavailable sites can still time out. Local fetch failure logs
-include the host, stage, elapsed seconds, HTTP status when available, and exception
-types, without raw error messages, request parameters, or response bodies.
-An uncertain SMTP send or sent-history failure leaves the hosted
-`data/email_schedule.paused` marker; inspect Gmail and hosted sent history before
-clearing it. No automatic retry of uncertain emails occurs. SMTP acceptance does
-not prove inbox delivery.
-Inspect both loops in `data/hosted_worker.log` (2 MB plus three rotated backups):
-the task can remain Running with a failed loop. No new migration or dependency
-is required. Resume and job text pass to the laptop for inference; ATS requests,
-hosted writes and Gmail delivery require the internet. No-alert reminder emails
-remain a separate hosted feature and are not sent by the local similarity flow.
+Explicit legacy local similarity commands and previously saved rankings remain
+available, but should not run alongside this scheduler. Stop an old worker before
+starting the unified launcher; inspect uncertain email attempts before any restart.
 
-The local Flask development website and local-only scripts still use
-`data/jobs.db`; that database is separate and is not synchronized by the hosted
-worker. For one authoritative product database, use the hosted website. The
-local similarity cache contains embeddings only, not accounts or job records.
-To run the separate local development website, use a separate PowerShell terminal:
+### Retired daily cloud automation
 
-```powershell
-.\.venv\Scripts\python.exe -B -m dotenv -f .env run --no-override -- .\.venv\Scripts\python.exe -B -c "import os; os.environ['STUDENTCONNECT_BASE_URL'] = ''; from backend.app import app; app.run(host='127.0.0.1', port=5000, debug=False)"
-```
-
-Open `http://127.0.0.1:5000/jobs/local` and sign in with a local account. Its
-records do not appear in the hosted website. Website startup itself is manual;
-the five-minute hosted-data worker starts automatically at Windows sign-in.
-
-Use Windows Task Scheduler to inspect **StudentConnect Five Minute Worker**, or:
-
-```powershell
-Get-ScheduledTaskInfo -TaskName 'StudentConnect Five Minute Worker'
-Stop-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
-Disable-ScheduledTask -TaskName 'StudentConnect Five Minute Worker'
-```
-
-#### No-alert reminders
-
-The immediate hosted-email worker also checks for accounts that have gone seven
-full days without a job-match email. For accounts that have never received one,
-the window starts at verified account creation (invitation redemption). It sends
-one reminder to review the website, resume and matching preferences, followed by
-at most one follow-up fourteen full days after the first reminder. Reminders then
-pause until a new match email or a detected resume, role/location preference,
-minimum-score or company-subscription change starts another window. Profile
-changes start their new window when first observed by the email worker.
-
-Verified active accounts with email enabled are eligible. Off also disables
-reminders. Pending/failed matching work, unscored candidates and qualifying
-unsent matches block reminders. The local worker reaches email only after a
-successful matching cycle; an outage must not be described as a poor resume.
-Reminders never change preferences, and do not count as job-match emails.
-They are checked on completed worker cycles, not at a guaranteed wall-clock time.
-The same exclusive lock and uncertain-delivery pause protection cover reminders.
-
-This feature required the additive `010_match_reminders.sql` migration. The
-deployment script now makes and verifies a private SQLite backup before applying
-pending SQL migrations, and reloads only after migration verification succeeds.
-Existing users may receive their first reminder on the first healthy cycle if
-their seven-day window has already passed.
-
-### Free daily cloud automation
-
-`.github/workflows/daily-automation.yml` runs on GitHub-hosted Linux runners,
-even when your PC is off. It targets fetching/scoring at **06:30 Asia/Kolkata**
-(01:00 UTC), fetching only at **18:30 Asia/Kolkata** (13:00 UTC), and emails at
-**08:00 Asia/Kolkata** (02:30 UTC). Evening openings are scored during the next
-morning run; the evening worker never scores or sends mail. GitHub schedules
-can be delayed or missed; these are target times, not delivery guarantees.
-The three jobs have 55-minute, 25-minute and 10-minute limits, including dependency
-setup: 31 scheduled triples can use up to **2,790 job minutes**, exceeding a
-2,000-minute allowance by 790 minutes if every job reaches its limit. Actual usage
-depends on run duration. Other workflows, reruns and other repositories using the
-same account also consume the allowance.
-Do not add frequent runs or automatic workflow retries. Configure a zero-spend
-GitHub Actions budget that stops usage at the free allowance, and monitor billing
-usage. Public scheduled workflows can be disabled after 60 days of inactivity.
-See [GitHub usage allowances](https://docs.github.com/en/billing/reference/product-usage-included)
-and [scheduled workflow limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
-
-The website keeps its SQLite database and uploaded resume files. The worker
-uses a separate authenticated API to fetch board definitions, save complete
-snapshots, read pending resume text/job data, and save validated evaluations.
-Resume text passes through GitHub's temporary runner and Groq; it is not written
-to artifacts, caches, or logs by this worker. Restrict repository access and do
-not enable verbose HTTP debugging. Gmail credentials remain on PythonAnywhere.
-Browser login and CSRF protection remain required for browser actions; the worker
-API instead requires its separate bearer credential and rejects session cookies.
-Blank worker credentials disable API access. Invalid credentials fail startup.
+The separate GitHub fetching, scoring and email schedules have been removed.
+`.github/workflows/daily-automation.yml` now provides manual offline validation
+only. Deployments still use the existing deployment workflow. The local unified
+worker is the sole live automation scheduler; the website retains authentication,
+CSRF protection for browser requests, and separate authenticated worker endpoints.
 
 The hosted Groq worker first generates **5-7 distinct best-suited role families**
 from each resume, ranked by suitability and supported by actual resume-line
@@ -1591,3 +1471,5 @@ script is optional: `python -m scripts.add_test_user`; edit its placeholder data
 first and be aware it updates any profile with the configured email.
 
 The admin workflow monitor shows Groq Key 1?3 status and the last reported model-specific rate limits. After additive migration `019_groq_limits.sql`, hosted workers record allowlisted Groq response headers for both JD scoring and resume role extraction. Requests refer to the daily limit; tokens refer to the per-minute limit. Reset timestamps are estimates from the observed response, not confirmation of restored capacity. Keys in one organization share limits; missing readings display Unavailable. No extra Groq requests are made for monitoring. Back up the database before applying migrations and deploy the hosted API before running the updated worker.
+
+The hosted-data local similarity worker continues to score persisted eligible jobs and check qualifying email after partial board-fetch failures. Failed boards retain previously saved data and failures remain logged. A complete fetch failure, exhausted fetch budget, scoring failure, or email failure still stops the cycle for review. The next regular fetch follows a completed cycle.

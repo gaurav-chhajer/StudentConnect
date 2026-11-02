@@ -1,4 +1,4 @@
-# Registers the hosted-data worker with local inference; does not start it or overwrite another task.
+# Registers the hosted-data worker with Groq scoring; does not start it or overwrite another task.
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param()
 
@@ -23,7 +23,7 @@ $action = New-ScheduledTaskAction -Execute $pythonPath -Argument '-B -m scripts.
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentAccount -ErrorAction Stop
 $taskSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ErrorAction Stop
 $principal = New-ScheduledTaskPrincipal -UserId $currentAccount -LogonType Interactive -RunLevel Limited -ErrorAction Stop
-if ($PSCmdlet.ShouldProcess($taskName, 'Start hosted-database fetching, local similarity scoring, and qualifying hosted email at Windows sign-in')) {
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $taskSettings -Principal $principal -Description 'Hosted database and email; five-minute ATS fetching; local similarity model; alerts at 60/100. Logs in data/hosted_worker.log.' -ErrorAction Stop | Out-Null
+if ($PSCmdlet.ShouldProcess($taskName, 'Start hosted-database fetching, Groq role-family scoring, and qualifying hosted email at Windows sign-in')) {
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $taskSettings -Principal $principal -Description 'Hosted database and email; five-minute ATS fetching; Groq scoring after resume role-family filtering; qualifying match alerts. Logs in data/hosted_worker.log.' -ErrorAction Stop | Out-Null
     Write-Output 'Worker startup task installed for the current user. It starts at the next Windows sign-in.'
 }

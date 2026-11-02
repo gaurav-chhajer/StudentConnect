@@ -848,7 +848,7 @@ class LocalHostedWatcherTests(unittest.TestCase):
                 patch.object(runner.time, 'monotonic', return_value=0), \
                 patch.object(runner, 'send_emails') as email:
             self.assertEqual(watcher.run_cycle(fetch_only=True), 0)
-        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=True, provider="similarity")
+        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=True, provider="groq")
         email.assert_not_called()
         client.close.assert_called_once()
 
@@ -856,7 +856,7 @@ class LocalHostedWatcherTests(unittest.TestCase):
         with patch.object(watcher, 'exclusive_cycle'), \
                 patch.object(watcher, 'run_cycle', return_value=0) as cycle:
             self.assertEqual(watcher.main(['--run', '--fetch-only', '--once']), 0)
-        cycle.assert_called_once_with("similarity", fetch_only=True)
+        cycle.assert_called_once_with("groq", fetch_only=True)
 
     def test_failed_matching_never_sends_and_always_closes(self):
         for failure in (1, requests.Timeout('private')):
@@ -876,7 +876,7 @@ class LocalHostedWatcherTests(unittest.TestCase):
         with patch.object(watcher, 'exclusive_cycle'), \
                 patch.object(watcher, 'run_cycle', side_effect=[0, 1]) as cycle, \
                 patch.object(watcher.time, 'sleep') as sleep:
-            self.assertEqual(watcher.main(['--run']), 1)
+            self.assertEqual(watcher.main(['--run', '--provider', 'similarity']), 1)
         self.assertEqual(cycle.call_count, 2)
         self.assertEqual(sum(call.args[0] for call in sleep.call_args_list), 300)
 

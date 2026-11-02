@@ -2,6 +2,7 @@
 
 import json
 import unittest
+import requests
 from unittest.mock import MagicMock, patch
 
 from backend import cloud_worker, local_embeddings, pipeline_skeleton as pipeline, similarity
@@ -105,7 +106,7 @@ class SimilaritySelectionTests(unittest.TestCase):
                 patch.object(runner, "fetch_and_score", return_value=0) as score, \
                 patch.object(watcher.time, "monotonic", return_value=0), \
                 patch.object(runner, "send_emails", return_value=0) as email:
-            self.assertEqual(watcher.run_cycle(), 0)
+            self.assertEqual(watcher.run_cycle("similarity"), 0)
         score.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=False, provider="similarity")
         email.assert_called_once_with(client, runner.EMAIL_SECONDS, similarity_only=True)
         client.close.assert_called_once()
@@ -119,6 +120,27 @@ class SimilaritySelectionTests(unittest.TestCase):
         groq.assert_not_called()
         pending.assert_called_once()
         scorer.return_value.close.assert_called_once()
+
+    def test_partial_fetch_continues_to_scoring_and_email_but_total_failure_stops(self):
+        for failures in (1,2):
+            with self.subTest(failures=failures):
+                client=MagicMock()
+                client.call.return_value={'companies':[dict(id=i,ats_type='lever',board_slug='fixture',fingerprint='fixture') for i in (1,2)]}
+                outcomes=[requests.Timeout()] + ([[]] if failures==1 else [requests.Timeout()])
+                with patch.object(runner,'HostedClient',return_value=client), patch.object(local_embeddings,'LocalScorer') as scorer, patch.object(runner.pipeline,'fetch_jobs_for_company',side_effect=outcomes), patch.object(runner.time,'monotonic',return_value=0), patch.object(run_similarity,'score_pending',return_value=0) as pending, patch.object(runner,'send_emails',return_value=0) as email:
+                    if failures==1:
+                        self.assertEqual(watcher.run_cycle("similarity"),0)
+                        pending.assert_called_once()
+                        email.assert_called_once()
+                        self.assertEqual(client.call.call_args_list[1].args[0],'snapshot')
+                        self.assertEqual(client.call.call_args_list[1].args[1]['company_id'],2)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError,'No boards fetched'):
+                            watcher.run_cycle("similarity")
+                        pending.assert_not_called()
+                        email.assert_not_called()
+                    scorer.return_value.close.assert_called_once()
+                    client.close.assert_called_once()
 
     def test_cursor_failures_and_budget_do_not_retry_or_fallback(self):
         client, scorer = MagicMock(), MagicMock()

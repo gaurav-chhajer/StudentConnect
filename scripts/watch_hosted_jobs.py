@@ -51,7 +51,7 @@ def _fetch_loop(client, stop):
         started = time.monotonic()
         logger.info("Independent fetch started; successful snapshots enter the durable queue.")
         status = worker._fetch_and_score(client, started + worker.MATCHING_SECONDS,
-                                        fetch_only=True, pool=None, stop=stop)
+                                        fetch_only=True, pool=None, stop=stop, allow_partial=True)
         if status:
             logger.error("Fetch loop stopped; successful snapshots remain queued. Review logs before restarting.")
             return status
@@ -71,7 +71,7 @@ def _score_loop(client, stop, ready):
             if status and not stop.is_set():
                 logger.error("Scoring loop stopped; pending jobs remain queued. Review logs before restarting.")
             return status
-        status = worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, immediate=True)
+        status = worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, matches_only=True)
         if status:
             logger.error("Email loop stopped; inspect hosted email state before restarting.")
             return status
@@ -131,7 +131,7 @@ def run_queued():
         return int(any(statuses))
 
 
-def run_cycle(provider="similarity", fetch_only=False):
+def run_cycle(provider="groq", fetch_only=False):
     """Hosted storage is authoritative; private local embeddings stay in data/."""
     client = worker.HostedClient()
     try:
@@ -153,8 +153,8 @@ def run_cycle(provider="similarity", fetch_only=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="Enable live fetching with the selected mode")
-    parser.add_argument("--provider", choices=("similarity", "groq"), default="similarity",
-                        help="Local similarity by default; groq explicitly enables LLM scoring and email alerts")
+    parser.add_argument("--provider", choices=("similarity", "groq"), default="groq",
+                        help="Groq role-family scoring and immediate match alerts by default; similarity is an explicit legacy mode")
     parser.add_argument("--fetch-only", action="store_true", help="Fetch jobs without comparison or email delivery")
     parser.add_argument("--once", action="store_true", help="Exit after one cycle")
     args = parser.parse_args(argv)
@@ -163,6 +163,8 @@ def main(argv=None):
         logger.info("Preview only: provider=%s; no external calls made.", args.provider)
         return 0
     try:
+        if args.provider == 'groq' and not args.fetch_only and not args.once:
+            return run_queued()
         with exclusive_cycle(LOCK_PATH):
             while True:
                 logger.info("Hosted job check started.")

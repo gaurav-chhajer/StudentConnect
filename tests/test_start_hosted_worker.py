@@ -30,10 +30,16 @@ class StartupWorkerTests(unittest.TestCase):
                                      side_effect=lambda args: order.append(('worker', args)) or status):
                     self.assertEqual(start_hosted_worker.main(), status)
                 self.assertEqual(order, [('environment', root / '.env'),
-                                         ('worker', ['--run', '--provider', 'similarity'])])
+                                         ('worker', ['--run', '--provider', 'groq'])])
                 self.assertIn('result_code=' + str(status), (root / 'data' / 'hosted_worker.log').read_text())
                 self.assertEqual(logging.getLogger().handlers, handlers_before)
                 self.assertEqual(logging.getLogger().level, level_before)
+
+    def test_default_live_command_uses_independent_groq_queue(self):
+        with patch.object(watch_hosted_jobs,'run_queued',return_value=0) as queued, patch.object(watch_hosted_jobs,'run_cycle') as sequential:
+            self.assertEqual(watch_hosted_jobs.main(['--run']),0)
+        queued.assert_called_once()
+        sequential.assert_not_called()
 
     def test_startup_and_worker_failures_stop_without_logging_private_messages(self):
         for stage in ('environment', 'worker'):
@@ -65,7 +71,7 @@ class QueuedWorkerTests(unittest.TestCase):
                         patch.object(watch_hosted_jobs.time, 'monotonic', side_effect=[100, 100 + duration]):
                     self.assertEqual(watch_hosted_jobs._fetch_loop('client', stop), 0)
                 fetch.assert_called_once_with('client', 100 + runner.MATCHING_SECONDS,
-                                              fetch_only=True, pool=None, stop=stop)
+                                              fetch_only=True, pool=None, stop=stop, allow_partial=True)
                 stop.wait.assert_called_once_with(expected_delay)
 
     def test_fetch_failure_preserves_queue_and_does_not_restart_uncertain_writes(self):
@@ -81,7 +87,7 @@ class QueuedWorkerTests(unittest.TestCase):
         sessions = [MagicMock(), MagicMock()]
         shared_stop = []
 
-        def fetch(client, deadline, *, fetch_only, pool, stop):
+        def fetch(client, deadline, *, fetch_only, pool, stop, allow_partial):
             self.assertTrue(scoring_started.wait(2))
             count.append(1)
             client.call('snapshot', {'jobs': []})
@@ -96,8 +102,8 @@ class QueuedWorkerTests(unittest.TestCase):
             self.assertTrue(second_fetch.wait(2))
             return 0
 
-        def email(client, deadline, *, immediate):
-            self.assertTrue(immediate)
+        def email(client, deadline, *, matches_only):
+            self.assertTrue(matches_only)
             shared_stop[0].set()
             emailed.set()
             return 0
