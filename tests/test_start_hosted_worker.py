@@ -1,6 +1,7 @@
 """Background launcher tests; no external requests or real configuration reads."""
 
 import logging
+import os
 import tempfile
 import threading
 import unittest
@@ -34,6 +35,15 @@ class StartupWorkerTests(unittest.TestCase):
                 self.assertIn('result_code=' + str(status), (root / 'data' / 'hosted_worker.log').read_text())
                 self.assertEqual(logging.getLogger().handlers, handlers_before)
                 self.assertEqual(logging.getLogger().level, level_before)
+
+    def test_rotated_private_keys_replace_inherited_slots(self):
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
+            root=Path(folder)
+            (root/'data').mkdir()
+            (root/'.env').write_text('GROQ_API_KEY=synthetic-new\nGROQ_API_KEY_2=synthetic-second\n')
+            with patch.dict(os.environ,{'GROQ_API_KEY':'synthetic-old'}), patch.object(start_hosted_worker,'PROJECT_ROOT',root), patch.object(start_hosted_worker,'load_hosted_environment'), patch.object(watch_hosted_jobs,'main',side_effect=lambda args: 0 if os.environ['GROQ_API_KEY']=='synthetic-new' else 1):
+                self.assertEqual(start_hosted_worker.main(),0)
+                self.assertEqual(os.environ['GROQ_API_KEY_2'],'synthetic-second')
 
     def test_default_live_command_uses_independent_groq_queue(self):
         with patch.object(watch_hosted_jobs,'run_queued',return_value=0) as queued, patch.object(watch_hosted_jobs,'run_cycle') as sequential:

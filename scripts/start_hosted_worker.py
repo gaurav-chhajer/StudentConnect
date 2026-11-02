@@ -1,6 +1,9 @@
 """Background sign-in task: hosted database, Groq title filtering/scoring, hosted email."""
 
 import logging
+import os
+
+from dotenv import dotenv_values
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -21,6 +24,11 @@ def main():
     root_logger.addHandler(handler)
     try:
         load_hosted_environment(PROJECT_ROOT / ".env")
+        # Explicitly rotated local Groq credentials must replace stale inherited slots.
+        private_values=dotenv_values(PROJECT_ROOT / '.env', interpolate=False)
+        for name in ('GROQ_API_KEY','GROQ_API_KEY_2','GROQ_API_KEY_3'):
+            if name in private_values:
+                os.environ[name]=private_values[name] or ''
         from scripts import watch_hosted_jobs
 
         logger.info("Sign-in worker starting: hosted database, five-minute fetching, resume role-family filtering, Groq scoring and immediate match-only email.")
