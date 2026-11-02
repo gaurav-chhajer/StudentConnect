@@ -130,6 +130,13 @@ class QueuedWorkerTests(unittest.TestCase):
         for session in sessions:
             session.close.assert_called_once()
 
+    def test_unavailable_candidate_does_not_abort_queue_batch(self):
+        client,pool=MagicMock(),MagicMock()
+        client.call.side_effect=[dict(next=1,items=[dict(user=dict(id=1,resume_text='fixture'),job=dict(id=1),company_name='fixture',fingerprint='a'*64)]),dict(next=None,items=[])]
+        with patch.object(runner.time,'monotonic',return_value=0), patch.object(runner.career_sources,'prepare_job',side_effect=requests.HTTPError()):
+            self.assertEqual(runner._score_pending(client,1000,pool,stop=threading.Event()),0)
+        pool.score.assert_not_called()
+
     def test_failed_scoring_does_not_stop_fetching_or_send_email(self):
         stop, ready = threading.Event(), threading.Event()
         with patch.object(runner, 'score_pending', return_value=1) as score, \

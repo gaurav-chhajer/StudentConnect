@@ -271,7 +271,7 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
         if time.monotonic() >= deadline - 120:
             if queued:
                 logger.info("Queue batch time budget reached; pending jobs remain stored for the next batch.")
-                return int(failed)
+                return 0
             logger.error("Matching time budget reached; remaining scores deferred")
             return 1
         payload = client.call("work?after=" + str(after) + company_query)
@@ -286,7 +286,7 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
                 raise ValueError("Invalid resume title work item")
             if scores + title_requests >= MAX_SCORES:
                 logger.info("Groq request budget reached; title suggestions remain pending.")
-                return int(failed) if queued else 1
+                return 0 if queued else 1
             if stop is not None and stop.is_set():
                 return 1
             title_requests += 1
@@ -314,7 +314,7 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
                 raise ValueError("Work without an account cursor")
             logger.info("Scoring summary: eligible_accounts=%s evaluations_attempted=%s candidates_skipped_failed_boards=%s scores_saved=%s candidates_failed=%s partial_failure=%s title_profiles_attempted=%s",
                         accounts, scores, skipped, saved, candidate_failures, failed, title_requests)
-            return int(failed)
+            return 0 if queued else int(failed)
         after = next_id
         accounts += 1
         for item in items:
@@ -323,7 +323,7 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
             if scores + title_requests >= MAX_SCORES or time.monotonic() >= deadline - 120:
                 if queued:
                     logger.info("Queue batch budget reached; pending jobs remain stored for the next batch.")
-                    return int(failed)
+                    return 0
                 logger.error("Scoring budget reached; remaining scores deferred")
                 return 1
             if (not isinstance(item, dict) or not isinstance(item.get("user"), dict) or
@@ -396,7 +396,7 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
                 return 1
     if queued:
         logger.info("Queue account budget reached; remaining work stays stored for the next batch.")
-        return int(failed)
+        return 0
     logger.error("Account budget reached; remaining work deferred")
     return 1
 
