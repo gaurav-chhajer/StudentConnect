@@ -15,7 +15,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, request
 
-from backend import match_reminders, matching_tasks, pipeline_skeleton as pipeline, similarity, store
+from backend import match_reminders, matching_tasks, pipeline_skeleton as pipeline, role_titles, similarity, store
 from backend.evaluation import validate_evaluation
 from scripts import run_pipeline
 
@@ -24,30 +24,6 @@ MAX_COMPANIES = 1000
 MAX_JOBS = 5000
 MAX_WORK_ITEMS = 5
 INDIA = timezone(timedelta(hours=5, minutes=30))
-RANKING_TITLE_WEIGHT = 3
-RANKING_STOP_WORDS = frozenset("a an and are as at be by for from in is it of on or that the this to with you your".split())
-
-
-def rank_candidates(candidates, user):
-    """Prioritize distinct lexical overlap; this is not a fit or eligibility score."""
-    def terms(text):
-        return set(re.findall(r"[a-z][a-z0-9]*(?:\+\+|#)?", text.casefold())) - RANKING_STOP_WORDS
-
-    resume_terms = terms(user["resume_text"])
-
-    def priority(job):
-        title_terms = terms(job["title"] + " " + (job["department"] or ""))
-        try:
-            description_terms = terms(pipeline.extract_job_description(job))
-        except ValueError:
-            # Career-source observations may not have a full description until selected.
-            # Keep them eligible and make the reduced ranking information explicit.
-            current_app.logger.warning("Ranking uses metadata only: job_id=%s; description unavailable", job["id"])
-            description_terms = set()
-        overlap = RANKING_TITLE_WEIGHT * len(resume_terms & title_terms) + len(resume_terms & description_terms)
-        return (-overlap, job["id"])
-
-    return sorted(candidates, key=priority)
 
 
 def worker_key():
@@ -263,11 +239,18 @@ def register_routes(application, connection, database):
         if user is None:
             return {"items": [], "next": None}
         items = []
-        candidates = pipeline.filter_candidate_jobs(conn, user)
+        profile = role_titles.current(conn, user)
+        candidates = pipeline.filter_candidate_jobs(conn, role_titles.filtering_user(user, profile))
         if company_values:
             # Failed boards must not consume the bounded batch's candidate slots.
             candidates = [job for job in candidates if job["company_id"] in company_ids]
-        for job in rank_candidates(candidates, user)[:MAX_WORK_ITEMS]:
+        if not candidates:
+            return {"items": [], "next": user["id"]}
+        if profile is None:
+            return {"items": [], "next": user["id"], "role_profile_required": {
+                "user": dict(user), "fingerprint": fingerprint(dict(user)),
+                "version": role_titles.VERSION, "model": pipeline.GROQ_MODEL}}
+        for job in role_titles.select(candidates, profile)[:MAX_WORK_ITEMS]:
             company = conn.execute("SELECT name FROM companies WHERE id=?", (job["company_id"],)).fetchone()
             items.append(dict(user=dict(user), job=dict(job), company_name=company[0],
                               fingerprint=fingerprint(work_identity(user, job))))
@@ -275,6 +258,21 @@ def register_routes(application, connection, database):
         if len(json.dumps(payload).encode()) > MAX_BODY_BYTES:
             raise ValueError("Work batch exceeds transfer limit")
         return payload
+
+    @routes.post("/role-titles")
+    def save_role_titles():
+        data = body()
+        user_id = positive_id(data.get("user_id"))
+        if data.get("version") != role_titles.VERSION or data.get("model") != pipeline.GROQ_MODEL:
+            return {"error": "Title profile configuration changed"}, 409
+        conn = connection()
+        with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
+            conn.execute("BEGIN IMMEDIATE")
+            user = eligible_user(conn, user_id)
+            if user is None or data.get("fingerprint") != fingerprint(dict(user)):
+                return {"error": "Resume inputs changed; title suggestions discarded"}, 409
+            role_titles.save(conn, user, data.get("profile"))
+        return {"saved": True}
 
     @routes.get("/similarity/work")
     def similarity_work():
@@ -357,6 +355,12 @@ def register_routes(application, connection, database):
                 return {"error": "Inputs changed; result discarded"}, 409
             if job["company_id"] not in matching_tasks.companies_for_user(conn, user_id):
                 return {"error": "Subscription changed; result discarded"}, 409
+            profile = role_titles.current(conn, user)
+            if profile is None or role_titles.match_index(job["title"], profile) is None:
+                return {"error": "Job title requires review; result discarded"}, 409
+            filtering_user = role_titles.filtering_user(user, profile)
+            if not pipeline.filter_jobs_for_user([job], filtering_user):
+                return {"error": "Job preferences changed; result discarded"}, 409
             existing = conn.execute("SELECT is_stale FROM scores WHERE user_id=? AND job_id=?", (user_id, job_id)).fetchone()
             if existing and not existing[0]:
                 return {"saved": False, "already_scored": True}
@@ -364,7 +368,7 @@ def register_routes(application, connection, database):
             validate_evaluation(result, user["resume_text"], pipeline.extract_job_description(job))
             task = conn.execute("SELECT revision FROM matching_tasks WHERE user_id=?", (user_id,)).fetchone()
             pipeline.store_score(conn, job_id, user_id, result)
-            if task and not pipeline.filter_candidate_jobs(conn, user):
+            if task and not pipeline.filter_candidate_jobs(conn, filtering_user):
                 conn.execute("""UPDATE matching_tasks SET status='complete',last_error=NULL
                     WHERE user_id=? AND revision=?""", (user_id, task[0]))
         return {"saved": True}
@@ -376,6 +380,9 @@ def register_routes(application, connection, database):
         user_id, job_id = positive_id(data.get('user_id')), positive_id(data.get('job_id'))
         text, title, location = data.get('description'), data.get('title'), data.get('location')
         employment = data.get('employment_type')
+        title_gate = data.get('title_gate', False)
+        if type(title_gate) is not bool:
+            raise ValueError('Invalid title gate')
         if (not isinstance(text, str) or not text.strip() or len(text) > MAX_DESCRIPTION or
                 not isinstance(title, str) or not title.strip() or len(title) > 1000 or
                 location is not None and (not isinstance(location, str) or len(location) > 4000) or
@@ -406,11 +413,18 @@ def register_routes(application, connection, database):
                              (prepared['raw_json'], title, location, job_id))
                 conn.execute('UPDATE scores SET is_stale=1 WHERE job_id=?', (job_id,))
                 matching_tasks.enqueue_company(conn, job['company_id'], datetime.now(timezone.utc))
-            eligible = any(candidate['id'] == job_id for candidate in pipeline.filter_candidate_jobs(conn, user))
+            filtering_user = user
+            if title_gate:
+                profile = role_titles.current(conn, user)
+                if profile is None or role_titles.match_index(title, profile) is None:
+                    return {'eligible': False, 'job': prepared, 'fingerprint': fingerprint(work_identity(user, prepared))}
+                filtering_user = role_titles.filtering_user(user, profile)
+            eligible = any(candidate['id'] == job_id for candidate in pipeline.filter_candidate_jobs(conn, filtering_user))
             return {'eligible': eligible, 'job': prepared, 'fingerprint': fingerprint(work_identity(user, prepared))}
 
     @routes.post("/email")
     @routes.post("/email/immediate")
+    @routes.post("/email/matches")
     def email():
         after = body().get("after", 0)
         if type(after) is not int or not 0 <= after <= 2147483647:
@@ -431,12 +445,13 @@ def register_routes(application, connection, database):
                 WHERE is_active=1 AND last_seen_at>=? AND last_seen_at<=?""",
                 (start.isoformat(), now.isoformat()))}
             matches = pipeline.get_unsent_top_matches(conn, user["id"], company_ids=refreshed)
-            immediate = request.path.endswith("/email/immediate")
+            immediate = request.path.endswith(("/email/immediate", "/email/matches"))
+            matches_only = request.path.endswith("/email/matches")
             cadence = store.settings(conn, user["id"])["cadence"]
             if cadence not in ("off", "daily", "weekly"):
                 raise ValueError("Invalid cadence")
             due = cadence != "off" if immediate else fixed_schedule_due(conn, user["id"], now)
-            reminder = immediate and not matches and match_reminders.due(conn, user['id'], now)
+            reminder = immediate and not matches_only and not matches and match_reminders.due(conn, user['id'], now)
             if not due or not (matches or reminder):
                 return {"next": user["id"], "sent": False}
             pipeline.validate_email_configuration()

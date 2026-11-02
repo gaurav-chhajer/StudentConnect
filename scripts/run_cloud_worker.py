@@ -14,7 +14,7 @@ import uuid
 import requests
 
 from backend import hosting, pipeline_skeleton as pipeline
-from backend import career_sources
+from backend import career_sources, role_titles
 from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, MAX_JOBS, worker_key
 from backend.job_ingestion import deduplicate, mode_for_source, observation_batches
 
@@ -74,6 +74,13 @@ class GroqKeyPool:
             self.publish("running")
 
     def score(self, user, job, company_name):
+        return self._request(lambda key: pipeline.score_job_for_user(user, job, company_name) if key is None else
+                             pipeline.score_job_for_user(user, job, company_name, api_key=key))
+
+    def suggest_titles(self, user):
+        return self._request(lambda key: role_titles.generate(user, api_key=key))
+
+    def _request(self, operation):
         for slot in range(self.slot, len(self.keys)):
             if not self.keys[slot]:
                 continue
@@ -83,8 +90,7 @@ class GroqKeyPool:
             if self.states[slot] in ("not_attempted", "failed"):
                 self.state("attempting")
             try:
-                result = (pipeline.score_job_for_user(user, job, company_name) if slot == 0 else
-                          pipeline.score_job_for_user(user, job, company_name, api_key=self.keys[slot]))
+                result = operation(None if slot == 0 else self.keys[slot])
             except requests.HTTPError as error:
                 limited = error.response is not None and error.response.status_code == 429
                 self.state("rate_limited" if limited else "failed")
@@ -245,7 +251,7 @@ def score_pending(client, deadline, stop):
 def _score_pending(client, deadline, pool, successful=None, failed=False, stop=None):
     queued = successful is None
     after, scores, accounts, skipped = 0, 0, 0, 0
-    saved, candidate_failures = 0, 0
+    saved, candidate_failures, title_requests = 0, 0, 0
     company_query = "" if queued else "".join("&company_id=" + str(company_id) for company_id in sorted(successful))
     for _ in range(MAX_ACCOUNTS):
         if stop is not None and stop.is_set():
@@ -257,6 +263,34 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
             logger.error("Matching time budget reached; remaining scores deferred")
             return 1
         payload = client.call("work?after=" + str(after) + company_query)
+        if "role_profile_required" in payload:
+            required = payload["role_profile_required"]
+            if (not isinstance(required, dict) or not isinstance(required.get("user"), dict) or
+                    type(required["user"].get("id")) is not int or required["user"]["id"] <= after or
+                    required["user"]["id"] != payload.get("next") or payload.get("items") != [] or
+                    not isinstance(required.get("fingerprint"), str) or
+                    len(required["fingerprint"]) != 64 or required.get("version") != role_titles.VERSION or
+                    required.get("model") != pipeline.GROQ_MODEL):
+                raise ValueError("Invalid resume title work item")
+            if scores + title_requests >= MAX_SCORES:
+                logger.info("Groq request budget reached; title suggestions remain pending.")
+                return int(failed) if queued else 1
+            if stop is not None and stop.is_set():
+                return 1
+            title_requests += 1
+            profile = role_titles.validate(pool.suggest_titles(required["user"]), required["user"]["resume_text"])
+            if stop is not None and stop.is_set():
+                return 1
+            reply = client.call("role-titles", dict(user_id=required["user"]["id"],
+                fingerprint=required["fingerprint"], version=role_titles.VERSION,
+                model=pipeline.GROQ_MODEL, profile=profile))
+            if reply.get("saved") is not True:
+                raise RuntimeError("Resume title profile was not acknowledged")
+            logger.info("Resume role-family profile saved: user_id=%s families=%s status=%s",
+                        required["user"]["id"], len(profile["families"]), profile["status"])
+            payload = client.call("work?after=" + str(after) + company_query)
+            if "role_profile_required" in payload:
+                raise RuntimeError("Resume title profile changed; restart the scoring batch")
         if "next" not in payload:
             raise ValueError("Missing work cursor")
         next_id = cursor(payload["next"], after)
@@ -266,15 +300,15 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
         if next_id is None:
             if items:
                 raise ValueError("Work without an account cursor")
-            logger.info("Scoring summary: eligible_accounts=%s evaluations_attempted=%s candidates_skipped_failed_boards=%s scores_saved=%s candidates_failed=%s partial_failure=%s",
-                        accounts, scores, skipped, saved, candidate_failures, failed)
+            logger.info("Scoring summary: eligible_accounts=%s evaluations_attempted=%s candidates_skipped_failed_boards=%s scores_saved=%s candidates_failed=%s partial_failure=%s title_profiles_attempted=%s",
+                        accounts, scores, skipped, saved, candidate_failures, failed, title_requests)
             return int(failed)
         after = next_id
         accounts += 1
         for item in items:
             if stop is not None and stop.is_set():
                 return 1
-            if scores >= MAX_SCORES or time.monotonic() >= deadline - 120:
+            if scores + title_requests >= MAX_SCORES or time.monotonic() >= deadline - 120:
                 if queued:
                     logger.info("Queue batch budget reached; pending jobs remain stored for the next batch.")
                     return int(failed)
@@ -307,7 +341,8 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
                     raw = json.loads(prepared['raw_json'])
                     detail = client.call('description', dict(user_id=after, job_id=prepared['id'],
                         fingerprint=item['fingerprint'], description=raw['descriptionHtml'],
-                        title=prepared['title'], location=prepared.get('location'), employment_type=raw.get('employmentType')))
+                        title=prepared['title'], location=prepared.get('location'), employment_type=raw.get('employmentType'),
+                        title_gate=True))
                     if type(detail.get('eligible')) is not bool or not isinstance(detail.get('job'), dict):
                         raise ValueError('Invalid description response')
                     if (detail['job'].get('id') != prepared['id'] or
@@ -354,13 +389,14 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
     return 1
 
 
-def send_emails(client, deadline, immediate=False):
+def send_emails(client, deadline, immediate=False, matches_only=False):
     after = 0
     for _ in range(MAX_ACCOUNTS):
         if time.monotonic() >= deadline - 100:
             logger.error("Email time budget reached; remaining accounts deferred")
             return 1
-        payload = client.call("email/immediate" if immediate else "email", dict(after=after))
+        path = "email/matches" if matches_only else "email/immediate" if immediate else "email"
+        payload = client.call(path, dict(after=after))
         if "next" not in payload or type(payload.get("sent")) is not bool:
             raise ValueError("Invalid email response")
         next_id = cursor(payload["next"], after)

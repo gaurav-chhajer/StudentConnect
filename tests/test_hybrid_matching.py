@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from backend import cloud_worker, pipeline_skeleton as pipeline, store
+from backend import cloud_worker, pipeline_skeleton as pipeline, role_titles, store
 from scripts import run_cloud_worker as runner
 from tests import test_cloud_worker, test_evaluation
 
@@ -88,6 +88,9 @@ class HybridEndpointTests(unittest.TestCase):
 
     def test_ranks_before_five_item_limit_and_preserves_unselected_jobs(self):
         self.conn.execute("UPDATE users SET resume_text='Python Flask SQL' WHERE id=1")
+        role_titles.save(self.conn, dict(id=1, resume_text='Python Flask SQL'),
+                        test_cloud_worker.title_profile(['Python Intern', 'General Intern', 'Backend Developer',
+                                                        'Software Engineer', 'Data Analyst']))
         self.conn.execute("UPDATE jobs SET title='General Intern',raw_json=?", (json.dumps(dict(content='General tasks')),))
         original = self.conn.execute('SELECT * FROM jobs WHERE id=1').fetchone()
         for number in range(3, 9):
@@ -105,21 +108,18 @@ class HybridEndpointTests(unittest.TestCase):
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM jobs WHERE is_active=1').fetchone()[0], 8)
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 0)
 
-    def test_keywords_are_distinct_and_missing_description_remains_eligible(self):
-        user = dict(resume_text='Python Python SQL')
-        jobs = [dict(id=2, title='Intern', department=None, raw_json=json.dumps(dict(content='Python ' * 20))),
-                dict(id=1, title='Intern', department='', raw_json=json.dumps(dict(content='SQL Python'))),
+    def test_title_gate_does_not_read_descriptions_or_mutate_jobs(self):
+        profile = test_cloud_worker.title_profile(['Python Intern', 'General Intern', 'Backend Developer',
+                                                  'Software Engineer', 'Data Analyst'])
+        jobs = [dict(id=2, title='General Intern', department=None, raw_json=json.dumps(dict(content='Python ' * 20))),
+                dict(id=1, title='General Intern', department='', raw_json=json.dumps(dict(content='SQL Python'))),
                 dict(id=3, title='Python Intern', department='', raw_json='{}')]
         before = copy.deepcopy(jobs)
-        with self.app.app_context(), self.assertLogs(self.app.logger, level='WARNING') as logs:
-            ranked = cloud_worker.rank_candidates(jobs, user)
+        with patch.object(pipeline, 'extract_job_description', side_effect=AssertionError('Title gate read JD')):
+            ranked = role_titles.select(jobs, profile)
         self.assertEqual([job['id'] for job in ranked], [3, 1, 2])
         self.assertEqual(jobs, before)
-        self.assertIn('job_id=3', ' '.join(logs.output))
-        self.assertNotIn('Python', ' '.join(logs.output))
-        with self.app.app_context():
-            self.assertEqual(cloud_worker.rank_candidates([], user), [])
-            self.assertEqual([job['id'] for job in cloud_worker.rank_candidates(jobs[:2], dict(resume_text=''))], [1, 2])
+        self.assertEqual(role_titles.select([], profile), [])
 
     def run_matching(self, score, keys=('synthetic-2', 'synthetic-3'), clock=None):
         client = MagicMock()

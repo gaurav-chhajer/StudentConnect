@@ -584,13 +584,12 @@ workflow while using this worker, and run only one scheduler. No Windows task
 is installed and no existing workflow is changed by these commands.
 
 In explicit Groq mode, each cycle fetches active companies and scores pending candidates with the
-existing cloud limits, then sends up to five qualifying unsent matches per
-verified active account. Immediate delivery overrides daily/weekly timing for
-email-enabled accounts; Off, minimum scores, subscriptions, stale-score checks,
-sent-job tracking and uncertain-delivery pause protection still apply. Existing
-eligible unsent matches from today's refreshed companies may also be sent on
-the first run. The website's displayed daily/weekly settings still describe
-scheduled digests, not this opt-in worker's immediate mode.
+existing cloud limits, then immediately sends up to five unsent matches that meet each account's
+saved minimum fit score. Immediate delivery overrides daily/weekly timing; Off, subscriptions,
+stale-score checks, sent-job tracking and uncertain-delivery pause protection still apply. This
+path sends job-match digests only, never no-match reminders. Eligible unsent matches from today's
+refreshed companies may also be sent on the first run. The website's displayed daily/weekly
+settings still describe scheduled digests, not this opt-in worker's immediate mode.
 
 For the manual `scripts.watch_hosted_jobs` commands above, the next check starts
 five minutes **after the previous cycle completes**. The Windows sign-in worker
@@ -747,14 +746,58 @@ Browser login and CSRF protection remain required for browser actions; the worke
 API instead requires its separate bearer credential and rejects session cookies.
 Blank worker credentials disable API access. Invalid credentials fail startup.
 
-The worker processes up to five missing/stale evaluations per account and 100
-evaluations total per morning cycle. After existing preference/subscription filters,
-Python ranks candidates by distinct resume keyword overlap with title/department
-(weight 3) and the stored description (weight 1), ignoring common connecting words.
-Repeated keywords do not add points; ties use ascending job ID. Missing descriptions
-are logged and ranked using metadata until their selected posting is resolved.
-This ranking only prioritizes the five candidates: it does not assign a final fit
-score or permanently exclude lower-ranked jobs. It uses no external calls.
+The hosted Groq worker first generates **5-7 distinct best-suited role families**
+from each resume, ranked by suitability and supported by actual resume-line
+references. Each family contains equivalent job-title aliases, so Software
+Engineer, Software Developer, SDE and SWE occupy **one family slot**. Groq proposes
+3-8 aliases per family; validation allows at most 20. Known software, backend,
+frontend, fullstack and QA aliases expand matching without using additional family
+slots. Groq can supply additional employer wording without code changes.
+Duplicate family names and equivalent aliases shared across families are rejected.
+Suggestions use the configured Groq model and existing ordered key pool. They are
+saved privately in `resume_role_titles` and reused across runs; a changed resume,
+profile version, or Groq model requires regeneration. If the resume cannot
+support five distinct families, an explicit `insufficient_evidence` result is
+saved with no families; the worker does not pad the list with synonyms or score
+every job. The `resume-families-v2` version invalidates old literal-title profiles
+and requests regeneration on the next eligible worker run. The existing
+`resume_role_titles` table is reused; no additional migration is required.
+
+After existing preference, subscription, and senior-title filters, the worker
+compares **job titles only** against each family's aliases before loading full
+descriptions or evaluating JDs. Matching ignores word order, punctuation, and
+junior/graduate/internship markers, and normalizes explicit aliases such as
+SWE/SDE, developer/engineer, and back-end/backend. All remaining title terms must
+match an alias. Extra specializations and unmatched numeric/Roman levels remain held:
+`Security Software Engineer 5` cannot pass a suggestion of `Software Engineer`.
+Groq supplies semantic variants during family generation; runtime matching uses
+those aliases and known equivalents, not an embedding-similarity cutoff. Unseen
+wording can still remain unmatched. A family match does not establish experience
+eligibility; the complete-JD evaluation remains necessary. Unmatched jobs remain
+stored. Explicit role preferences are expanded only within a matching family in
+a query copy, so selecting Software Engineer also allows Software Developer.
+Other selected families are not implicitly enabled. Explicit level/internship
+wording remains literal, and location/employment/stipend/subscription filters
+continue to apply. Saved preferences are never overwritten. Until a profile exists,
+the worker checks other filters to discover pending work but returns no scoreable
+jobs; role filtering is applied with aliases once the profile has been generated.
+
+The worker orders title matches by family order, then ascending job ID, and
+selects up to **five missing/stale evaluations per account per batch**. Only these
+jobs proceed to complete-JD Groq evaluation. Resolved career-posting titles are
+checked again before evaluation, and the server rechecks titles before saving
+scores. Title generation shares the 100-operation cycle budget with JD evaluation;
+429 key rotation remains subject to the existing key-pool limits. Suggestions are
+generated only when an account has otherwise eligible pending jobs. Existing scores
+are retained. The separate offline similarity worker and manual local Groq commands
+keep their existing behavior; this title gate applies to the hosted Groq queue.
+
+Apply additive migration `018_resume_role_titles.sql` after a verified database
+backup, then reload the website and restart the hosted Groq worker together. The
+updated `/internal/worker/work` response can request a title profile, which the
+worker saves through the authenticated `/internal/worker/role-titles` endpoint.
+Old workers cannot process that new request. No website request calls Groq to
+generate titles. No new dependency is required.
 Its own 50-minute matching, 20-minute evening
 fetch and 7-minute email budgets leave room within the job limits. The evening
 fetch needs neither Groq nor Gmail credentials on GitHub. Reaching a limit reports

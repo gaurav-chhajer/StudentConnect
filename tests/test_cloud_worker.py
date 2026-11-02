@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from backend import automatic_matching, cloud_worker, pipeline_skeleton as pipeline
+from backend import automatic_matching, cloud_worker, pipeline_skeleton as pipeline, role_titles
 from backend.app import create_app
 from scripts import run_cloud_worker as runner
 from scripts import watch_hosted_jobs as watcher
@@ -18,11 +18,22 @@ HEADERS = {"Authorization": "Bearer " + KEY}
 NOW = datetime(2026, 10, 8, 2, 30, tzinfo=timezone.utc)
 
 
+def title_profile(titles=None):
+    families = ([(title, [title]) for title in titles] if titles is not None else [
+        ('Software Engineering', ['Software Engineer', 'Software Engineer 1', 'Software Engineer 2']),
+        ('Backend Development', ['Backend Developer']), ('Frontend Development', ['Frontend Developer']),
+        ('Data Analysis', ['Data Analyst']), ('Quality Assurance', ['QA Engineer'])])
+    return dict(status='ready', reason='Synthetic resume evidence', families=[
+        dict(family=family, aliases=aliases, reason='Synthetic evidence', resume_line_ids=[1])
+        for family, aliases in families])
+
+
 class CloudEndpointTests(unittest.TestCase):
     def setUp(self):
         test_web_flows.WebFlowTests.setUp(self)
         test_web_flows.WebFlowTests.seed_user(self)
         self.conn.execute("UPDATE scores SET is_stale=1")
+        role_titles.save(self.conn, dict(id=1, resume_text='Python resume'), title_profile())
         self.conn.commit()
         env = patch.dict(os.environ, STUDENTCONNECT_WORKER_KEY=KEY)
         env.start()
@@ -191,6 +202,22 @@ class CloudEndpointTests(unittest.TestCase):
             marker.write_text('Review required', encoding='utf-8')
             self.assertEqual(self.call('email/immediate', dict(after=0)).status_code, 503)
         mail.assert_not_called()
+
+    def test_matches_only_immediate_email_never_sends_reminders(self):
+        self.conn.execute("UPDATE jobs SET last_seen_at=?", (NOW.isoformat(),))
+        self.conn.execute("INSERT INTO user_settings(user_id,cadence) VALUES(1,'weekly')")
+        self.conn.commit()
+        with patch.object(cloud_worker, "datetime") as clock, \
+                patch.object(cloud_worker.match_reminders, "due", return_value=True) as reminder_due, \
+                patch.object(pipeline, "deliver_email") as mail:
+            clock.now.return_value = NOW
+            self.assertFalse(self.call("email/matches", {"after": 0}).json["sent"])
+            reminder_due.assert_not_called()
+            self.conn.execute("UPDATE scores SET is_stale=0")
+            self.conn.commit()
+            self.assertTrue(self.call("email/matches", {"after": 0}).json["sent"])
+            self.assertFalse(self.call("email/matches", {"after": 0}).json["sent"])
+        mail.assert_called_once()
 
     def test_immediate_alerts_require_worker_authentication(self):
         self.assertEqual(self.client.post('/internal/worker/email/immediate', json=dict(after=0)).status_code, 401)
@@ -759,7 +786,7 @@ class LocalHostedWatcherTests(unittest.TestCase):
                 patch.object(runner, 'send_emails', return_value=0) as email:
             self.assertEqual(watcher.run_cycle("groq"), 0)
         matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=False, provider="groq")
-        email.assert_called_once_with(client, runner.EMAIL_SECONDS, immediate=True)
+        email.assert_called_once_with(client, runner.EMAIL_SECONDS, matches_only=True)
         client.close.assert_called_once()
 
     def test_fetch_only_cycle_skips_comparison_and_email(self):
@@ -817,6 +844,13 @@ class LocalHostedWatcherTests(unittest.TestCase):
             self.assertEqual(runner.send_emails(client, 420, immediate=True), 0)
         self.assertEqual([call.args for call in client.call.call_args_list], [
             ('email/immediate', dict(after=0)), ('email/immediate', dict(after=1))])
+
+    def test_matches_only_email_uses_distinct_hosted_route(self):
+        client = MagicMock()
+        client.call.side_effect = [dict(next=None, sent=False)]
+        with patch.object(runner.time, 'monotonic', return_value=0):
+            self.assertEqual(runner.send_emails(client, 420, matches_only=True), 0)
+        client.call.assert_called_once_with('email/matches', dict(after=0))
 
 
 if __name__ == "__main__":
