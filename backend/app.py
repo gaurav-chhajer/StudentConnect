@@ -434,13 +434,16 @@ def create_app(database_path=None, upload_dir=None):
             before=store.integer(request.args.get('before','0'),0,9223372036854775807)
             stage=request.args.get('stage','all')
             severity=request.args.get('severity','all')
+            sort=request.args.get('sort','scored')
+            if sort not in ('scored','newest','oldest','fit','relevance'):
+                raise ValueError('Invalid monitor sort')
             if stage not in ('all','scored','prepared','applied','review') or severity not in ('all','info','warning','error'):
                 raise ValueError('Invalid monitor filter')
         except ValueError:
             return 'Choose valid workflow monitor filters.',400
         try:
             monitor=workflow_monitor.snapshot(connection(),g.user['id'],workflow_id,page=page,
-                stage=stage,severity=severity,before=before,now=utc_now())
+                stage=stage,severity=severity,before=before,now=utc_now(),sort=sort)
         except LookupError:
             return 'Workflow not found.',404
         return render('workflow_monitor',dict(data,monitor=monitor))

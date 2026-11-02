@@ -102,7 +102,7 @@ def validate(value, resume):
     return value
 
 
-def generate(user, *, api_key=None):
+def generate(user, *, api_key=None, response_observer=None):
     """One bounded Groq request; the worker owns key selection and error handling."""
     resume = user["resume_text"]
     if not isinstance(resume, str) or not resume.strip() or len(resume) > 100000:
@@ -120,6 +120,8 @@ def generate(user, *, api_key=None):
                   messages=[dict(role="system", content=PROMPT), dict(role="user", content=data)],
                   response_format={"type": "json_object"}), timeout=30, stream=True)
     try:
+        if response_observer is not None:
+            response_observer(response.headers)
         response.raise_for_status()
         chunks, size = [], 0
         for chunk in response.iter_content(8192):

@@ -49,6 +49,17 @@ class CloudEndpointTests(unittest.TestCase):
         self.addCleanup(response.request.input_stream.close)
         return response
 
+    def test_groq_limits_validated_and_saved(self):
+        payload=dict(key_slot=1,model='fixture',metrics=dict(limit_requests=1000,remaining_requests=990,reset_tokens='2026-11-02T12:00:00+00:00'))
+        self.assertEqual(self.call('groq-limits',payload).status_code,200)
+        self.assertEqual(self.conn.execute('SELECT model FROM groq_limits WHERE key_slot=1').fetchone()[0],'fixture')
+        payload['metrics']['unexpected']='private'
+        self.assertEqual(self.call('groq-limits',payload).status_code,400)
+        payload['metrics']={'remaining_tokens':True}
+        self.assertEqual(self.call('groq-limits',payload).status_code,400)
+        payload['metrics']={'reset_tokens':'2026-11-02'}
+        self.assertEqual(self.call('groq-limits',payload).status_code,400)
+
     def item(self):
         return self.call("work").json["items"][0]
 

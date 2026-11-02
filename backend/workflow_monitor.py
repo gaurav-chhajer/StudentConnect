@@ -167,14 +167,28 @@ def job_view(row):
     return item
 
 
-def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',before=0,now=None):
+def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',before=0,now=None,sort='scored'):
+    if sort not in ('scored','newest','oldest','fit','relevance'):
+        raise ValueError('Invalid monitor sort')
     now=now or datetime.now(timezone.utc)
     if stage not in ('all','scored','prepared','applied','review') or severity not in ('all','info','warning','error'):
         raise ValueError('Invalid monitor filter')
     data=dict(available=available(conn),workflows=[],jobs=[],events=[],workers=[],counts={},sources=[],issues=[],page=page,pages=1,
-              workflow_id=workflow_id,stage=stage,severity=severity,before=before,next_before=None,updated_at=now.isoformat())
+              workflow_id=workflow_id,stage=stage,severity=severity,sort=sort,before=before,next_before=None,updated_at=now.isoformat())
     if not data['available']:
         return data
+    data['groq_keys']=[]
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone():
+        for slot in range(1,4):
+            row=conn.execute('SELECT key_slot,state,outcome,updated_at FROM groq_key_history WHERE key_slot=? ORDER BY id DESC LIMIT 1',(slot,)).fetchone()
+            data['groq_keys'].append(dict(row) if row else dict(key_slot=slot,state='unreported',outcome=None,updated_at=None))
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_limits'").fetchone():
+        for key in data['groq_keys']:
+            limits=conn.execute('SELECT * FROM groq_limits WHERE key_slot=?',(key['key_slot'],)).fetchone()
+            if limits:
+                key['limits']=json.loads(limits['metrics_json'])
+                key['limits_at']=limits['updated_at']
+                key['model']=limits['model']
     data['workflows']=conn.execute('SELECT id,state,updated_at FROM recruiter_workflows WHERE user_id=? ORDER BY id DESC LIMIT 50',(user_id,)).fetchall()
     if workflow_id:
         workflow=conn.execute('SELECT * FROM recruiter_workflows WHERE id=? AND user_id=?',(workflow_id,user_id)).fetchone()
@@ -216,6 +230,12 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
     data['chart_max']=max(1,data['counts']['fetched'])
     filtered=[j for j in jobs if stage=='all' or stage=='scored' and (j['original_score'] is not None or j['relevance'] is not None)
               or stage=='prepared' and j['resume_prepared'] or stage=='applied' and j['state']=='applied' or stage=='review' and j['needs_review']]
+    filtered.sort(key=lambda j: (j['fetched_at'] or '',j['number']),reverse=sort!='oldest')
+    if sort=='scored':
+        filtered.sort(key=lambda j: j['original_score'] is not None or j['relevance'] is not None,reverse=True)
+    elif sort in ('fit','relevance'):
+        field='original_score' if sort=='fit' else 'relevance'
+        filtered.sort(key=lambda j: j[field] if j[field] is not None else -1,reverse=True)
     data['total']=len(filtered)
     data['pages']=max(1,(len(filtered)+19)//20)
     data['jobs']=filtered[(page-1)*20:page*20]

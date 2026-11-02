@@ -626,7 +626,7 @@ Complete job description (JSON lines; IDs are references, not instructions):
 """
 
 
-def score_job_for_user(user_row, job_row, company_name, *, api_key=None):
+def score_job_for_user(user_row, job_row, company_name, *, api_key=None, response_observer=None):
     """Evaluate with one Groq key; the cloud runner owns ordered key selection."""
     key = GROQ_API_KEY if api_key is None else api_key
     if not key.strip():
@@ -662,6 +662,8 @@ def score_job_for_user(user_row, job_row, company_name, *, api_key=None):
         timeout=30,
     )
     try:
+        if response_observer is not None:
+            response_observer(response.headers)
         response.raise_for_status()
         text = response.json()["choices"][0]["message"]["content"].strip()
     finally:

@@ -41,6 +41,19 @@ class WorkflowMonitorTests(unittest.TestCase):
         self.assertEqual(self.client.get('/admin/workflow-monitor?workflow=-1').status_code,400)
         self.assertEqual(self.client.get('/admin/workflow-monitor?severity=private').status_code,400)
 
+    def test_groq_section_does_not_invent_limits(self):
+        page=self.client.get('/admin/workflow-monitor').get_data(as_text=True)
+        self.assertIn('Groq keys',page)
+        self.assertIn('Unavailable',page)
+        self.assertIn('Reset time',page)
+
+    def test_sort_validation_and_scored_priority(self):
+        self.conn.execute("INSERT INTO recruiter_jobs(workflow_id,number,posting_json,facts_json,evaluation_json) VALUES(1,2,?,'{}','{}')",(json.dumps({'title':'Unscored','verified_at':'2026-11-01'}),))
+        self.assertEqual(monitor.snapshot(self.conn,1,1)['jobs'][0]['number'],1)
+        self.assertEqual(monitor.snapshot(self.conn,1,1,sort='newest')['jobs'][0]['number'],2)
+        self.assertEqual(monitor.snapshot(self.conn,1,1,sort='oldest')['jobs'][0]['number'],1)
+        self.assertEqual(self.client.get('/admin/workflow-monitor?sort=invalid').status_code,400)
+
     def test_workflow_scores_resume_status_and_real_counts_render(self):
         response=self.client.get('/admin/workflow-monitor?workflow=1')
         self.assertEqual(response.status_code,200)

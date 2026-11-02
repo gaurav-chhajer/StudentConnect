@@ -350,7 +350,7 @@ class ProfileWorkerTests(unittest.TestCase):
             self.assertEqual(pool.suggest_titles(dict(resume_text='Python')), profile())
             pool.score(dict(resume_text='Python'), {}, 'Synthetic')
         self.assertEqual([call.kwargs['api_key'] for call in generate.call_args_list], [None, 'synthetic-2'])
-        self.assertEqual(score.call_args.kwargs, dict(api_key='synthetic-2'))
+        self.assertEqual({k:v for k,v in score.call_args.kwargs.items() if k!='response_observer'}, dict(api_key='synthetic-2'))
 
         client, pool = MagicMock(), MagicMock(reporting_failed=False)
         client.call.side_effect = [self.required(), dict(saved=True), dict(next=1, items=[dict(

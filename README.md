@@ -1589,3 +1589,5 @@ It writes `data/boards/discovered_boards_batch2.csv` and does not overwrite the
 verified seed CSV. Inspect discoveries before importing them. The test-profile
 script is optional: `python -m scripts.add_test_user`; edit its placeholder data
 first and be aware it updates any profile with the configured email.
+
+The admin workflow monitor shows Groq Key 1?3 status and the last reported model-specific rate limits. After additive migration `019_groq_limits.sql`, hosted workers record allowlisted Groq response headers for both JD scoring and resume role extraction. Requests refer to the daily limit; tokens refer to the per-minute limit. Reset timestamps are estimates from the observed response, not confirmation of restored capacity. Keys in one organization share limits; missing readings display Unavailable. No extra Groq requests are made for monitoring. Back up the database before applying migrations and deploy the hosted API before running the updated worker.

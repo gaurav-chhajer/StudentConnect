@@ -142,7 +142,7 @@ class HybridEndpointTests(unittest.TestCase):
         result = test_evaluation.sample_result()
         status, evaluate = self.run_matching([http_error(429), http_error(429), result, result])
         self.assertEqual(status, 0)
-        self.assertEqual([call.kwargs for call in evaluate.call_args_list],
+        self.assertEqual([{k:v for k,v in call.kwargs.items() if k!='response_observer' and v is not None} for call in evaluate.call_args_list],
                          [{}, {'api_key': 'synthetic-2'}, {'api_key': 'synthetic-3'}, {'api_key': 'synthetic-3'}])
         self.assertEqual(evaluate.call_args_list[0].args, evaluate.call_args_list[2].args)
         rows = self.conn.execute('SELECT key_slot,state,outcome FROM groq_key_history ORDER BY key_slot').fetchall()
@@ -192,12 +192,12 @@ class HybridEndpointTests(unittest.TestCase):
         status, evaluate = self.run_matching([http_error(429), test_evaluation.sample_result(),
                                              test_evaluation.sample_result()], keys=('', 'synthetic-3'))
         self.assertEqual(status, 0)
-        self.assertEqual(evaluate.call_args_list[1].kwargs, {'api_key': 'synthetic-3'})
+        self.assertEqual({k:v for k,v in evaluate.call_args_list[1].kwargs.items() if k!='response_observer'}, {'api_key': 'synthetic-3'})
         self.conn.execute('UPDATE scores SET is_stale=1')
         self.conn.commit()
         status, evaluate = self.run_matching([test_evaluation.sample_result()] * 2)
         self.assertEqual(status, 0)
-        self.assertEqual(evaluate.call_args_list[0].kwargs, {})
+        self.assertEqual({k:v for k,v in evaluate.call_args_list[0].kwargs.items() if k!='response_observer' and v is not None}, {})
         self.assertEqual(self.conn.execute('SELECT COUNT(DISTINCT run_id) FROM groq_key_history').fetchone()[0], 2)
 
     def test_other_failures_do_not_switch_keys(self):
@@ -212,7 +212,7 @@ class HybridEndpointTests(unittest.TestCase):
     def test_rejected_evaluation_does_not_switch_and_next_candidate_can_succeed(self):
         status, evaluate = self.run_matching([ValueError('private evaluation'), test_evaluation.sample_result()])
         self.assertEqual(status, 1)
-        self.assertEqual([call.kwargs for call in evaluate.call_args_list], [{}, {}])
+        self.assertEqual([{k:v for k,v in call.kwargs.items() if k!='response_observer' and v is not None} for call in evaluate.call_args_list], [{}, {}])
         self.assertEqual(self.conn.execute("SELECT state FROM groq_key_history WHERE key_slot=1").fetchone()[0], 'succeeded')
 
     def test_deadline_prevents_next_key_request(self):

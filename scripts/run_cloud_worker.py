@@ -73,12 +73,21 @@ class GroqKeyPool:
             self.states[self.slot] = value
             self.publish("running")
 
+    def observe_limits(self, headers):
+        from backend.groq_limits import capture
+        metrics=capture(headers)
+        if metrics:
+            reply=self.client.call('groq-limits',dict(key_slot=self.slot+1,model=pipeline.GROQ_MODEL,metrics=metrics))
+            if reply.get('saved') is not True:
+                raise RuntimeError('Groq limits were not acknowledged')
+
     def score(self, user, job, company_name):
-        return self._request(lambda key: pipeline.score_job_for_user(user, job, company_name) if key is None else
-                             pipeline.score_job_for_user(user, job, company_name, api_key=key))
+        return self._request(lambda key: pipeline.score_job_for_user(user, job, company_name,
+            api_key=key, response_observer=self.observe_limits))
 
     def suggest_titles(self, user):
-        return self._request(lambda key: role_titles.generate(user, api_key=key))
+        return self._request(lambda key: role_titles.generate(user, api_key=key,
+            response_observer=self.observe_limits))
 
     def _request(self, operation):
         for slot in range(self.slot, len(self.keys)):
