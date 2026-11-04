@@ -141,7 +141,39 @@ def generate(user, *, api_key=None, response_observer=None):
     return validate(value, resume)
 
 
+def validate_custom(value):
+    """User-selected families are bounded but need not be AI-supported suggestions."""
+    if not isinstance(value,list) or not 1<=len(value)<=MAX_FAMILIES:
+        raise ValueError('Choose one to seven matching families')
+    names,aliases=set(),set()
+    for entry in value:
+        if not isinstance(entry,dict) or set(entry)!={'family','aliases'}:
+            raise ValueError('Invalid custom family')
+        name=entry['family']
+        titles=entry['aliases']
+        if not isinstance(name,str) or not name.strip() or len(name)>MAX_TITLE_LENGTH or any(ord(c)<32 for c in name):
+            raise ValueError('Use a short family name')
+        if name.casefold() in names:
+            raise ValueError('Family names must be distinct')
+        names.add(name.casefold())
+        if not isinstance(titles,list) or not 1<=len(titles)<=MAX_ALIASES:
+            raise ValueError('Each family needs one to twenty titles')
+        terms=set()
+        for title in titles:
+            if not isinstance(title,str) or not title.strip() or len(title)>MAX_TITLE_LENGTH or any(ord(c)<32 for c in title) or not title_terms(title):
+                raise ValueError('Use short, usable job titles')
+            terms.add(title_terms(title))
+        if terms & aliases:
+            raise ValueError('Equivalent titles must stay in one family')
+        aliases.update(terms)
+    return value
+
+
 def current(conn, user):
+    preferences=json.loads(user['preferences_json'] or '{}')
+    if 'role_families' in preferences:
+        families=validate_custom(preferences['role_families'])
+        return dict(status='ready',reason='Families selected by you',families=[dict(entry,reason='Selected by you; review after changing your resume.',resume_line_ids=[]) for entry in families])
     row = conn.execute("""SELECT profile_json FROM resume_role_titles
         WHERE user_id=? AND resume_hash=? AND version=? AND model=?""",
         (user["id"], similarity.text_hash(user["resume_text"]), VERSION, pipeline.GROQ_MODEL)).fetchone()

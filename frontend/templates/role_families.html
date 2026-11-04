@@ -1,0 +1,16 @@
+<section class="spaced" id="matching-families" aria-labelledby="families-title">
+<div class="hd"><h3 id="families-title">Matching families &amp; titles</h3><span class="tag">{{ role_profile.families|length if role_profile else 0 }} families</span></div>
+<p class="sub">Fetched jobs must match one of these families before Groq compares the full job description with your resume. Your other preferences still apply.</p>
+<div class="pf-pills spaced"><label class="pf-pill"><input type="radio" name="family_mode" value="suggested" {% if 'role_families' not in preferences %}checked{% endif %}><span>Use Groq suggestions</span></label><label class="pf-pill"><input type="radio" name="family_mode" value="custom" {% if 'role_families' in preferences %}checked{% endif %}><span>Customize families</span></label></div>
+{% if not role_profile %}<p class="notice">Groq has not generated families for your current resume yet. Wait for the worker or choose Customize families to enter your own.</p>{% endif %}
+<p class="sub">To edit, select Customize families. Add or remove titles below, or remove a family. Blank rows let you add a family, up to seven. Save with the existing Save changes button.</p>
+{% for index in range(7) %}{% set family=role_profile.families[index] if role_profile and index < role_profile.families|length else none %}
+<details class="spaced" {% if family and index==0 %}open{% endif %}>
+<summary><strong>{{ family.family if family else 'Add a family' }}</strong>{% if family %} <span class="co">&middot; {{ family.aliases|length }} titles</span>{% endif %}</summary>
+{% if family %}<div class="chips spaced">{% for title in family.aliases %}<span class="tag">{{ title }}</span>{% endfor %}</div><p class="sub">{{ family.reason }}{% if family.resume_line_ids %} Resume lines: {{ family.resume_line_ids|join(', ') }}.{% endif %}</p>{% endif %}
+<div class="prefs-grid"><label class="field">Family name<span class="inputbox"><input name="family_name_{{ index }}" maxlength="120" value="{{ family.family if family else '' }}" placeholder="e.g. Backend Development"></span></label>
+<label class="field">Job titles<textarea name="family_titles_{{ index }}" maxlength="2500" rows="3" placeholder="One title per line, or separate with commas">{{ family.aliases|join('\n') if family else '' }}</textarea><small>Equivalent titles share one family, for example Software Engineer and Software Developer.</small></label></div>
+{% if family %}<label class="chk"><input type="checkbox" name="family_remove_{{ index }}">Remove this family when saving customizations</label>{% endif %}
+</details>{% endfor %}
+<p class="sub spaced">Custom families stay selected until you change them. Review them after a resume update. Choose Use Groq suggestions and save to restore automatic suggestions. Existing scores are marked for rescoring after a change.</p>
+</section>

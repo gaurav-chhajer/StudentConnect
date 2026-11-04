@@ -1,6 +1,7 @@
 {% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner with context %}{% block title %}Settings · StudentConnect{% endblock %}
 {% block content %}<div class="top2"><div><h1>Settings</h1><p class="sub">Your profile, job preferences, and company choices.</p></div><button class="btn p" type="submit" form="settings-form">{{ 'Save changes' if user else 'Create profile' }}</button></div>
-{{ page_banner('Your preferences','Make your matches work for you','Choose your target companies, job preferences, and digest settings in one place.',url_for('dashboard'),'Back to dashboard',url_for('resume'),'My resume','settings') }}
+{% if setup_pending %}{{ page_banner('Your preferences','Make your matches work for you','Choose your target companies, job preferences, and digest settings in one place.',url_for('dashboard'),'Back to dashboard',url_for('resume'),'My resume','settings') }}{% endif %}
+<nav class="jump" aria-label="Settings sections"><a href="#profile">Profile</a><a href="#companies">Companies</a><a href="#email">Email alerts</a><a href="#preferences">Job preferences</a></nav>
 <form method="post" class="page-form" id="settings-form">{{ csrf() }}
 <section class="card" id="profile"><h2>Profile</h2><div class="fields spaced">
 <label class="field"><span class="inputbox"><input name="name" maxlength="100" value="{{ user.name if user else '' }}" required placeholder=" "><span class="input-label">Full name</span><i aria-hidden="true"></i></span></label>
@@ -37,6 +38,7 @@
 <div class="pf-pills">{% for kind in ['internship','full-time','part-time'] %}<label class="pf-pill"><input type="checkbox" name="employment_types" value="{{ kind }}" {% if kind in preferences.get('employment_types',[]) %}checked{% endif %}><span>{{ kind|title }}</span></label>{% endfor %}</div>
 <small>No types selected means any type. Specific types require structured ATS data.</small></div>
 </div>
+{% include "role_families.html" %}
 <p class="prefs-note">Leave these fields empty to skip their filters. Changing job preferences queues matching and marks old scores stale. Selecting a company queues a check of its current openings. Matching runs when the worker processes your task.</p></section>
 <div class="form-footer"><span class="save-status" id="save-status" role="status" aria-live="polite"><i aria-hidden="true"></i><span>No unsaved changes</span></span><div class="actions"><button class="btn" type="button" id="discard-changes" hidden>Discard</button><button class="btn p">{{ 'Save changes' if user else 'Create profile' }}</button></div></div></form>
 <script src="{{ url_for('static', filename='js/companies.js') }}" nonce="{{ script_nonce }}" defer></script>

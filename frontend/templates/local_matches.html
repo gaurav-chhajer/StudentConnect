@@ -1,19 +1,22 @@
 {% extends 'base.html' %}
-{% from 'macros.html' import pagination,company_heading with context %}
+{% from 'macros.html' import pagination,company_heading,score_ring,co_logo with context %}
 {% block title %}Local similarity · StudentConnect{% endblock %}
 {% block content %}
 <div class="top2"><div><h1>Local similarity</h1><p class="sub">Your eligible jobs, ranked locally by document similarity and skill mentions.</p></div><a class="btn" href="{{ url_for('jobs') }}">View saved fit evaluations</a></div>
 <p class="notice">These are relevance rankings, not verified fit scores or eligibility decisions. They do not trigger fit-score email alerts. Review the full job description before applying.</p>
-{% for item in matches %}
-<section class="card">
-{{ company_heading(item.title,item.company_name,item.location or 'Not specified') }}
-<p><strong>Relevance index: {{ item.rank_score|round(1) }}/100</strong></p>
-<p class="sub">Cosine similarity: {{ item.cosine|round(3) }} · Skill mention overlap: {{ (item.skill_overlap*100)|round(1) }}%</p>
-<p>Skills mentioned in both: {{ item.matched_skills|join(', ') or 'None recognized' }}</p>
-<p>JD skills not mentioned in your resume: {{ item.jd_skills_not_mentioned|join(', ') or 'None recognized' }}</p>
-<p class="sub">A mention does not establish proficiency. Skills not mentioned are unknown, rather than confirmed missing qualifications. The index combines 70% nonnegative cosine similarity and 30% skill overlap; if no JD skills are recognized, it uses cosine similarity alone.</p>
-{% if item.url %}<a class="btn p" href="{{ item.url }}" rel="noopener noreferrer" target="_blank">Read posting and apply</a>{% endif %}
-</section>
-{% else %}<section class="card">No current local rankings yet. Select companies, save your resume, and run the local similarity worker.</section>{% endfor %}
+<div class="list jt-list">{% for item in matches %}{% set idx = item.rank_score|round(1) %}{% set ok = item.matched_skills or [] %}{% set unk = item.jd_skills_not_mentioned or [] %}
+<article class="job-tile {{ '' if item.url else 'no-link' }} tier-{{ 'h' if item.rank_score >= 85 else 'md' if item.rank_score >= 60 else 'lo' }}">
+<div class="jt-head">{{ co_logo(item.company_name) }}<div class="jt-main"><h3 class="jt-title">{% if item.url %}<a class="jt-link" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}<span class="visually-hidden"> (opens the posting in a new tab)</span></a>{% else %}{{ item.title }}{% endif %}</h3>
+<p class="jt-meta"><span class="jt-co">{{ item.company_name }}</span><span class="jt-loc"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"></path></svg>{{ item.location or 'Not specified' }}</span></p></div>
+<div class="jt-score">{{ score_ring(item.rank_score, what='Relevance index') }}<span class="jt-fit" aria-hidden="true">Relevance</span></div></div>
+<div class="jt-skills">
+<div class="jt-row"><span class="jt-lbl">In both</span><ul class="jt-chips">{% for skill in ok[:5] %}<li class="jt-chip ok">{{ skill }}</li>{% else %}<li class="jt-more">None recognized</li>{% endfor %}{% if ok|length > 5 %}<li class="jt-more">+{{ ok|length - 5 }}</li>{% endif %}</ul></div>
+<div class="jt-row"><span class="jt-lbl">Not seen</span><ul class="jt-chips">{% for skill in unk[:4] %}<li class="jt-chip gap">{{ skill }}</li>{% else %}<li class="jt-more">None recognized</li>{% endfor %}{% if unk|length > 4 %}<li class="jt-more">+{{ unk|length - 4 }}</li>{% endif %}</ul></div></div>
+<div class="jt-foot"><details class="jt-why"><summary>How is this calculated?</summary><div class="jt-why-body"><p><strong>Cosine similarity:</strong> {{ item.cosine|round(3) }} · <strong>Skill mention overlap:</strong> {{ (item.skill_overlap*100)|round(1) }}%</p>
+{% if ok|length > 5 %}<p><strong>All skills mentioned in both:</strong> {{ ok|join(', ') }}</p>{% endif %}{% if unk|length > 4 %}<p><strong>All JD skills not mentioned:</strong> {{ unk|join(', ') }}</p>{% endif %}
+<p class="sub">A mention does not establish proficiency. Skills not mentioned are unknown, rather than confirmed missing qualifications. The index combines 70% nonnegative cosine similarity and 30% skill overlap; if no JD skills are recognized, it uses cosine similarity alone.</p></div></details>
+{% if item.url %}<span class="jt-cta" aria-hidden="true">Read posting<svg class="ic" viewBox="0 0 24 24" focusable="false"><path d="M7 17L17 7M9 7h8v8"></path></svg></span>{% endif %}</div>
+</article>
+{% else %}<div class="empty-tile"><strong>No current local rankings yet.</strong><p class="sub">Select companies, save your resume, and run the local similarity worker.</p><a class="btn" href="{{ url_for('settings_page') }}#companies">Select companies</a></div>{% endfor %}</div>
 {{ pagination('local_matches') }}
 {% endblock %}

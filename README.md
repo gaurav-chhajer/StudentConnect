@@ -243,6 +243,11 @@ them. Dashboards and email selection exclude stale scores.
    this is not automated employer tracking. Weekly charts cover current scores,
    not a complete immutable history of scoring runs.
 
+Dashboard, Job matches, Workflow monitor, and Analytics remember applied filters
+separately in the signed-in browser session when navigating away and back. Explicit
+URL filters replace that page's saved selection; submit default values to reset it.
+Pagination and activity cursors are not retained. Signing out clears the selections.
+
 Email preferences, including frequency, local send time/timezone, score threshold,
 and inclusion of gaps, are stored. Candidate selection honors company choices,
 thresholds, and Off; rendering honors the gap preference. The dashboard is only a candidate preview and does not mark
@@ -1485,3 +1490,5 @@ The hosted-data local similarity worker continues to score persisted eligible jo
 Synechron careers uses the verified Workday tenant `synechron`, site `SynechronCareers`. Apply additive migration `020_synechron_career_source.sql` after a database backup, then register `synechron` through the existing authenticated worker `sync-catalog` endpoint or company catalog seed command. It uses the existing paginated Workday listing and full-description adapter. Listing and detail access were verified; source changes and network failures can still affect coverage.
 
 Location searches and pre-scoring preferences share offline worldwide country/city matching through pinned `geonamescache==3.0.2`. The GeoNames cities500 dataset covers populated places with at least 500 residents plus its documented exceptions; it is not a complete list of every settlement. Country names, ISO codes and city aliases are normalized, including accents. Country inference from a city-only label requires an unambiguous country; explicit country context resolves duplicate names. Semicolon-separated offices keep independent context. Remote-only labels never imply a country. Unknown posting locations retain the existing permissive pre-scoring behavior, while explicit geographic results filters exclude unknowns. US state names and the existing Indian state aliases supplement the worldwide city dataset; worldwide administrative-region matching is not provided. The compact index is loaded once per process and retained in memory; the first geographic lookup has a cold-start cost. Local measurement was about five seconds and 388 MiB total process working memory for roughly 235,000 city records; verify hosted memory capacity before deployment. No job or resume data is sent to geocoding services. GeoNames data attribution: https://www.geonames.org/ (CC BY 4.0); geonamescache code is MIT licensed.
+
+Settings > Job preferences > Matching families & titles displays the effective role families and aliases. Choose Customize families to save one to seven families, with one to twenty titles each, through the existing CSRF-protected Settings form. Overrides are private user preferences; no migration is required. They remain selected across resume changes until edited or Use Groq suggestions is saved. Review manual selections after changing a resume. Saving matching preferences marks existing fit scores stale and queues matching through the existing settings flow. Equivalent title aliases must remain in one family, and existing company, seniority and location filters still apply.

@@ -67,6 +67,16 @@ def create_app(database_path=None, upload_dir=None):
     def render(page, data, status=200):
         return render_template(page + ".html", script_nonce=getattr(g, "script_nonce", None), **data), status
 
+    def filter_arguments(fields):
+        """Restore applied filters; explicit selections replace the saved set."""
+        saved = session.get('page_filters', {}).get(request.endpoint, {})
+        explicit = any(field in request.args for field in fields)
+        arguments = {} if explicit else dict(saved)
+        arguments.update(request.args.to_dict())
+        if explicit:
+            g.page_filters = {field: arguments[field].strip() for field in fields if field in arguments}
+        return arguments
+
     def csrf_token():
         if "csrf" not in session:
             session["csrf"] = secrets.token_urlsafe(32)
@@ -108,6 +118,10 @@ def create_app(database_path=None, upload_dir=None):
 
     @application.after_request
     def protect_response(response):
+        if response.status_code == 200 and g.get('user') and hasattr(g, 'page_filters'):
+            saved = dict(session.get('page_filters', {}))
+            saved[request.endpoint] = g.page_filters
+            session['page_filters'] = saved
         if not application.testing and getattr(g, "user", None) and response.status_code < 400:
             automatic_matching.ensure_started(database, notify=request.method == "POST")
         response.headers["Cache-Control"] = "no-store"
@@ -162,7 +176,8 @@ def create_app(database_path=None, upload_dir=None):
     def dashboard():
         data = context()
         try:
-            data.update(store.filters(request.args))
+            args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days'))
+            data.update(store.filters(args))
             history_before = (store.integer(request.args.get("history_before", "0"), 0, 9223372036854775807)
                               if getattr(g, "account", None) and g.account["is_admin"] else 0)
         except ValueError as error:
@@ -205,7 +220,8 @@ def create_app(database_path=None, upload_dir=None):
     def jobs():
         data = context()
         try:
-            data.update(store.filters(request.args))
+            args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days'))
+            data.update(store.filters(args))
             selected_id = store.integer(request.args.get("job", "0"), 0, 2147483647)
         except ValueError as error:
             data["message"] = str(error)
@@ -279,6 +295,8 @@ def create_app(database_path=None, upload_dir=None):
         data["subscriptions"] = {row[0] for row in conn.execute("SELECT company_id FROM company_subscriptions WHERE user_id=?", (data["user"]["id"],))} if data["user"] else set()
         data["preferences"] = json.loads(data["user"]["preferences_json"] or "{}") if data["user"] else {}
         data["location_suggestions"] = store.location_suggestions(conn) if conn else []
+        from backend import role_titles
+        data['role_profile']=role_titles.current(conn,data['user']) if conn and data['user'] else None
         if request.method == "GET":
             if not conn:
                 data["message"] = "Run the documented migration command to initialize the database first."
@@ -318,6 +336,23 @@ def create_app(database_path=None, upload_dir=None):
             if any(value not in ("internship", "full-time", "part-time") for value in types):
                 raise ValueError("Invalid employment preference")
             preferences["employment_types"] = types
+            if request.form.get('family_mode')=='custom':
+                families=[]
+                for index in range(role_titles.MAX_FAMILIES):
+                    if request.form.get('family_remove_'+str(index))=='on':
+                        continue
+                    family=request.form.get('family_name_'+str(index),'').strip()
+                    raw=request.form.get('family_titles_'+str(index),'')
+                    if len(raw)>2500:
+                        raise ValueError('Family titles are too long')
+                    aliases=[title.strip() for title in re.split(r'[,\n]',raw) if title.strip()]
+                    if family or aliases:
+                        families.append(dict(family=family,aliases=aliases))
+                preferences['role_families']=role_titles.validate_custom(families)
+            elif request.form.get('family_mode') not in (None,'suggested'):
+                raise ValueError('Invalid family mode')
+            elif request.form.get('family_mode') is None and 'role_families' in data['preferences']:
+                preferences['role_families']=data['preferences']['role_families']
             matching_changed = preferences != data["preferences"] or company_ids != data["subscriptions"]
             with conn:
                 user_id = data["user"]["id"]
@@ -429,12 +464,13 @@ def create_app(database_path=None, upload_dir=None):
             return 'Administrator access required.',403
         data=context()
         try:
-            workflow_id=store.integer(request.args.get('workflow','0'),0,9223372036854775807)
+            args = filter_arguments(('workflow', 'stage', 'severity', 'sort'))
+            workflow_id=store.integer(args.get('workflow','0'),0,9223372036854775807)
             page=store.integer(request.args.get('page','1'),1,1000000)
             before=store.integer(request.args.get('before','0'),0,9223372036854775807)
-            stage=request.args.get('stage','all')
-            severity=request.args.get('severity','all')
-            sort=request.args.get('sort','scored')
+            stage=args.get('stage','all')
+            severity=args.get('severity','all')
+            sort=args.get('sort','scored')
             if sort not in ('scored','newest','oldest','fit','relevance'):
                 raise ValueError('Invalid monitor sort')
             if stage not in ('all','scored','prepared','applied','review') or severity not in ('all','info','warning','error'):
@@ -452,7 +488,8 @@ def create_app(database_path=None, upload_dir=None):
     def analytics():
         data = context()
         try:
-            weeks = store.integer(request.args.get("weeks", "8"), 1, 26)
+            args = filter_arguments(('weeks',))
+            weeks = store.integer(args.get("weeks", "8"), 1, 26)
         except ValueError as error:
             return render("analytics", dict(data, message=str(error)), 400)
         populate(data)

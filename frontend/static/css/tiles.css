@@ -1,0 +1,141 @@
+/* Job tiles, score ring, filter bar and match detail panel.
+   Loaded last (after preferences.css) so it can refine the shared card/button skin. */
+
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+.visually-hidden{position:absolute!important;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* Big containers should not lift on hover: only things you can click should move. */
+.app .matched-card:hover,.app .detail-card:hover{transform:none;box-shadow:0 10px 30px rgba(14,21,48,.06)}
+
+/* ---------- Company logo tile: one stable colour per company ---------- */
+.app .logo-tile.lt-0{background:#2E4BE8}.app .logo-tile.lt-1{background:#0A6B4B}.app .logo-tile.lt-2{background:#B3401F}
+.app .logo-tile.lt-3{background:#6D3FC4}.app .logo-tile.lt-4{background:#0E7490}.app .logo-tile.lt-5{background:#9A3C6B}
+
+/* ---------- Score ring ---------- */
+@keyframes ringfill{from{stroke-dasharray:0 100}}
+.ring-score{position:relative;display:inline-grid;place-items:center;width:56px;height:56px;flex:none;color:var(--acc)}
+.ring-score.h{color:var(--ok)}.ring-score.md{color:var(--acc)}.ring-score.lo{color:#C26A00}
+.ring-score svg{position:absolute;inset:0;width:100%;height:100%}
+.ring-score circle{fill:none;stroke-width:3.4}
+.ring-score .rs-bg{stroke:var(--line)}
+.ring-score .rs-fg{stroke:currentColor;stroke-linecap:round;animation:ringfill .9s cubic-bezier(.2,.8,.2,1) .15s backwards}
+.ring-score b{position:relative;font:700 16px/1 'Bricolage Grotesque',sans-serif;color:var(--ink);letter-spacing:-.02em}
+.ring-score b small{font-size:10px;font-weight:600;margin-left:1px;color:var(--mute)}
+.ring-score.big{width:76px;height:76px}.ring-score.big b{font-size:24px}.ring-score.big b small{font-size:12px}
+.jt-fit{font-size:11px;font-weight:700;letter-spacing:.02em;white-space:nowrap;color:var(--mute)}
+.tier-h .jt-fit,.jd-score .ring-score.h~.jt-fit{color:var(--ok)}
+.tier-md .jt-fit,.jd-score .ring-score.md~.jt-fit{color:var(--acc)}
+.tier-lo .jt-fit,.jd-score .ring-score.lo~.jt-fit{color:var(--warn)}
+
+/* ---------- Job tile (the whole tile is the click target) ---------- */
+.jt-list{gap:12px}
+.job-tile{position:relative;container-type:inline-size;display:grid;gap:12px;padding:16px 18px;background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(14,21,48,.04);cursor:pointer;transition:border-color .2s,box-shadow .2s,transform .2s,background-color .2s}
+.job-tile:hover{border-color:#AEBBF5;box-shadow:0 12px 28px rgba(14,21,48,.1);transform:translateY(-2px)}
+.job-tile:active{transform:none}
+.job-tile.is-selected{border-color:var(--acc);background:var(--accbg);box-shadow:inset 4px 0 0 var(--acc),0 6px 18px rgba(46,75,232,.12)}
+.app .jt-list>.job-tile{animation:rise .45s ease both;animation-fill-mode:backwards}
+.app .jt-list>.job-tile:nth-child(2){animation-delay:.05s}.app .jt-list>.job-tile:nth-child(3){animation-delay:.1s}.app .jt-list>.job-tile:nth-child(4){animation-delay:.15s}.app .jt-list>.job-tile:nth-child(5){animation-delay:.2s}.app .jt-list>.job-tile:nth-child(n+6){animation-delay:.25s}
+
+.jt-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center}
+.jt-head .logo-tile{grid-row:auto;width:44px;height:44px;font-size:19px}
+.jt-main{min-width:0}
+.jt-title{font-size:16px;line-height:1.3;margin:0}
+.app .main .job-tile a.jt-link{color:var(--ink);text-decoration:none;overflow-wrap:anywhere}
+.jt-link::after{content:"";position:absolute;inset:0;z-index:1}
+.app .main .job-tile a.jt-link:hover{color:var(--acc)}
+.job-tile a.jt-link:focus-visible{outline:0}
+.jt-link:focus-visible::after{outline:3px solid var(--pop);outline-offset:3px;border-radius:18px}
+.jt-meta{display:flex;flex-wrap:wrap;gap:2px 14px;align-items:center;margin:4px 0 0;font-size:13px;line-height:1.4;color:var(--mute)}
+.jt-co{font-weight:600;color:var(--ink)}
+.jt-loc,.jt-when{display:inline-flex;align-items:center;gap:5px;min-width:0}
+.jt-loc em{font-style:normal;font-weight:600}
+.jt-meta .ic{width:14px;height:14px;stroke-width:2;opacity:.8}
+.jt-score{display:grid;justify-items:center;gap:3px}
+
+.jt-skills{display:grid;gap:8px}
+.jt-row{display:flex;gap:10px;align-items:baseline}
+.jt-lbl{flex:0 0 58px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.jt-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none;min-width:0}
+.jt-chip{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;line-height:1.6;overflow-wrap:anywhere}
+.jt-chip.ok{background:var(--okbg);color:var(--ok)}
+.jt-chip.gap{background:var(--warnbg);color:var(--warn);box-shadow:inset 0 0 0 1px rgba(124,70,0,.35)}
+.jt-more{padding:2px 4px;font-size:12px;font-weight:700;color:var(--mute)}
+
+.jt-foot{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding-top:10px;border-top:1px solid var(--line)}
+.jt-why{flex:1 1 auto;min-width:0}
+.jt-why summary{position:relative;z-index:2;display:inline-flex;align-items:center;gap:6px;width:fit-content;min-height:32px;font-size:13px;font-weight:600;color:var(--acc);list-style:none;cursor:pointer}
+.jt-why summary::-webkit-details-marker{display:none}
+.jt-why summary::after{content:"";width:7px;height:7px;border:solid currentColor;border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);transition:transform .2s}
+.jt-why[open] summary::after{transform:translateY(1px) rotate(-135deg)}
+.jt-why-body{position:relative;z-index:2;cursor:auto;padding:4px 0 2px;font-size:13px;line-height:1.55;color:var(--ink)}
+.jt-why-body p{margin:0 0 8px}
+.jt-cta{flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 8px 7px 14px;border-radius:99px;background:var(--accbg);color:var(--acc);font-size:13px;font-weight:700;white-space:nowrap;transition:background-color .2s,color .2s}
+.jt-cta .ic{width:16px;height:16px;stroke-width:2.2;transition:transform .2s}
+.job-tile:hover .jt-cta,.job-tile:focus-within .jt-cta{background:var(--acc);color:#fff}
+.job-tile:hover .jt-cta .ic{transform:translateX(3px)}
+.job-tile.is-selected .jt-cta{background:var(--acc);color:#fff}
+
+@container (max-width:430px){
+ .jt-head{gap:10px}.jt-head .logo-tile{width:38px;height:38px;font-size:17px}
+ .ring-score{width:48px;height:48px}.ring-score b{font-size:14px}
+ .jt-fit{display:none}
+ .jt-row{flex-direction:column;gap:4px}
+}
+
+.list-col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.list-head{display:flex;justify-content:space-between;gap:8px;padding:0 4px;font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mute)}
+.list-col .pagination{margin-top:4px;justify-content:space-between}
+.empty-tile{display:grid;justify-items:center;gap:8px;padding:32px 20px;text-align:center;border:1px dashed #B9C1DD;border-radius:16px;background:rgba(255,255,255,.6)}
+.empty-tile p{margin:0;max-width:42ch}
+
+/* ---------- Filters: search first, the rest on request ---------- */
+.filters.flt{display:block}
+.flt-main{display:grid;grid-template-columns:minmax(0,1fr) 190px auto;gap:12px;align-items:end}
+.filters.flt .flt-main>label{min-width:0}
+.app .flt .flt-go{min-height:52px;padding:0 24px}
+.flt-more{margin-top:8px}
+.flt-more summary{display:inline-flex;align-items:center;gap:8px;min-height:44px;font-weight:600;color:var(--acc);list-style:none}
+.flt-more summary::-webkit-details-marker{display:none}
+.flt-more summary::after{content:"";width:7px;height:7px;border:solid currentColor;border-width:0 2px 2px 0;transform:translateY(-2px) rotate(45deg);transition:transform .2s}
+.flt-more[open] summary::after{transform:translateY(1px) rotate(-135deg)}
+.flt-count{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--acc);color:#fff;font-size:12px;font-weight:700}
+.flt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;align-items:end;padding-top:4px}
+.filters.flt .flt-grid>label{min-width:0}
+.flt-clear{display:inline-block;margin-top:4px;font-weight:600}
+.flt-note{margin:-8px 4px 0;font-size:12px}
+.matched-card .filters.flt{padding:0;border:0;background:none;box-shadow:none;margin-bottom:16px}
+.row-matches{align-items:start}
+@media (max-width:640px){.flt-main{grid-template-columns:1fr 1fr}.flt-search,.flt-sort,.flt-go{grid-column:1/-1}}
+
+/* ---------- Match detail ---------- */
+.detail-card{scroll-margin-top:16px}
+.detail-card:focus{outline:0}
+@media (min-width:1001px){.detail-card{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto;scrollbar-width:thin}}
+.jd-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:14px;align-items:center}
+.jd-head .logo-tile{grid-row:auto;width:48px;height:48px;font-size:21px}
+.jd-titles h2{font-size:20px;line-height:1.25;overflow-wrap:anywhere}
+.jd-score{display:grid;justify-items:center;gap:4px}
+.detail-card .jd-actions{margin-top:20px}.jd-actions form{margin:0}
+.jd-note{margin:12px 0 0;font-size:12px}
+.jd-sec{margin-top:24px}.jd-sec h3{margin-bottom:8px}.jd-sec p{margin:0 0 8px}
+.jd-sec-hd{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.jd-skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px}
+.jd-skills .chips{margin:0}
+.jd-alert{padding:14px 16px;border-radius:12px;background:var(--warnbg);color:var(--warn)}
+.cb-list{display:grid;gap:16px;margin:16px 0 0;padding:0;list-style:none}
+.cb-top{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;font-weight:600}
+.cb-val small{font-weight:500;color:var(--mute)}
+.cb progress{display:block;width:100%;height:8px;border:0;border-radius:99px;overflow:hidden;appearance:none;-webkit-appearance:none;background:var(--bg)}
+.cb progress::-webkit-progress-bar{background:#E6E9F5;border-radius:99px}
+.cb progress::-webkit-progress-value{background:var(--acc);border-radius:99px}
+.cb progress::-moz-progress-bar{background:var(--acc);border-radius:99px}
+.cb-why{margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--mute)}
+.jd-fold{margin-top:16px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.6)}
+.jd-fold summary{font-weight:600;min-height:32px;display:flex;align-items:center}
+.jd-empty{padding:32px 8px;text-align:center}
+
+@media (max-width:480px){
+ .job-tile{padding:14px}
+ .jd-head{grid-template-columns:auto minmax(0,1fr)}.jd-score{grid-column:1/-1;grid-auto-flow:column;justify-content:start;align-items:center;gap:10px}
+ .jd-actions .btn,.jd-actions form{width:100%}
+}

@@ -32,7 +32,7 @@
 {% endif %}
 {% endmacro %}
 {% macro icon(name) %}
-{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4', 'applications':'M5 12l4 4 10-10', 'email':'M3 6h18v12H3zM3 7l9 7 9-7', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M12 8v8M8 12h8M4 4h16v16H4z'} %}
+{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3M4 13h16', 'local_matches':'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 3v3M12 18v3M3 12h3M18 12h3', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5', 'applications':'M9 11l2 2 4-4M6 4h12v17H6zM9 4V3h6v1', 'email':'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6zM10 19a2 2 0 0 0 4 0', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M6 15v4', 'workflow':'M3 12h4l3-8 4 16 3-8h4', 'invite':'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 8v6M22 11h-6'} %}
 <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="{{ paths[name] }}"></path></svg>
 {% endmacro %}
 {% macro score_trend(items) %}
@@ -47,15 +47,70 @@
 {% endmacro %}
 {% macro badge(score) %}<span class="m {{ 'h' if score >= 85 else 'md' if score >= 60 else 'lo' }}">{{ score }}%</span>{% endmacro %}
 {% macro filter_form(action) %}
-<form class="filters" method="get" action="{{ url_for(action) }}">
-<label><span class="inputbox has-hint"><input type="search" name="q" maxlength="200" value="{{ search }}" placeholder="Role, company, skill"><span class="input-label">Search</span><i aria-hidden="true"></i></span></label>
+{% set ns = namespace(n=0) %}
+{% if company and company|string != '0' %}{% set ns.n = ns.n + 1 %}{% endif %}
+{% if min_score and min_score|string not in ['0',''] %}{% set ns.n = ns.n + 1 %}{% endif %}
+{% if location %}{% set ns.n = ns.n + 1 %}{% endif %}
+{% if job_type %}{% set ns.n = ns.n + 1 %}{% endif %}
+{% if days and days|string != '0' %}{% set ns.n = ns.n + 1 %}{% endif %}
+{% set presets = [50,60,70,80,90] %}
+<form class="filters flt" method="get" action="{{ url_for(action) }}" role="search" aria-label="Filter job matches">
+<div class="flt-main">
+<label class="flt-search"><span class="inputbox has-hint"><input type="search" name="q" maxlength="200" value="{{ search }}" placeholder="Role, company, skill"><span class="input-label">Search</span><i aria-hidden="true"></i></span></label>
+<label class="flt-sort">Sort by<select name="sort"><option value="best" {% if sort == 'best' %}selected{% endif %}>Best match</option><option value="recent" {% if sort == 'recent' %}selected{% endif %}>Recently discovered</option></select></label>
+<button class="btn p flt-go">Search</button></div>
+<details class="flt-more" {% if ns.n %}open{% endif %}><summary><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>More filters{% if ns.n %}<span class="flt-count" aria-label="{{ ns.n }} active">{{ ns.n }}</span>{% endif %}</summary>
+<div class="flt-grid">
 <label>Company<select name="company"><option value="0">All matched companies</option>{% for item in companies %}<option value="{{ item.id }}" {% if company == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
-<label><span class="inputbox"><input type="number" name="min_score" min="0" max="100" value="{{ min_score }}" placeholder=" "><span class="input-label">Minimum match</span><i aria-hidden="true"></i></span></label>
+<label>Minimum match<select name="min_score"><option value="0">Any score</option>{% if min_score and min_score|string not in ['0',''] and (min_score|int) not in presets %}<option value="{{ min_score }}" selected>{{ min_score }}% or higher</option>{% endif %}{% for value in presets %}<option value="{{ value }}" {% if min_score and (min_score|int) == value %}selected{% endif %}>{{ value }}% or higher</option>{% endfor %}</select></label>
 <label><span class="inputbox has-hint"><input name="location" maxlength="100" value="{{ location }}" placeholder="Any location"><span class="input-label">Location</span><i aria-hidden="true"></i></span></label>
 <label>Job type<select name="job_type"><option value="">All types</option>{% for value in ['internship','full-time','part-time'] %}<option value="{{ value }}" {% if job_type == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label>
 <label>Discovered<select name="days">{% for value,label in [(0,'Any time'),(1,'Last 24 hours'),(7,'Last 7 days'),(30,'Last 30 days')] %}<option value="{{ value }}" {% if days == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-<label>Sort<select name="sort"><option value="best" {% if sort == 'best' %}selected{% endif %}>Best match</option><option value="recent" {% if sort == 'recent' %}selected{% endif %}>Recently discovered</option></select></label>
-<button class="btn p">Filter</button></form>
+</div></details>
+{% if ns.n or search %}<a class="flt-clear" href="{{ url_for(action) }}">Clear all filters</a>{% endif %}
+</form>
+{% endmacro %}
+{% macro co_logo(name) %}{% set n = name or '?' %}<span class="logo-tile lt-{{ ('abcdefghijklmnopqrstuvwxyz0123456789'.find(n[0]|lower) + n|length) % 6 }}" aria-hidden="true">{{ n[0]|upper }}</span>{% endmacro %}
+{% macro short_date(iso) %}{% if iso and iso|length >= 10 %}{% set months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}{{ months[(iso[5:7]|int) - 1] }} {{ iso[8:10]|int }}{% else %}Date unknown{% endif %}{% endmacro %}
+{% macro fit_label(score) %}{{ 'Strong fit' if score >= 85 else 'Good fit' if score >= 60 else 'Partial fit' }}{% endmacro %}
+{% macro score_ring(score, big=false, small=false, what='Match score') %}
+{% set s = [[(score or 0)|int, 0]|max, 100]|min %}
+{% set tier = 'h' if s >= 85 else 'md' if s >= 60 else 'lo' %}
+<span class="ring-score {{ tier }}{{ ' big' if big else '' }}{{ ' sm' if small else '' }}" role="img" aria-label="{{ what }} {{ s }} percent, {{ fit_label(s)|lower }}">
+<svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="rs-bg" cx="18" cy="18" r="15.9155" pathLength="100"></circle><circle class="rs-fg" cx="18" cy="18" r="15.9155" pathLength="100" stroke-dasharray="{{ s }} 100" transform="rotate(-90 18 18)"></circle></svg>
+<b aria-hidden="true">{{ s }}<small>%</small></b></span>
+{% endmacro %}
+{% macro job_tile(item, href, selected=false) %}
+{# Whole tile is clickable through one stretched link on the title (valid HTML, one tab stop).
+   Interactive extras inside (the "Why this score?" disclosure) sit above the overlay. #}
+{% set s = [[(item.fit_score or 0)|int, 0]|max, 100]|min %}
+{% set tier = 'h' if s >= 85 else 'md' if s >= 60 else 'lo' %}
+{% set co_name = item.company_name or '?' %}
+{% set places = (item.location or '').split(';')|map('trim')|reject('equalto','')|list %}
+{% set matched = item.matched_skills or [] %}
+{% set missing = item.missing_requirements or [] %}
+{% set shown_ok = 4 %}{% set shown_gap = 3 %}
+<article class="job-tile tier-{{ tier }}{{ ' is-selected' if selected else '' }}">
+<div class="jt-head">
+{{ co_logo(co_name) }}
+<div class="jt-main">
+<h3 class="jt-title"><a class="jt-link" href="{{ href }}" {% if selected %}aria-current="true"{% endif %}>{{ item.title }}</a></h3>
+<p class="jt-meta"><span class="jt-co">{{ co_name }}</span>
+<span class="jt-loc" {% if places|length > 2 %}title="{{ places|join(' · ') }}"{% endif %}><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"></path></svg><span class="visually-hidden">Location: </span>{% if places %}{{ places[:2]|join(' · ') }}{% if places|length > 2 %} <em>+{{ places|length - 2 }} more</em>{% endif %}{% else %}Not specified{% endif %}</span>
+{% if item.first_seen_at %}<span class="jt-when"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"></path></svg><span class="visually-hidden">First discovered </span><time datetime="{{ item.first_seen_at }}" title="First discovered {{ item.first_seen_at[:16]|replace('T',' ') }} UTC">{{ short_date(item.first_seen_at) }}</time></span>{% endif %}</p>
+</div>
+<div class="jt-score">{{ score_ring(s) }}<span class="jt-fit" aria-hidden="true">{{ fit_label(s) }}</span></div>
+</div>
+{% if matched or missing %}<div class="jt-skills">
+{% if matched %}<div class="jt-row"><span class="jt-lbl">Matches</span><ul class="jt-chips">{% for skill in matched[:shown_ok] %}<li class="jt-chip ok">{{ skill }}</li>{% endfor %}{% if matched|length > shown_ok %}<li class="jt-more">+{{ matched|length - shown_ok }}</li>{% endif %}</ul></div>{% endif %}
+{% if missing %}<div class="jt-row"><span class="jt-lbl">Gaps</span><ul class="jt-chips">{% for skill in missing[:shown_gap] %}<li class="jt-chip gap">{{ skill }}</li>{% endfor %}{% if missing|length > shown_gap %}<li class="jt-more">+{{ missing|length - shown_gap }}</li>{% endif %}</ul></div>{% endif %}
+</div>{% endif %}
+<div class="jt-foot">
+{% if item.reasoning %}<details class="jt-why"><summary>Why this score?</summary><div class="jt-why-body"><p>{{ item.reasoning }}</p>
+{% if matched|length > shown_ok or missing|length > shown_gap %}{% if matched %}<p><strong>All matched skills:</strong> {{ matched|join(', ') }}</p>{% endif %}{% if missing %}<p><strong>All gaps:</strong> {{ missing|join(', ') }}</p>{% endif %}{% endif %}</div></details>{% else %}<span></span>{% endif %}
+<span class="jt-cta" aria-hidden="true">View match<svg class="ic" viewBox="0 0 24 24" focusable="false"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></span>
+</div>
+</article>
 {% endmacro %}
 {% macro pagination(action) %}<div class="pagination">
 {% if page > 1 %}<a class="btn" href="{{ url_for(action,page=page-1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}">Previous</a>{% endif %}

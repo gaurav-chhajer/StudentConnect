@@ -1,0 +1,68 @@
+/* Sidebar, Applications board, Local similarity, Resume and Settings refinements. Loaded after tiles.css. */
+
+/* ---------- Sidebar ---------- */
+@media (min-width:861px){
+ .app .side{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.2) transparent}
+}
+.app .nav{gap:2px}
+.app .nav .cap{margin-top:18px;padding:0 12px 4px;font-size:11px;letter-spacing:.09em}
+.app .nav .cap:first-child{margin-top:0}
+.app .nav a{font-size:14px}
+.app .nav a .ic{width:19px;height:19px}
+.app .nav a.on{position:relative}
+.app .nav a.on::before{content:"";position:absolute;left:-16px;top:10px;bottom:10px;width:4px;border-radius:0 4px 4px 0;background:var(--pop)}
+.app .side>form .btn{width:100%;background:transparent;border-color:rgba(255,255,255,.2);color:#C9D1EE;box-shadow:none}
+.app .side>form .btn:is(:hover,:focus-visible){background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.4);color:#fff;box-shadow:none}
+.app .side .me{margin-top:0}
+@media (min-width:861px){.app .side>form{margin-top:auto}.app .side>form+.me{margin-top:0}}
+@media (max-width:860px){.app .nav a.on::before{display:none}}
+
+/* ---------- Applications ---------- */
+.pipeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:0;padding:0;list-style:none}
+.app .main .pipeline a{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--line);border-top:4px solid var(--st,var(--acc));border-radius:14px;background:rgba(255,255,255,.88);color:var(--ink);text-decoration:none;transition:box-shadow .2s,transform .2s}
+.app .main .pipeline a:hover{transform:translateY(-2px);box-shadow:0 10px 22px rgba(14,21,48,.1)}
+.pipeline b{font:700 26px/1.1 'Bricolage Grotesque',sans-serif}
+.pipeline span{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mute)}
+.pl-step[data-stage=saved]{--st:#8A93B2}.pl-step[data-stage=applied]{--st:var(--acc)}.pl-step[data-stage=interview]{--st:#7C3AED}.pl-step[data-stage=offer]{--st:#0A9B6B}.pl-step[data-stage=rejected]{--st:#C26A00}
+.col{scroll-margin-top:16px}
+.app-card{gap:10px;padding:14px;cursor:default}
+.ac-top{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}
+.app-card .logo-tile{grid-row:auto;width:36px;height:36px;font-size:16px;border-radius:10px}
+.ac-title{margin:0;font:600 14px/1.3 'Bricolage Grotesque',sans-serif;overflow-wrap:anywhere}
+.ac-co{margin:2px 0 0;font-size:12px;color:var(--mute);overflow-wrap:anywhere}
+.ring-score.sm{width:40px;height:40px}.ring-score.sm circle{stroke-width:4}.ring-score.sm b{font-size:12px}.ring-score.sm b small{display:none}
+.ac-notes{margin:0;padding:0 0 0 10px;border-left:3px solid #D3D9EE;font-size:13px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.ac-meta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 10px;font-size:12px;color:var(--mute)}
+.ac-meta a{font-weight:600}
+.ac-edit summary{display:flex;align-items:center;min-height:32px;font-size:13px;font-weight:600;color:var(--acc)}
+.ac-edit form{margin-top:8px}
+.col-empty{margin:0;padding:18px 10px;text-align:center;font-size:13px;color:var(--mute);border:1px dashed #C4CAE2;border-radius:12px}
+
+/* ---------- Tiles with no link (Local similarity without a posting URL) ---------- */
+.job-tile.no-link{cursor:default}
+.job-tile.no-link:hover{transform:none;border-color:var(--line);box-shadow:0 1px 2px rgba(14,21,48,.04)}
+
+/* ---------- Resume ---------- */
+.resume-layout{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:16px;align-items:start}
+.resume-side{display:grid;gap:16px;min-width:0}
+.rs-step{display:grid;grid-template-columns:32px minmax(0,1fr);gap:14px;padding:18px 0;border-top:1px solid var(--line)}
+.page-form>.rs-step:first-child{border-top:0;padding-top:0}
+.rs-num{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--accbg);color:var(--acc);font-weight:700}
+.rs-body{display:grid;gap:10px;min-width:0}
+.rs-body p{margin:0}
+.rs-tips{font-size:13px;color:var(--mute)}.rs-tips summary{color:var(--acc);font-weight:600}.rs-tips ul{margin:8px 0 0;padding-left:18px;line-height:1.6}
+.rs-body .notice{font-size:13px}
+@media (max-width:1000px){.resume-layout{grid-template-columns:1fr}}
+@media (max-width:480px){.rs-step{grid-template-columns:1fr}.rs-num{display:none}}
+
+/* ---------- Settings: jump links + always-visible save bar ---------- */
+.jump{position:sticky;top:0;z-index:6;display:flex;gap:8px;margin:0 -4px;padding:8px 4px;overflow-x:auto;background:linear-gradient(#F2F4FB 75%,rgba(242,244,251,0));scrollbar-width:none}
+.jump::-webkit-scrollbar{display:none}
+.app .main .jump a{flex:none;display:inline-flex;align-items:center;min-height:40px;padding:0 16px;border:1px solid var(--line);border-radius:99px;background:var(--card);color:var(--ink);font-weight:600;text-decoration:none;transition:border-color .2s,color .2s,background-color .2s}
+.app .main .jump a:hover,.app .main .jump a:focus-visible{border-color:var(--acc);color:var(--acc);background:var(--accbg)}
+#profile,#companies,#email,#preferences{scroll-margin-top:68px}
+.form-footer{position:sticky;bottom:12px;z-index:6;margin-top:8px;padding:12px 16px;border:1px solid var(--line);border-radius:16px;background:rgba(255,255,255,.95);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 10px 30px rgba(14,21,48,.14)}
+@media (max-width:860px){.jump{top:0}}
+@media (max-width:860px){.app .side>form .btn{width:auto}}
+
+.kan{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
