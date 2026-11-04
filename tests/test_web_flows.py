@@ -113,6 +113,11 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(path)
                 self.assertEqual(page.status_code, 200)
                 controls = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">[^<]+</span>', page.data)
+                if path == '/jobs':
+                    controls += re.findall(rb'<select\b[^>]*name="min_score"[^>]*>', page.data)
+                    self.assertIn(b'<label>Minimum match<select name="min_score">', page.data)
+                    for score in (0, 50, 60, 70, 80, 90):
+                        self.assertRegex(page.data, ('<option value="' + str(score) + '"').encode())
                 if path == '/settings':
                     controls += re.findall(rb'<input\b[^>]*id="(?:roles-input|stipend-input)"[^>]*>', page.data)
                 names = {match.group(1).decode() for control in controls
@@ -125,11 +130,20 @@ class WebFlowTests(unittest.TestCase):
                     self.assertIn(b'readonly required', page.data)
                     self.assertIn(b'aria-describedby="stipend-help"', page.data)
 
-    def test_filtered_dashboard_uses_readable_match_table(self):
+    def test_filtered_dashboard_uses_job_tiles_and_preserves_filtering(self):
         self.seed_user()
+        self.conn.execute("UPDATE jobs SET location='Pune, India' WHERE id=1")
+        self.conn.execute("UPDATE jobs SET location='New York, USA' WHERE id=2")
+        self.conn.commit()
         response=self.client.get('/?location=India&min_score=0')
         self.assertEqual(response.status_code,200)
-        self.assertIn(b'matched-jobs-table',response.data)
+        self.assertIn(b'id="matched-jobs"',response.data)
+        self.assertIn(b'class="job-tile tier-h"',response.data)
+        self.assertIn(b'Software Engineer 1',response.data)
+        tiles = re.findall(rb'<article class="job-tile.*?</article>', response.data, re.S)
+        self.assertEqual(len(tiles), 1)
+        self.assertNotIn(b'Software Engineer 2', tiles[0])
+        self.assertIn(b'class="jt-link" href="/jobs?job=1#job-detail"', tiles[0])
 
     def test_migration_is_idempotent_and_preserves_existing_records(self):
         self.seed_user()
@@ -213,7 +227,14 @@ class WebFlowTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn(b'href="/static/css/theme.css"', response.data)
                 self.assertIn(b'href="/static/css/wow.css"', response.data)
-                self.assertIn(b'class="hero-banner"', response.data)
+                if route == '/':
+                    self.assertIn(b'class="hero-banner"', response.data)
+                else:
+                    self.assertNotIn(b'class="hero-banner"', response.data)
+                    primary = {'/jobs': b'id="match-list"', '/resume': b'id="resume-editor"',
+                               '/settings': b'id="settings-form"', '/analytics': b'aria-label="Analytics period"',
+                               '/applications': b'aria-label="Pipeline summary"'}
+                    self.assertIn(primary[route], response.data)
                 self.assertIn(b'href="#main">Skip to content', response.data)
                 self.assertIn(b'aria-current="page"', response.data)
                 self.assertIn(b'aria-hidden="true"', response.data)
@@ -260,11 +281,15 @@ class WebFlowTests(unittest.TestCase):
     def test_banner_counts_use_saved_data_and_do_not_include_mockup_claims(self):
         self.seed_user()
         self.assertIn(b"2 current matches for your resume", self.client.get("/").data)
-        self.assertIn(b"0 applications tracked", self.client.get("/applications").data)
+        empty = self.client.get('/applications').data
+        for stage in ('saved', 'applied', 'interview', 'offer', 'rejected'):
+            self.assertIn(('href="#stage-' + stage + '"><b>0</b>').encode(), empty)
         self.assertEqual(self.post("/applications", dict(job_id="1", status="interview")).status_code, 302)
         applications = self.client.get("/applications").data
-        self.assertIn(b"1 application tracked", applications)
-        self.assertIn(b"1 interview and 0 offers recorded", applications)
+        self.assertIn(b'href="#stage-interview"><b>1</b>', applications)
+        for stage in ('saved', 'applied', 'offer', 'rejected'):
+            self.assertIn(('href="#stage-' + stage + '"><b>0</b>').encode(), applications)
+        self.assertIn(b'Software Engineer 1', applications)
         for route in ("/", "/jobs", "/resume", "/settings", "/analytics", "/applications"):
             with self.subTest(route=route):
                 page = self.client.get(route).data
@@ -281,9 +306,28 @@ class WebFlowTests(unittest.TestCase):
             with self.subTest(route=route):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
-                self.assertIn(b'class="hero-banner"', page.data)
+                if route == '/':
+                    self.assertIn(b'class="hero-banner"', page.data)
+                else:
+                    self.assertNotIn(b'class="hero-banner"', page.data)
                 self.assertNotIn(b'class="spark"', page.data)
+                if route == '/jobs':
+                    self.assertIn(b'No current matches for these filters.', page.data)
+                if route == '/applications':
+                    self.assertEqual(page.data.count(b'class="col-empty"'), 5)
         self.assertIn(b"0 current matches for your resume", self.client.get("/").data)
+
+    def test_setup_banner_remains_available_until_profile_is_complete(self):
+        self.seed_user()
+        self.conn.execute("UPDATE users SET resume_text='' WHERE id=1")
+        self.conn.commit()
+        for route in ('/', '/jobs', '/resume', '/settings', '/analytics', '/applications'):
+            with self.subTest(route=route):
+                page = self.client.get(route)
+                self.assertEqual(page.status_code, 200)
+                self.assertIn(b'class="hero-banner"', page.data)
+                self.assertIn(b'Set up your job matches', page.data)
+                self.assertIn(b'href="/resume#resume-editor">Upload resume', page.data)
 
     def test_company_tiles_escape_untrusted_titles_and_company_names(self):
         self.seed_user()
@@ -294,7 +338,7 @@ class WebFlowTests(unittest.TestCase):
         for route in ("/", "/jobs", "/applications"):
             with self.subTest(route=route):
                 page = self.client.get(route).data
-                self.assertIn(b'class="logo-tile" aria-hidden="true">&lt;', page)
+                self.assertRegex(page, rb'<span class="logo-tile lt-[0-5]" aria-hidden="true">&lt;</span>')
                 self.assertIn(b"&lt;script&gt;company&lt;/script&gt;", page)
                 self.assertIn(b"&lt;script&gt;role&lt;/script&gt;", page)
                 self.assertNotIn(b"<script>company", page)
