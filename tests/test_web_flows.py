@@ -253,11 +253,35 @@ class WebFlowTests(unittest.TestCase):
                     self.assertIn(b'src="/static/js/companies.js"', response.data)
                     self.assertIn(b'src="/static/js/preferences.js"', response.data)
                     self.assertIn(b'href="/static/css/preferences.css"', response.data)
+                elif route == "/jobs":
+                    self.assertEqual(response.data.count(b"<script"), 2)
+                    self.assertIn(b'src="/static/js/job-selection.js"', response.data)
+                    self.assertIn("connect-src 'self'", policy)
                 else:
                     self.assertEqual(response.data.count(b"<script"), 1)
                 self.assertNotIn(b"Scheduled sending is not connected yet", response.data)
                 self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(before, self.database.read_bytes())
+
+    def test_job_selection_preserves_links_filters_forms_and_nonce_protection(self):
+        self.seed_user()
+        before = self.database.read_bytes()
+        page = self.client.get('/jobs?job=2&q=Engineer&min_score=70')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(b'id="job-detail" data-job-id="2"', page.data)
+        self.assertIn(b'role="status" aria-live="polite"', page.data)
+        self.assertIn(b'name="job_id" value="2"', page.data)
+        self.assertIn(b'name="csrf_token"', page.data)
+        script = re.search(rb'<script defer nonce="([^"]+)" src="/static/js/job-selection.js"></script>', page.data)
+        self.assertIsNotNone(script)
+        self.assertIn("script-src 'nonce-" + script.group(1).decode() + "'", page.headers['Content-Security-Policy'])
+        self.assertIn("connect-src 'self'", page.headers['Content-Security-Policy'])
+        self.assertIn(b'job=1', page.data)
+        self.assertIn(b'min_score=70', page.data)
+        self.assertEqual(self.client.get('/jobs?job=2147483647').status_code, 404)
+        self.assertEqual(before, self.database.read_bytes())
+        asset = self.client.get('/static/js/job-selection.js')
+        self.assertEqual(asset.status_code, 200)
 
     def test_constellation_is_decorative_and_nonce_protected_on_account_pages(self):
         nonces = []

@@ -135,7 +135,7 @@ def create_app(database_path=None, upload_dir=None):
             response.headers["Content-Security-Policy"] += (
                 f"; script-src 'nonce-{g.script_nonce}'; script-src-attr 'none'"
             )
-        if request.endpoint == 'workflow_monitor_page':
+        if request.endpoint in ('workflow_monitor_page', 'jobs'):
             response.headers['Content-Security-Policy'] += "; connect-src 'self'"
         return response
 

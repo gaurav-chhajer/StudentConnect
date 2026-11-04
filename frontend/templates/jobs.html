@@ -1,4 +1,5 @@
 {% extends 'base.html' %}{% from 'macros.html' import csrf,badge,filter_form,pagination,page_banner,company_heading,job_tile,score_ring,fit_label,co_logo with context %}
+{% block extra_head %}<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/job-selection.js') }}"></script>{% endblock %}
 {% block title %}Job matches · StudentConnect{% endblock %}{% block content %}
 <div class="top2"><div><h1>Job matches</h1><p class="sub">Your saved matches, ranked by resume fit. Select a job to review the evidence before applying.</p></div><div class="actions"><a class="btn" href="{{ url_for('settings_page') }}#companies">Choose companies</a><a class="btn p" href="#save-search">Save search</a></div></div>
 {% if user %}
@@ -9,10 +10,11 @@
 <label class="field"><span class="inputbox"><input name="name" maxlength="80" required placeholder=" "><span class="input-label">Search name</span><i aria-hidden="true"></i></span></label>
 {% for name,value in [('q',search),('company',company),('min_score',min_score),('location',location),('job_type',job_type),('days',days),('sort',sort)] %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}<button class="btn p">Save search</button></form>
 <div class="chips">{% for item in saved_searches %}<a class="btn" href="{{ item.link }}">{{ item.name }}</a>{% endfor %}</div></details>
+<p id="job-selection-status" class="sub" role="status" aria-live="polite"></p>
 <div class="split" id="match-list"><div class="list-col"><div class="list-head"><span>{{ 'Recently discovered' if sort == 'recent' else 'Best match first' }}</span><span>Page {{ page }} of {{ pages }}</span></div>
 <div class="list jt-list">{% for item in matches %}{% set is_sel = selected and selected.job_id == item.job_id %}{{ job_tile(item, url_for('jobs',job=item.job_id,page=page,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort,_anchor='job-detail'), is_sel) }}
 {% else %}<div class="empty-tile"><strong>No current matches for these filters.</strong><p class="sub">Widen your filters, or save your resume and run the scoring command to populate matches.</p><a class="btn" href="{{ url_for('jobs') }}">Clear filters</a></div>{% endfor %}</div>{{ pagination('jobs') }}</div>
-<div class="card detail-card" id="job-detail" tabindex="-1" aria-label="Selected match details">{% if selected %}
+<div class="card detail-card" id="job-detail" data-job-id="{{ selected.job_id if selected else '' }}" tabindex="-1" aria-label="Selected match details">{% if selected %}
 <header class="jd-head">{{ co_logo(selected.company_name) }}<div class="jd-titles"><h2>{{ selected.title }}</h2><p class="sub">{{ selected.company_name }} · {{ selected.location or 'Not specified' }}</p></div><div class="jd-score">{{ score_ring(selected.fit_score, true) }}<span class="jt-fit" aria-hidden="true">{{ fit_label(selected.fit_score or 0) }}</span></div></header>
 <div class="actions jd-actions">{% if selected.url %}<a class="btn p" href="{{ selected.url }}" target="_blank" rel="noopener noreferrer">Apply on company website</a>{% endif %}
 <form method="post" action="{{ url_for('applications') }}">{{ csrf() }}<input type="hidden" name="job_id" value="{{ selected.job_id }}"><input type="hidden" name="status" value="saved"><button class="btn">Save job</button></form>
