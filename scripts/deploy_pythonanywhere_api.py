@@ -75,6 +75,9 @@ def deploy(sha):
                 response = session.request(method, legacy.API + endpoint, timeout=(10, 30),
                                            allow_redirects=False, stream=True, **kwargs)
             except requests.RequestException as error:
+                logger.warning('Hosted API request failed: stage=%s error=%s cause=%s',
+                               stage, type(error).__name__,
+                               type(error.__cause__).__name__ if error.__cause__ is not None else 'unavailable')
                 raise legacy.RemoteDeploymentError(stage, 'network_error') from error
             return response
 
@@ -109,9 +112,18 @@ def deploy(sha):
         upload(legacy.ROOT / 'data/deploy-release.zip', content, 'release_upload')
         upload(legacy.ROOT / 'data/deploy-request.json', request, 'request_upload')
         upload(legacy.ROOT / 'wsgi.py', (ROOT / 'wsgi.py').read_bytes(), 'entry_upload')
-        with call('POST', f'webapps/{legacy.DOMAIN}/reload/', 'web_reload') as response:
-            if response.status_code != 200:
-                raise legacy.RemoteDeploymentError('web_reload', 'http_rejected', response.status_code)
+        reload_acknowledged = True
+        try:
+            with call('POST', f'webapps/{legacy.DOMAIN}/reload/', 'web_reload') as response:
+                if response.status_code != 200:
+                    raise legacy.RemoteDeploymentError('web_reload', 'http_rejected', response.status_code)
+        except legacy.RemoteDeploymentError as error:
+            if error.stage != 'web_reload' or str(error) != 'network_error':
+                raise
+            # A lost response does not establish whether the reload was accepted.
+            # Reconcile through read-only status checks; never resend the mutation.
+            reload_acknowledged = False
+            logger.warning('Reload acknowledgement unavailable; checking this run and commit for activation without resending reload')
         deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             with call('GET', 'files/path' + str(legacy.STATUS), 'confirmation') as response:
@@ -130,7 +142,8 @@ def deploy(sha):
                                 raise legacy.RemoteDeploymentError('confirmation', 'invalid_status')
                             logger.error('Hosted release failed stage=%s error_code=%s; previous release retained', stage, code)
                             return 1
-                        logger.info('Verified release %s activated; web reload completed', sha[:12])
+                        logger.info('Verified release %s activated; reload_acknowledged=%s',
+                                    sha[:12], reload_acknowledged)
                         return 0
                 elif response.status_code != 404:
                     raise legacy.RemoteDeploymentError('confirmation', 'http_rejected', response.status_code)

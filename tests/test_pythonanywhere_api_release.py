@@ -163,6 +163,99 @@ class ApiTests(unittest.TestCase):
         metadata = json.loads(calls[6].kwargs['files']['content'][1])
         self.assertEqual(metadata['archive_sha256'], hashlib.sha256(body).hexdigest())
 
+    def reload_session(self, reload_response, statuses):
+        session = MagicMock()
+        session.__enter__.return_value = session
+        requirements = (api.ROOT / 'requirements.txt').read_bytes()
+        session.request.side_effect = [
+            self.response(content=requirements), self.response(404),
+            self.response(content=b'previous entry'), self.response(201),
+            self.response(201), self.response(201), self.response(201), self.response(200),
+            reload_response, *statuses]
+        return session
+
+    def deploy_mock_session(self, session, clock):
+        with patch.dict(os.environ, {'PYTHONANYWHERE_API_TOKEN': 'synthetic-token'}), \
+                patch.object(api, 'release_archive', return_value=b'archive'), \
+                patch.object(api.requests, 'Session', return_value=session), \
+                patch.object(api.uuid, 'uuid4') as uuid, \
+                patch.object(api.time, 'monotonic', side_effect=clock), \
+                patch.object(api.time, 'sleep'):
+            uuid.return_value.hex = RUN
+            try:
+                return api.deploy(SHA)
+            finally:
+                reloads = [call for call in session.request.call_args_list if '/reload/' in call.args[1]]
+                self.assertEqual(len(reloads), 1)
+                self.assertEqual(reloads[0].args[0], 'POST')
+                self.assertEqual(reloads[0].kwargs['timeout'], (10, 30))
+                self.assertTrue(all(call.args[0] == 'GET' for call in session.request.call_args_list[9:]))
+
+    def test_uncertain_reload_confirms_matching_activation_without_resending(self):
+        status = self.response(content=json.dumps({'run_id': RUN, 'sha': SHA, 'success': True}).encode())
+        for error_type in (api.requests.ReadTimeout, api.requests.ConnectionError):
+            with self.subTest(error=error_type.__name__):
+                error = error_type('private-token-url')
+                error.__cause__ = OSError('private-path')
+                session = self.reload_session(error, [status])
+                with self.assertLogs(api.logger, level='INFO') as logs:
+                    self.assertEqual(self.deploy_mock_session(session, [0, 0]), 0)
+                output = '\n'.join(logs.output)
+                self.assertIn('error=' + error_type.__name__, output)
+                self.assertIn('cause=OSError', output)
+                self.assertIn('reload_acknowledged=False', output)
+                self.assertNotIn('private-token-url', output)
+                self.assertNotIn('private-path', output)
+                self.assertNotIn('synthetic-token', output)
+                self.assertEqual(session.request.call_count, 10)
+
+    def test_uncertain_reload_ignores_old_status_until_current_run_is_confirmed(self):
+        old = self.response(content=json.dumps({'run_id': 'c' * 32, 'sha': SHA, 'success': True}).encode())
+        current = self.response(content=json.dumps({'run_id': RUN, 'sha': SHA, 'success': True}).encode())
+        session = self.reload_session(api.requests.ReadTimeout(), [old, current])
+        self.assertEqual(self.deploy_mock_session(session, [0, 0, 1]), 0)
+        self.assertEqual(session.request.call_count, 11)
+
+    def test_uncertain_reload_missing_or_old_status_expires_without_success(self):
+        for response in (self.response(404), self.response(content=json.dumps(
+                {'run_id': 'c' * 32, 'sha': SHA, 'success': True}).encode())):
+            with self.subTest(status=response.status_code):
+                session = self.reload_session(api.requests.ReadTimeout(), [response])
+                with self.assertRaisesRegex(api.legacy.RemoteDeploymentError, 'deadline_expired') as raised:
+                    self.deploy_mock_session(session, [0, 0, 181])
+                self.assertEqual(raised.exception.stage, 'confirmation')
+                self.assertEqual(session.request.call_count, 10)
+
+    def test_uncertain_reload_cannot_accept_wrong_sha_or_invalid_status(self):
+        for status in ({'run_id': RUN, 'sha': 'd' * 40, 'success': True},
+                       {'run_id': RUN, 'sha': SHA, 'success': 'true'}):
+            with self.subTest(status=status):
+                session = self.reload_session(api.requests.ReadTimeout(), [
+                    self.response(content=json.dumps(status).encode())])
+                with self.assertRaisesRegex(api.legacy.RemoteDeploymentError, 'invalid_status'):
+                    self.deploy_mock_session(session, [0, 0])
+
+    def test_uncertain_reload_reports_confirmed_activation_failure(self):
+        status = {'run_id': RUN, 'sha': SHA, 'success': False,
+                  'stage': 'startup', 'error_code': 'RuntimeError'}
+        session = self.reload_session(api.requests.ReadTimeout(), [
+            self.response(content=json.dumps(status).encode())])
+        self.assertEqual(self.deploy_mock_session(session, [0, 0]), 1)
+
+    def test_reload_http_rejection_stops_without_status_polling(self):
+        session = self.reload_session(self.response(502), [])
+        with self.assertRaisesRegex(api.legacy.RemoteDeploymentError, 'http_rejected') as raised:
+            self.deploy_mock_session(session, [])
+        self.assertEqual(raised.exception.http_status, 502)
+        self.assertEqual(session.request.call_count, 9)
+
+    def test_confirmation_network_failure_propagates_without_retry(self):
+        session = self.reload_session(api.requests.ReadTimeout(), [api.requests.ConnectionError('private')])
+        with self.assertRaisesRegex(api.legacy.RemoteDeploymentError, 'network_error') as raised:
+            self.deploy_mock_session(session, [0, 0])
+        self.assertEqual(raised.exception.stage, 'confirmation')
+        self.assertEqual(session.request.call_count, 10)
+
     def test_dependency_mismatch_stops_before_upload(self):
         session = MagicMock()
         session.__enter__.return_value = session

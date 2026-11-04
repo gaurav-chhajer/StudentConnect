@@ -1052,8 +1052,13 @@ WSGI entry point before reloading, so the old checkout need not be pulled manual
 
 The workflow shares the scheduled worker concurrency group. It waits up to three
 minutes for `data/deployment-status.json` to report the exact run and commit. A
-failed or uncertain API request stops without retrying mutations. Check that file,
-the website, and the PythonAnywhere error log before retrying a timeout. Releases
+failed upload or rejected reload stops without retrying mutations. If the reload
+response is lost to a network error, the runner checks status within that same
+three-minute window without resending the reload. Only a successful status for
+the exact run and commit confirms activation; stale, missing, or failed status
+cannot produce success. Safe exception and cause types distinguish connection
+failures from timeouts without exposing private error text. Check the status file,
+the website, and the PythonAnywhere error log before retrying an unresolved timeout. Releases
 are retained for rollback and use the free account's disk allowance; remove old
 releases only after a separate backup and review. Private `data/boards` in the
 existing checkout remains the board source for the web app.
