@@ -60,6 +60,56 @@ class GroqHistoryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.json)
         self.assertEqual(response.json, dict(saved=True, revision=payload['revision']))
 
+    def test_status_timing_includes_commit_for_initial_and_idempotent_writes(self):
+        for _ in range(2):
+            with self.assertLogs(self.app.logger, level='INFO') as logs:
+                self.record(self.initial())
+            stages = ['handler entered', 'stage=connection', 'stage=lock_wait',
+                      'stage=lock_acquired', 'stage=begin_wait', 'stage=transaction_started',
+                      'stage=save_complete', 'stage=commit_complete', 'stage=lock_released']
+            output = '\n'.join(logs.output)
+            positions = [output.index(stage) for stage in stages]
+            self.assertEqual(positions, sorted(positions))
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM groq_key_history').fetchone()[0], 3)
+
+    def test_status_timing_identifies_lock_failure_without_private_message(self):
+        with patch.object(cloud_worker.run_pipeline, 'exclusive_cycle',
+                          side_effect=RuntimeError('private failure details')):
+            with self.assertLogs(self.app.logger, level='INFO') as logs:
+                self.assertEqual(self.call('groq-status', self.initial()).status_code, 503)
+        output = '\n'.join(logs.output)
+        self.assertIn('stage=lock_wait error=RuntimeError', output)
+        self.assertNotIn('private failure details', output)
+        self.assertNotIn('stage=commit_complete', output)
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM groq_key_history').fetchone()[0], 0)
+
+    def test_transaction_failures_report_the_failing_stage_and_propagate(self):
+        for stage in ('connection', 'begin_wait', 'commit'):
+            with self.subTest(stage=stage):
+                conn = MagicMock()
+                connect = MagicMock(return_value=conn)
+                error = OSError('private storage details')
+                if stage == 'connection':
+                    connect.side_effect = error
+                elif stage == 'begin_wait':
+                    conn.execute.side_effect = error
+                else:
+                    conn.__exit__.side_effect = error
+                with self.app.app_context(), \
+                        patch.object(cloud_worker.run_pipeline, 'exclusive_cycle') as lock, \
+                        self.assertLogs(self.app.logger, level='INFO') as logs:
+                    with self.assertRaises(OSError) as raised:
+                        with cloud_worker._groq_status_transaction(
+                                connect, self.database, 'a' * 32, 0, 0):
+                            pass
+                self.assertIs(raised.exception, error)
+                output = '\n'.join(logs.output)
+                self.assertIn('stage=' + stage + ' error=OSError', output)
+                self.assertNotIn('private storage details', output)
+                self.assertNotIn('stage=commit_complete', output)
+                if stage != 'connection':
+                    lock.return_value.__exit__.assert_called_once()
+
     def test_status_endpoint_requires_worker_auth_and_rejects_browser_session(self):
         self.assertEqual(self.client.post('/internal/worker/groq-status', json=self.initial()).status_code, 401)
         with self.client.session_transaction() as session:
@@ -158,6 +208,42 @@ class GroqHistoryTests(unittest.TestCase):
 
 
 class GroqReportingFailureTests(unittest.TestCase):
+    def test_delayed_acknowledgement_logs_timeout_and_stops_before_groq(self):
+        client = MagicMock()
+        client.call.side_effect = requests.ReadTimeout('private credential response')
+        with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                patch.object(pipeline, 'score_job_for_user') as score, \
+                patch.object(runner.time, 'monotonic', side_effect=[100.0, 120.5]), \
+                self.assertLogs(runner.logger, level='ERROR') as logs:
+            with self.assertRaisesRegex(RuntimeError, 'Could not record') as raised:
+                runner.fetch_and_score(client, 2100)
+        self.assertIsInstance(raised.exception.__cause__, requests.ReadTimeout)
+        output = '\n'.join(logs.output)
+        self.assertIn('error=ReadTimeout', output)
+        self.assertIn('elapsed_seconds=20.500', output)
+        self.assertIn('revision=0', output)
+        self.assertNotIn('private credential response', output)
+        self.assertNotIn('synthetic', output)
+        client.call.assert_called_once()
+        score.assert_not_called()
+
+    def test_status_http_failure_logs_status_and_safe_cause(self):
+        client = MagicMock()
+        error = runner.HostedOperationError(503)
+        error.__cause__ = OSError('private path')
+        client.call.side_effect = error
+        with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                self.assertLogs(runner.logger, level='ERROR') as logs:
+            with self.assertRaisesRegex(RuntimeError, 'Could not record'):
+                runner.GroqKeyPool(client, 2100)
+        output = '\n'.join(logs.output)
+        self.assertIn('http_status=503', output)
+        self.assertIn('cause=OSError', output)
+        self.assertNotIn('private path', output)
+        client.call.assert_called_once()
+
     def test_uncertain_status_write_stops_without_retry_or_provider_request(self):
         client = MagicMock()
         client.call.side_effect = requests.ReadTimeout('private details')

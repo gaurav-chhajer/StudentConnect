@@ -57,6 +57,7 @@ class GroqKeyPool:
         self.publish("running")
 
     def publish(self, outcome):
+        started = time.monotonic()
         try:
             reply = self.client.call("groq-status", dict(run_id=self.run_id, revision=self.revision,
                                                         states=list(self.states), outcome=outcome))
@@ -65,6 +66,15 @@ class GroqKeyPool:
                 raise RuntimeError("Hosted key status was not acknowledged")
         except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
             self.reporting_failed = True
+            response = error.response if isinstance(error, requests.RequestException) else None
+            status = (response.status_code if response is not None else
+                      error.status if isinstance(error, HostedOperationError) else 'unavailable')
+            logger.error(
+                'Groq status acknowledgement failed: run_id=%s revision=%s error=%s cause=%s '
+                'http_status=%s elapsed_seconds=%.3f; work stopped without retry',
+                self.run_id, self.revision, type(error).__name__,
+                type(error.__cause__).__name__ if error.__cause__ is not None else 'unavailable',
+                status, time.monotonic() - started)
             raise RuntimeError("Could not record Groq key status; work stopped") from error
         self.revision += 1
 

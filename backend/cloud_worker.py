@@ -7,9 +7,12 @@ password hashes or account tokens are returned to the worker.
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import smtplib
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -93,8 +96,46 @@ def fixed_schedule_due(conn, user_id, now):
     return (local.date() - previous.astimezone(INDIA).date()).days >= (7 if cadence == "weekly" else 1)
 
 
+@contextmanager
+def _groq_status_transaction(connection, database, run_id, revision, started):
+    """Time status persistence, including commit on early/idempotent returns."""
+    logger = current_app.logger.getChild('groq_status')
+    stage = 'connection'
+
+    def checkpoint(value):
+        logger.info(
+            'Groq status timing: run_id=%s revision=%s stage=%s elapsed_seconds=%.3f',
+            run_id, revision, value, time.monotonic() - started)
+    try:
+        checkpoint(stage)
+        conn = connection()
+        stage = 'lock_wait'
+        checkpoint(stage)
+        with run_pipeline.exclusive_cycle(Path(database).parent / 'pipeline.lock'):
+            checkpoint('lock_acquired')
+            with conn:
+                stage = 'begin_wait'
+                checkpoint(stage)
+                conn.execute('BEGIN IMMEDIATE')
+                stage = 'save'
+                checkpoint('transaction_started')
+                yield conn
+                stage = 'commit'
+                checkpoint('save_complete')
+            checkpoint('commit_complete')
+        checkpoint('lock_released')
+    except Exception as error:
+        # Observe and re-raise; existing request boundaries still own the response.
+        logger.error(
+            'Groq status failed: run_id=%s revision=%s stage=%s error=%s elapsed_seconds=%.3f',
+            run_id, revision, stage, type(error).__name__, time.monotonic() - started)
+        raise
+
+
 def register_routes(application, connection, database):
     worker_key()  # Invalid configured credentials must fail at startup.
+    # Keep diagnostic checkpoints visible without changing other application log levels.
+    application.logger.getChild('groq_status').setLevel(logging.INFO)
     routes = Blueprint("worker", __name__, url_prefix="/internal/worker")
 
     @routes.errorhandler(ValueError)
@@ -161,6 +202,8 @@ def register_routes(application, connection, database):
 
     @routes.post("/groq-status")
     def groq_status():
+        started = time.monotonic()
+        current_app.logger.getChild('groq_status').info('Groq status handler entered')
         data = body()
         if set(data) != {"run_id", "revision", "states", "outcome"}:
             raise ValueError("Invalid key history fields")
@@ -173,9 +216,7 @@ def register_routes(application, connection, database):
                 any(not isinstance(state, str) or state not in allowed for state in states) or
                 not isinstance(outcome, str) or outcome not in {"running", "complete", "deferred"}):
             raise ValueError("Invalid key history")
-        conn = connection()
-        with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with _groq_status_transaction(connection, database, run_id, revision, started) as conn:
             previous = conn.execute("SELECT * FROM groq_key_history WHERE run_id=? ORDER BY key_slot",
                                     (run_id,)).fetchall()
             now = datetime.now(timezone.utc).isoformat()

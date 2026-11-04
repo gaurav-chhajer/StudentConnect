@@ -702,6 +702,14 @@ stored. The worker publishes revisioned snapshots through its authenticated
 `groq-status` endpoint with 10-second connect/20-second read timeouts. Invalid,
 out-of-order or terminal-state changes are rejected; identical revisions are
 idempotent. Status-write failures stop matching without retrying uncertain writes.
+To diagnose a slow status acknowledgement, compare the local
+`Groq status acknowledgement failed` record with hosted `Groq status timing`
+records for the same run ID and revision. Hosted records time connection setup,
+file-lock acquisition, transaction start, saving, and commit; elapsed seconds are
+cumulative from handler entry. A long access-log duration with a late handler-entry
+record points to delay before the handler. Local failures record exception/cause
+types, HTTP status when available, and elapsed seconds, without private error text.
+These diagnostics do not change timeouts, retry writes, or restart stopped workers.
 The additive `008_groq_key_history.sql` migration creates only history storage;
 if its table is absent, the admin panel explicitly reports that the database update
 is needed and logs the missing migration; saved dashboard analytics still load.
