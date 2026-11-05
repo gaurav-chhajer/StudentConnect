@@ -579,6 +579,17 @@ next fetch starts, without overlapping fetches. Scoring continues while boards
 are downloaded. Successful snapshots enter the hosted pending queue immediately;
 partial board failures are logged and retain previous data without blocking scoring.
 Complete fetch failure or exhausted budgets stop that loop for review.
+Transient timeouts, connection failures, and HTTP 502/503/504 on the read-only
+hosted `companies` and `work` endpoints get at most three attempts, waiting 30
+then 60 seconds without holding the write lock; shutdown interrupts these waits.
+Authentication, TLS, rate-limit, invalid-response, and other endpoint failures
+are not retried. No Groq request or hosted POST is replayed by this recovery.
+If email delivery fails or its response is uncertain, this process pauses further
+email checks and logs the need to reconcile provider/sent history, while Groq
+scoring continues. The process still reports a failed status when it eventually
+exits. Reconcile email state before restarting delivery; a process restart does
+not clear the existing hosted email pause marker. Exhausted read recovery and
+uncertain scoring/status writes still stop the affected loop for review.
 
 Groq generates and saves the best 5?7 resume-supported role families with equivalent
 title aliases. Only eligible jobs passing this title gate receive full JD/resume

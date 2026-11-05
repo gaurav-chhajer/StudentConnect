@@ -16,6 +16,9 @@ CHECK_INTERVAL_SECONDS = 5 * 60
 LOCK_PATH = Path(__file__).resolve().parents[1] / "data" / "hosted_worker.lock"
 QUEUE_POLL_SECONDS = 30
 WRITE_LOCK_SECONDS = 120
+READ_ATTEMPTS = 3
+READ_BACKOFF_SECONDS = 30
+TRANSIENT_READ_STATUSES = frozenset({502, 503, 504})
 
 
 class _QueuedClient:
@@ -29,7 +32,28 @@ class _QueuedClient:
         if self.stop.is_set():
             raise RuntimeError("Queue worker is stopping")
         if data is None:
-            return self.client.call(path)
+            if path.partition('?')[0] not in ('companies', 'work'):
+                return self.client.call(path)
+            # These endpoints only read saved state. Never replay a POST or a provider call.
+            for attempt in range(READ_ATTEMPTS):
+                if self.stop.is_set():
+                    raise RuntimeError("Queue worker is stopping")
+                try:
+                    return self.client.call(path)
+                except (requests.Timeout, requests.ConnectionError, worker.HostedOperationError) as error:
+                    if isinstance(error, requests.exceptions.SSLError):
+                        raise
+                    if isinstance(error, worker.HostedOperationError) and error.status not in TRANSIENT_READ_STATUSES:
+                        raise
+                    if attempt == READ_ATTEMPTS - 1:
+                        logger.error('Hosted read recovery exhausted: operation=%s error=%s attempts=%s; loop requires review',
+                                     path.partition('?')[0], type(error).__name__, READ_ATTEMPTS)
+                        raise
+                    delay = READ_BACKOFF_SECONDS * (2 ** attempt)
+                    logger.warning('Hosted read temporarily unavailable: operation=%s error=%s attempt=%s; checking again in %s seconds',
+                                   path.partition('?')[0], type(error).__name__, attempt + 1, delay)
+                    if self.stop.wait(delay):
+                        raise RuntimeError("Queue worker is stopping") from error
         if not self.writes.acquire(timeout=WRITE_LOCK_SECONDS):
             raise RuntimeError("Hosted write lock timed out")
         try:
@@ -63,6 +87,7 @@ def _fetch_loop(client, stop):
 
 
 def _score_loop(client, stop, ready):
+    email_paused = False
     while not stop.is_set():
         ready.clear()
         logger.info("Queue scoring batch started; fetching runs independently.")
@@ -70,13 +95,20 @@ def _score_loop(client, stop, ready):
         if status or stop.is_set():
             if status and not stop.is_set():
                 logger.error("Scoring loop stopped; pending jobs remain queued. Review logs before restarting.")
-            return status
-        status = worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, matches_only=True)
-        if status:
-            logger.error("Email loop stopped; inspect hosted email state before restarting.")
-            return status
+            return int(bool(status) or email_paused)
+        if not email_paused:
+            try:
+                email_status = worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, matches_only=True)
+            except (requests.RequestException, OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+                email_paused = True
+                logger.error('Email delivery paused (%s); reconcile provider and hosted sent history before restarting email. Groq scoring continues; no send retry.',
+                             type(error).__name__)
+            else:
+                if email_status:
+                    email_paused = True
+                    logger.error('Email delivery paused; reconcile provider and hosted sent history before restarting email. Groq scoring continues; no send retry.')
         ready.wait(QUEUE_POLL_SECONDS)
-    return 0
+    return int(email_paused)
 
 
 def run_queued():

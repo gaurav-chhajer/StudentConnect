@@ -146,12 +146,103 @@ class QueuedWorkerTests(unittest.TestCase):
         email.assert_not_called()
         self.assertFalse(stop.is_set())
 
-    def test_failed_email_is_not_retried(self):
-        stop, ready = threading.Event(), threading.Event()
-        with patch.object(runner, 'score_pending', return_value=0), \
+    def test_failed_email_is_not_retried_and_scoring_continues(self):
+        stop, ready = threading.Event(), MagicMock()
+        batches = []
+        def score(*args):
+            batches.append(1)
+            if len(batches) == 2:
+                stop.set()
+            return 0
+        with patch.object(runner, 'score_pending', side_effect=score), \
                 patch.object(runner, 'send_emails', return_value=1) as email:
             self.assertEqual(watch_hosted_jobs._score_loop('client', stop, ready), 1)
         email.assert_called_once()
+        self.assertEqual(len(batches), 2)
+        ready.wait.assert_called_once_with(watch_hosted_jobs.QUEUE_POLL_SECONDS)
+
+    def test_email_exceptions_pause_only_delivery_without_replaying_sends(self):
+        for error in (requests.ReadTimeout('private message'), requests.ConnectionError('private message'),
+                      runner.HostedOperationError(503), ValueError('private message')):
+            with self.subTest(error=type(error).__name__):
+                stop, ready = threading.Event(), MagicMock()
+                batches = []
+                def score(*args):
+                    batches.append(1)
+                    if len(batches) == 2:
+                        stop.set()
+                    return 0
+                with patch.object(runner, 'score_pending', side_effect=score), \
+                        patch.object(runner, 'send_emails', side_effect=error) as email, \
+                        self.assertLogs(watch_hosted_jobs.logger, level='ERROR') as logs:
+                    self.assertEqual(watch_hosted_jobs._score_loop('client', stop, ready), 1)
+                self.assertEqual(len(batches), 2)
+                email.assert_called_once()
+                self.assertIn('Groq scoring continues', '\n'.join(logs.output))
+                self.assertNotIn('private message', '\n'.join(logs.output))
+
+    def test_read_recovery_uses_bounded_backoff_without_holding_write_lock(self):
+        stop, ready, writes = MagicMock(), threading.Event(), threading.Lock()
+        stop.is_set.return_value = False
+        stop.wait.return_value = False
+        with patch.object(runner, 'HostedClient') as factory:
+            client = watch_hosted_jobs._QueuedClient(writes, stop, ready)
+        factory.return_value.call.side_effect = [requests.ReadTimeout('private'),
+                                                 runner.HostedOperationError(503), {'items': []}]
+        def wait(delay):
+            self.assertFalse(writes.locked())
+            return False
+        stop.wait.side_effect = wait
+        with self.assertLogs(watch_hosted_jobs.logger, level='WARNING') as logs:
+            self.assertEqual(client.call('work?after=0'), {'items': []})
+        self.assertEqual(factory.return_value.call.call_count, 3)
+        self.assertEqual([call.args[0] for call in stop.wait.call_args_list], [30, 60])
+        self.assertFalse(ready.is_set())
+        self.assertNotIn('private', '\n'.join(logs.output))
+
+    def test_read_recovery_exhaustion_propagates_without_unbounded_retries(self):
+        stop = MagicMock()
+        stop.is_set.return_value = False
+        stop.wait.return_value = False
+        with patch.object(runner, 'HostedClient') as factory:
+            client = watch_hosted_jobs._QueuedClient(threading.Lock(), stop, threading.Event())
+        error = requests.ConnectionError('private')
+        factory.return_value.call.side_effect = error
+        with self.assertRaises(requests.ConnectionError) as raised:
+            client.call('companies')
+        self.assertIs(raised.exception, error)
+        self.assertEqual(factory.return_value.call.call_count, 3)
+        self.assertEqual(stop.wait.call_count, 2)
+
+    def test_shutdown_interrupts_read_backoff_before_another_request(self):
+        stop = MagicMock()
+        stop.is_set.return_value = False
+        stop.wait.return_value = True
+        with patch.object(runner, 'HostedClient') as factory:
+            client = watch_hosted_jobs._QueuedClient(threading.Lock(), stop, threading.Event())
+        factory.return_value.call.side_effect = requests.ReadTimeout()
+        with self.assertRaisesRegex(RuntimeError, 'stopping'):
+            client.call('companies')
+        factory.return_value.call.assert_called_once()
+        stop.wait.assert_called_once_with(30)
+
+    def test_nontransient_reads_and_unverified_endpoints_are_not_retried(self):
+        for path, error in (('companies', runner.HostedOperationError(401)),
+                            ('work?after=0', runner.HostedOperationError(403)),
+                            ('companies', runner.HostedOperationError(429)),
+                            ('companies', requests.exceptions.SSLError('private')),
+                            ('companies', ValueError('invalid response')),
+                            ('other', requests.ReadTimeout())):
+            with self.subTest(path=path, error=type(error).__name__):
+                stop = MagicMock()
+                stop.is_set.return_value = False
+                with patch.object(runner, 'HostedClient') as factory:
+                    client = watch_hosted_jobs._QueuedClient(threading.Lock(), stop, threading.Event())
+                factory.return_value.call.side_effect = error
+                with self.assertRaises(type(error)):
+                    client.call(path)
+                factory.return_value.call.assert_called_once()
+                stop.wait.assert_not_called()
 
     def test_clients_serialize_writes_signal_only_accepted_snapshots_and_release_on_error(self):
         writes, stop, ready = threading.Lock(), threading.Event(), threading.Event()
