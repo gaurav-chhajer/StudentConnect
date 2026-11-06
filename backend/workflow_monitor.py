@@ -7,7 +7,7 @@ import sqlite3
 
 import requests
 
-from backend import store
+from backend import pipeline_skeleton as pipeline, role_titles, store
 
 WORKERS={'fetch':'Job discovery','score':'Local scoring','email':'Email delivery','agent':'Application agent'}
 SOURCE_ISSUES={
@@ -68,6 +68,22 @@ MESSAGES={
 
 def available(conn):
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='worker_events'").fetchone() is not None
+
+
+def groq_queue_counts(conn):
+    """Count every currently eligible, unscored job using the Groq worker filters."""
+    users = conn.execute('''SELECT u.id,u.resume_text,u.preferences_json FROM users u
+        JOIN accounts a ON a.user_id=u.id WHERE u.active=1 AND a.email_verified=1
+        AND trim(u.resume_text)<>'' ORDER BY u.id''').fetchall()
+    jobs, profiles_needed = 0, 0
+    for user in users:
+        profile = role_titles.current(conn, user)
+        candidates = pipeline.filter_candidate_jobs(conn, role_titles.filtering_user(user, profile))
+        if profile is None:
+            profiles_needed += len(candidates)
+            continue
+        jobs += len(role_titles.select(candidates, profile))
+    return dict(jobs=jobs, profiles_needed=profiles_needed)
 
 
 def record(conn,user_id,worker,code,*,workflow_id=None,job_id=None,number=None,value=None,state='running',next_check=None,event=True):
@@ -177,6 +193,7 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
               workflow_id=workflow_id,stage=stage,severity=severity,sort=sort,before=before,next_before=None,updated_at=now.isoformat())
     if not data['available']:
         return data
+    data['groq_queue'] = groq_queue_counts(conn)
     data['groq_keys']=[]
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone():
         for slot in range(1,4):
