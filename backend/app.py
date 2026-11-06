@@ -484,6 +484,12 @@ def create_app(database_path=None, upload_dir=None):
             return 'Workflow not found.',404
         return render('workflow_monitor',dict(data,monitor=monitor))
 
+    @application.get('/admin/workflow-monitor/groq-queue')
+    def workflow_monitor_groq_queue():
+        if not g.account['is_admin']:
+            return 'Administrator access required.',403
+        return workflow_monitor.groq_queue_counts(connection())
+
     @application.get("/analytics")
     def analytics():
         data = context()

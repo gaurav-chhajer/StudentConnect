@@ -193,7 +193,6 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
               workflow_id=workflow_id,stage=stage,severity=severity,sort=sort,before=before,next_before=None,updated_at=now.isoformat())
     if not data['available']:
         return data
-    data['groq_queue'] = groq_queue_counts(conn)
     data['groq_keys']=[]
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone():
         for slot in range(1,4):
