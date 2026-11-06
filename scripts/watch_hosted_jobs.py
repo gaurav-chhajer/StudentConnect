@@ -18,6 +18,7 @@ QUEUE_POLL_SECONDS = 30
 WRITE_LOCK_SECONDS = 120
 READ_ATTEMPTS = 3
 READ_BACKOFF_SECONDS = 30
+SCORING_RECONNECT_SECONDS = 30
 TRANSIENT_READ_STATUSES = frozenset({502, 503, 504})
 
 
@@ -86,8 +87,8 @@ def _fetch_loop(client, stop):
     return 0
 
 
-def _score_loop(client, stop, ready):
-    email_paused = False
+def _score_loop(client, stop, ready, email_state=None):
+    email_state = email_state if email_state is not None else {"paused": False}
     while not stop.is_set():
         ready.clear()
         logger.info("Queue scoring batch started; fetching runs independently.")
@@ -95,20 +96,51 @@ def _score_loop(client, stop, ready):
         if status or stop.is_set():
             if status and not stop.is_set():
                 logger.error("Scoring loop stopped; pending jobs remain queued. Review logs before restarting.")
-            return int(bool(status) or email_paused)
-        if not email_paused:
+            return int(bool(status) or email_state["paused"])
+        if not email_state["paused"]:
             try:
                 email_status = worker.send_emails(client, time.monotonic() + worker.EMAIL_SECONDS, matches_only=True)
             except (requests.RequestException, OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
-                email_paused = True
+                email_state["paused"] = True
                 logger.error('Email delivery paused (%s); reconcile provider and hosted sent history before restarting email. Groq scoring continues; no send retry.',
                              type(error).__name__)
             else:
                 if email_status:
-                    email_paused = True
+                    email_state["paused"] = True
                     logger.error('Email delivery paused; reconcile provider and hosted sent history before restarting email. Groq scoring continues; no send retry.')
         ready.wait(QUEUE_POLL_SECONDS)
-    return int(email_paused)
+    return int(email_state["paused"])
+
+
+def _scoring_supervisor(writes, stop, ready):
+    """Reconnect the scoring client after failures while preserving email pause state."""
+    email_state = {"paused": False}
+    while not stop.is_set():
+        client = None
+        status = 1
+        try:
+            client = _QueuedClient(writes, stop, ready)
+            status = _score_loop(client, stop, ready, email_state)
+        except Exception as error:
+            status = 1
+            logger.error("Scoring/email connection failed (%s); queued scoring will reconnect after %s seconds.",
+                         type(error).__name__, SCORING_RECONNECT_SECONDS)
+        finally:
+            if client is not None:
+                try:
+                    client.close()
+                except Exception as error:
+                    status = 1
+                    logger.error("Scoring client cleanup failed (%s); reconnecting after %s seconds.",
+                                 type(error).__name__, SCORING_RECONNECT_SECONDS)
+        if stop.is_set():
+            return int(bool(status) or email_state["paused"])
+        if status:
+            logger.warning("Scoring loop stopped; reconnecting to check the persisted queue in %s seconds.",
+                           SCORING_RECONNECT_SECONDS)
+            if stop.wait(SCORING_RECONNECT_SECONDS):
+                break
+    return int(email_state["paused"])
 
 
 def run_queued():
@@ -120,9 +152,11 @@ def run_queued():
     def run(index):
         client = None
         try:
-            client = _QueuedClient(writes, stop, ready)
-            statuses[index] = (_fetch_loop(client, stop) if index == 0 else
-                               _score_loop(client, stop, ready))
+            if index == 0:
+                client = _QueuedClient(writes, stop, ready)
+                statuses[index] = _fetch_loop(client, stop)
+            else:
+                statuses[index] = _scoring_supervisor(writes, stop, ready)
         except Exception as error:
             statuses[index] = 1
             logger.error("%s loop stopped (%s); inspect logs before restarting. The other loop remains independent.",

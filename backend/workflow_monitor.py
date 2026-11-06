@@ -180,8 +180,8 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
     data['groq_keys']=[]
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone():
         for slot in range(1,4):
-            row=conn.execute('SELECT key_slot,state,outcome,updated_at FROM groq_key_history WHERE key_slot=? ORDER BY id DESC LIMIT 1',(slot,)).fetchone()
-            data['groq_keys'].append(dict(row) if row else dict(key_slot=slot,state='unreported',outcome=None,updated_at=None))
+            row=conn.execute('SELECT key_slot,state,outcome,updated_at,job_count FROM groq_key_history WHERE key_slot=? ORDER BY id DESC LIMIT 1',(slot,)).fetchone()
+            data['groq_keys'].append(dict(row) if row else dict(key_slot=slot,state='unreported',outcome=None,updated_at=None,job_count=0))
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_limits'").fetchone():
         for key in data['groq_keys']:
             limits=conn.execute('SELECT * FROM groq_limits WHERE key_slot=?',(key['key_slot'],)).fetchone()

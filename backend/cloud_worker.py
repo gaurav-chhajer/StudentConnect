@@ -205,15 +205,17 @@ def register_routes(application, connection, database):
         started = time.monotonic()
         current_app.logger.getChild('groq_status').info('Groq status handler entered')
         data = body()
-        if set(data) != {"run_id", "revision", "states", "outcome"}:
+        if set(data) != {"run_id", "revision", "states", "job_counts", "outcome"}:
             raise ValueError("Invalid key history fields")
         run_id, revision = data["run_id"], data["revision"]
-        states, outcome = data["states"], data["outcome"]
+        states, job_counts, outcome = data["states"], data["job_counts"], data["outcome"]
         allowed = {"not_configured", "not_attempted", "attempting", "succeeded", "rate_limited", "failed"}
         if (not isinstance(run_id, str) or re.fullmatch(r"[a-f0-9]{32}", run_id) is None or
                 type(revision) is not int or not 0 <= revision <= 1000 or
                 not isinstance(states, list) or len(states) != 3 or
                 any(not isinstance(state, str) or state not in allowed for state in states) or
+                not isinstance(job_counts, list) or len(job_counts) != 3 or
+                any(type(count) is not int or not 0 <= count <= 1000000 for count in job_counts) or
                 not isinstance(outcome, str) or outcome not in {"running", "complete", "deferred"}):
             raise ValueError("Invalid key history")
         with _groq_status_transaction(connection, database, run_id, revision, started) as conn:
@@ -225,12 +227,14 @@ def register_routes(application, connection, database):
                         any(state not in {"not_configured", "not_attempted"} for state in states)):
                     raise ValueError("History must begin with unattempted configured keys")
                 conn.executemany("""INSERT INTO groq_key_history
-                    (run_id,key_slot,state,outcome,revision,started_at,updated_at) VALUES(?,?,?,'running',0,?,?)""",
-                    [(run_id, slot, state, now, now) for slot, state in enumerate(states, 1)])
+                    (run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count) VALUES(?,?,?,'running',0,?,?,?)""",
+                    [(run_id, slot, state, now, now, job_counts[slot - 1]) for slot, state in enumerate(states, 1)])
             else:
                 old_revision = previous[0]["revision"]
                 if revision == old_revision:
-                    if states != [row["state"] for row in previous] or outcome != previous[0]["outcome"]:
+                    if (states != [row["state"] for row in previous] or
+                            job_counts != [row["job_count"] for row in previous] or
+                            outcome != previous[0]["outcome"]):
                         return {"error": "History revision already recorded"}, 409
                     return {"saved": True, "revision": revision}
                 if revision != old_revision + 1 or previous[0]["outcome"] != "running":
@@ -244,9 +248,12 @@ def register_routes(application, connection, database):
                 for row, state in zip(previous, states):
                     if state != row["state"] and state not in transitions[row["state"]]:
                         raise ValueError("Invalid key history transition")
-                    conn.execute("""UPDATE groq_key_history SET state=?,outcome=?,revision=?,
+                if any(count < row["job_count"] for count, row in zip(job_counts, previous)):
+                    raise ValueError("Groq key job counts cannot decrease")
+                for row, state, count in zip(previous, states, job_counts):
+                    conn.execute("""UPDATE groq_key_history SET state=?,outcome=?,revision=?,job_count=?,
                         updated_at=CASE WHEN state<>? THEN ? ELSE updated_at END WHERE id=?""",
-                        (state, outcome, revision, state, now, row["id"]))
+                        (state, outcome, revision, count, state, now, row["id"]))
         return {"saved": True, "revision": revision}
 
     @routes.post("/observations")

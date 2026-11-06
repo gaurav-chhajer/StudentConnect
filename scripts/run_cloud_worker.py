@@ -52,6 +52,7 @@ class GroqKeyPool:
         self.slot = 0
         self.run_id = uuid.uuid4().hex
         self.states = ["not_attempted" if key else "not_configured" for key in self.keys]
+        self.job_counts = [0, 0, 0]
         self.revision = 0
         self.reporting_failed = False
         self.publish("running")
@@ -60,7 +61,7 @@ class GroqKeyPool:
         started = time.monotonic()
         try:
             reply = self.client.call("groq-status", dict(run_id=self.run_id, revision=self.revision,
-                                                        states=list(self.states), outcome=outcome))
+                states=list(self.states), job_counts=list(self.job_counts), outcome=outcome))
             if (reply.get("saved") is not True or type(reply.get("revision")) is not int or
                     reply["revision"] != self.revision):
                 raise RuntimeError("Hosted key status was not acknowledged")
@@ -92,8 +93,11 @@ class GroqKeyPool:
                 raise RuntimeError('Groq limits were not acknowledged')
 
     def score(self, user, job, company_name):
-        return self._request(lambda key: pipeline.score_job_for_user(user, job, company_name,
+        result = self._request(lambda key: pipeline.score_job_for_user(user, job, company_name,
             api_key=key, response_observer=self.observe_limits))
+        self.job_counts[self.slot] += 1
+        self.publish("running")
+        return result
 
     def suggest_titles(self, user):
         return self._request(lambda key: role_titles.generate(user, api_key=key,
