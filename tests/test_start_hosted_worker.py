@@ -287,10 +287,15 @@ class QueuedWorkerTests(unittest.TestCase):
 
     def test_loop_exception_is_observed_and_other_loop_still_runs(self):
         sessions = [MagicMock(), MagicMock()]
+        def finish_scoring(client, stop, ready, email_state):
+            # The supervisor owns repeated batches until explicitly stopped.
+            stop.set()
+            return 0
+
         with patch.object(watch_hosted_jobs, 'exclusive_cycle'), \
                 patch.object(runner, 'HostedClient', side_effect=sessions), \
                 patch.object(watch_hosted_jobs, '_fetch_loop', side_effect=ValueError('private')) as fetch, \
-                patch.object(watch_hosted_jobs, '_score_loop', return_value=0) as score, \
+                patch.object(watch_hosted_jobs, '_score_loop', side_effect=finish_scoring) as score, \
                 self.assertLogs(watch_hosted_jobs.logger) as logs:
             self.assertEqual(watch_hosted_jobs.run_queued(), 1)
         fetch.assert_called_once()
