@@ -588,8 +588,12 @@ If email delivery fails or its response is uncertain, this process pauses furthe
 email checks and logs the need to reconcile provider/sent history, while Groq
 scoring continues. The process still reports a failed status when it eventually
 exits. Reconcile email state before restarting delivery; a process restart does
-not clear the existing hosted email pause marker. Exhausted read recovery and
-uncertain scoring/status writes still stop the affected loop for review.
+not clear the existing hosted email pause marker. Scoring exceptions, failed
+batches, and client initialization or cleanup errors trigger a new scoring
+connection after 30 seconds. Each batch reads the persisted queue again rather
+than replaying the failed request. Recovery preserves the email pause state;
+shutdown interrupts the delay. Persistent configuration or provider errors still
+need correction, and recovery requires the worker process to remain running.
 
 Groq generates and saves the best 5?7 resume-supported role families with equivalent
 title aliases. Only eligible jobs passing this title gate receive full JD/resume

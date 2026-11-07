@@ -636,6 +636,10 @@ def _listings(feed, rows=None):
     raise ValueError('Career pagination limit reached; snapshot withheld')
 
 
+class CareerJobUnavailable(ValueError):
+    """A denied Workday detail was independently absent from its public search."""
+
+
 def prepare_job(job_row, deadline=None):
     """Retrieve a full description only for a candidate actually being scored."""
     result = dict(job_row)
@@ -690,13 +694,54 @@ def prepare_job(job_row, deadline=None):
             description, title = detail['description'], detail['title']
             location = result.get('location')
             employment = detail.get('employmentType')
+        elif kind == 'phenom':
+            text = feed.request(result['url'])
+            match = re.search(r'phApp\.ddo\s*=\s*', text)
+            if match is None:
+                raise ValueError('IDFC job detail data is unavailable')
+            payload = json.JSONDecoder().raw_decode(text[match.end():])[0]
+            detail = payload.get('jobDetail') if isinstance(payload, dict) else None
+            if (not isinstance(detail, dict) or type(detail.get('status')) is not int or detail['status'] != 200 or
+                    type(detail.get('hits')) is not int or detail['hits'] != 1 or
+                    type(detail.get('totalHits')) is not int or detail['totalHits'] != 1 or
+                    not isinstance(detail.get('data'), dict) or
+                    not isinstance(detail['data'].get('job'), dict)):
+                raise ValueError('IDFC job detail is unavailable or ambiguous')
+            posting = detail['data']['job']
+            sequence, title = posting.get('jobSeqNo'), posting.get('title')
+            if (posting.get('jobId') != result['external_id'] or
+                    not isinstance(sequence, str) or not sequence.isascii() or
+                    not sequence.isalnum() or len(sequence) > 300 or
+                    not isinstance(title, str) or not title.strip() or len(title) > 1000):
+                raise ValueError('IDFC job detail identity changed')
+            expected_url = feed.origin + '/in/en/job/' + sequence + '/' + quote(title.replace(' ', '-'), safe='-')
+            if result['url'] != expected_url:
+                raise ValueError('IDFC job detail URL changed')
+            description = posting.get('description')
+            location, employment = posting.get('cityStateCountry'), posting.get('type')
+            if (location is not None and (not isinstance(location, str) or len(location) > 4000) or
+                    employment is not None and (not isinstance(employment, str) or len(employment) > 200)):
+                raise ValueError('IDFC job detail metadata is invalid')
         elif kind == 'workday':
             tenant, site = WORKDAY[key]
             path = urlsplit(result['url']).path
             prefix = f'/en-US/{site}'
             if not path.startswith(prefix + '/job/'):
                 raise ValueError('Workday detail path is invalid')
-            detail = feed.json(f'/wday/cxs/{tenant}/{site}' + path[len(prefix):])['jobPostingInfo']
+            try:
+                detail = feed.json(f'/wday/cxs/{tenant}/{site}' + path[len(prefix):])['jobPostingInfo']
+            except requests.HTTPError as error:
+                reference = re.fullmatch(r'([0-9]+WD)(?:-[0-9]+)?', result['external_id'])
+                if (key != 'pwc' or error.response is None or error.response.status_code != 403 or
+                        reference is None):
+                    raise
+                # PwC returns 403 for withdrawn postings too. A denial alone is
+                # insufficient: only an empty official requisition search retires it.
+                search = feed.json(f'/wday/cxs/{tenant}/{site}/jobs', data=dict(
+                    appliedFacets={}, limit=20, offset=0, searchText=reference[1]))
+                if type(search.get('total')) is int and search['total'] == 0 and search.get('jobPostings') == []:
+                    raise CareerJobUnavailable('PwC requisition is no longer published') from error
+                raise
             description = detail['jobDescription']
             title, location = detail['title'], detail.get('location')
             additional = detail.get('additionalLocations') or []

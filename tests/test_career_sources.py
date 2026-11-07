@@ -139,6 +139,41 @@ class CareerSourceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 sources.fetch(key)
 
+    def test_idfc_detail_uses_embedded_full_description_and_checks_identity(self):
+        candidate = sources.job('idfc', 'P-1', 'DevOps Engineer', 'India',
+                                'https://careers.idfcfirst.bank.in/in/en/job/IFBAINP1ENIN/DevOps-Engineer')
+        candidate['raw_json'] = json.dumps(candidate['raw_json'])
+        detail = dict(jobId='P-1', jobSeqNo='IFBAINP1ENIN', title='DevOps Engineer',
+                      cityStateCountry='Hyderabad, India', type='Full-Time',
+                      description='<p>Complete description FINAL REQUIREMENT</p>',
+                      descriptionTeaser='Short teaser')
+
+        def page(job, **changes):
+            payload = dict(status=200, hits=1, totalHits=1, data=dict(job=job))
+            payload.update(changes)
+            return ('<script type="application/ld+json"></script>phApp.ddo = ' +
+                    json.dumps(dict(jobDetail=payload)) + ';')
+
+        with patch.object(sources.Feed, 'request', return_value=page(detail)), \
+                patch.object(sources.Feed, 'close') as close:
+            prepared = sources.prepare_job(candidate)
+        close.assert_called_once()
+        self.assertEqual(prepared['location'], 'Hyderabad, India')
+        self.assertIn('FINAL REQUIREMENT', json.loads(prepared['raw_json'])['descriptionHtml'])
+        self.assertEqual(json.loads(prepared['raw_json'])['employmentType'], 'Full-Time')
+        invalid_pages = [page(dict(detail, **change)) for change in (
+            dict(jobId='P-2'), dict(jobSeqNo='OTHER'), dict(title='Other title'),
+            dict(description=''), dict(description=None), dict(description=[]),
+            dict(cityStateCountry=[]), dict(type=[]))]
+        invalid_pages.extend((page(detail, status=404), page(detail, hits=0), page(detail, hits=True),
+                              page(detail, totalHits=2), page(None),
+                              '<html>No embedded data</html>', 'phApp.ddo = invalid'))
+        for text in invalid_pages:
+            with self.subTest(text=text), patch.object(sources.Feed, 'request', return_value=text), \
+                    patch.object(sources.Feed, 'close') as close, self.assertRaises(ValueError):
+                sources.prepare_job(candidate)
+            close.assert_called_once()
+
     def test_description_host_allowlist_deadline_and_cleanup(self):
         feed = sources.Feed('hotstar', 0)
         self.addCleanup(feed.close)
@@ -171,6 +206,33 @@ class CareerSourceTests(unittest.TestCase):
             identifiers.append(result['external_id'])
             self.assertIsNone(result['location'])
         self.assertEqual(identifiers, ['JR1', 'JR1'])
+
+    def test_pwc_denied_detail_requires_independent_empty_search_before_retiring(self):
+        import requests
+        candidate = sources.job('pwc', '123WD-3', 'Analyst', 'India',
+                                sources.SOURCES['pwc'][2] + '/en-US/Global_Experienced_Careers/job/India/A_123WD-3')
+        candidate['raw_json'] = json.dumps(candidate['raw_json'])
+        response = requests.Response()
+        response.status_code = 403
+        denied = requests.HTTPError(response=response)
+        with patch.object(sources.Feed, 'json', side_effect=[denied, dict(total=0, jobPostings=[])]) as request:
+            with self.assertRaises(sources.CareerJobUnavailable):
+                sources.prepare_job(candidate)
+        self.assertEqual(request.call_args.kwargs['data']['searchText'], '123WD')
+        for search in (dict(total=1, jobPostings=[{}]), dict(total=False, jobPostings=[]),
+                       dict(total=0), dict(total=0, jobPostings=[{}])):
+            with self.subTest(search=search), patch.object(sources.Feed, 'json', side_effect=[denied, search]):
+                with self.assertRaises(requests.HTTPError):
+                    sources.prepare_job(candidate)
+        for failure in (requests.Timeout(), requests.ConnectionError()):
+            with patch.object(sources.Feed, 'json', side_effect=[denied, failure]):
+                with self.assertRaises(type(failure)):
+                    sources.prepare_job(candidate)
+        response.status_code = 429
+        with patch.object(sources.Feed, 'json', side_effect=denied) as request:
+            with self.assertRaises(requests.HTTPError):
+                sources.prepare_job(candidate)
+        request.assert_called_once()
 
     def test_structured_job_requires_description_not_listing_summary(self):
         html = '<script type="application/ld+json">' + json.dumps(dict(

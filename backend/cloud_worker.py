@@ -447,6 +447,39 @@ def register_routes(application, connection, database):
                     WHERE user_id=? AND revision=?""", (user_id, task[0]))
         return {"saved": True}
 
+    @routes.post("/job-unavailable")
+    def job_unavailable():
+        """Retain history while retiring a worker-verified absent PwC posting.
+
+        The worker must first receive a detail 403 and an empty official search
+        for that requisition. A generic network failure is never evidence.
+        """
+        data = body()
+        user_id, job_id = positive_id(data.get('user_id')), positive_id(data.get('job_id'))
+        if data.get('reason') != 'pwc_detail_403_search_empty':
+            raise ValueError('Unsupported unavailability evidence')
+        conn = connection()
+        with run_pipeline.exclusive_cycle(Path(database).parent / 'pipeline.lock'), conn:
+            conn.execute('BEGIN IMMEDIATE')
+            user = eligible_user(conn, user_id)
+            job = conn.execute('SELECT * FROM jobs WHERE id=?', (job_id,)).fetchone()
+            if (user is None or job is None or
+                    data.get('fingerprint') != fingerprint(work_identity(user, dict(job, is_active=1)))):
+                return {'error': 'Inputs changed; unavailability discarded'}, 409
+            if job['company_id'] not in matching_tasks.companies_for_user(conn, user_id):
+                return {'error': 'Subscription changed; unavailability discarded'}, 409
+            company = conn.execute('SELECT career_source,active FROM companies WHERE id=?', (job['company_id'],)).fetchone()
+            raw = json.loads(job['raw_json'])
+            if (not company['active'] or company['career_source'] != 'pwc' or
+                    raw.get('career_source') != 'pwc' or
+                    re.fullmatch(r'[0-9]+WD(?:-[0-9]+)?', job['external_id']) is None):
+                raise ValueError('Unavailability does not belong to a supported requisition')
+            if not job['is_active']:
+                return {'saved': True, 'already_inactive': True}
+            conn.execute('UPDATE jobs SET is_active=0 WHERE id=?', (job_id,))
+            current_app.logger.info('Verified unavailable posting retained as inactive: job_id=%s', job_id)
+        return {'saved': True}
+
     @routes.post("/description")
     def description():
         from backend.career_sources import MAX_DESCRIPTION, SOURCES

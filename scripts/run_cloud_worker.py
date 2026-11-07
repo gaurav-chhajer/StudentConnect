@@ -353,6 +353,22 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
             scores += 1
             try:
                 prepared = career_sources.prepare_job(item['job'], deadline - 120)
+            except career_sources.CareerJobUnavailable:
+                try:
+                    reply = client.call('job-unavailable', dict(user_id=after, job_id=item['job']['id'],
+                        fingerprint=item['fingerprint'], reason='pwc_detail_403_search_empty'))
+                    if reply.get('saved') is not True:
+                        raise RuntimeError('Unavailable posting was not acknowledged')
+                except HostedInputsChanged:
+                    logger.info('Unavailable posting inputs changed: job_id=%s; latest state remains authoritative.',
+                                item['job']['id'])
+                    continue
+                except (requests.RequestException, RuntimeError, ValueError, KeyError, TypeError) as error:
+                    logger.error('Unavailable posting update failed: job_id=%s error=%s; remaining work deferred',
+                                 item['job']['id'], type(error).__name__)
+                    return 1
+                logger.info('Verified unavailable posting removed from active scoring queue: job_id=%s', item['job']['id'])
+                continue
             except (requests.RequestException, ValueError, KeyError, TypeError) as error:
                 response = error.response if isinstance(error, requests.RequestException) else None
                 logger.error('Career description failed: user_id=%s job_id=%s error=%s http_status=%s; candidate deferred',

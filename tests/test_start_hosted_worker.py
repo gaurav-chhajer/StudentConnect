@@ -15,6 +15,57 @@ from scripts import run_cloud_worker as runner
 from tests import test_cloud_worker, test_evaluation
 
 
+class ScoringRecoveryTests(unittest.TestCase):
+    def test_failures_reconnect_after_delay_and_preserve_email_pause(self):
+        for failure in (requests.ConnectionError('private'), ValueError('private'),
+                        RuntimeError('private'), 1):
+            with self.subTest(failure=type(failure).__name__):
+                stop = threading.Event()
+                clients = [MagicMock(), MagicMock()]
+                states = []
+
+                def score(client, stop, ready, email_state):
+                    states.append(email_state)
+                    if len(states) == 1:
+                        email_state['paused'] = True
+                        if isinstance(failure, Exception):
+                            raise failure
+                        return failure
+                    self.assertTrue(email_state['paused'])
+                    stop.set()
+                    return 1
+
+                with patch.object(watch_hosted_jobs, '_QueuedClient', side_effect=clients), \
+                        patch.object(watch_hosted_jobs, '_score_loop', side_effect=score), \
+                        patch.object(stop, 'wait', return_value=False) as wait, \
+                        self.assertLogs(watch_hosted_jobs.logger, level='WARNING') as logs:
+                    self.assertEqual(watch_hosted_jobs._scoring_supervisor(
+                        threading.Lock(), stop, threading.Event()), 1)
+                wait.assert_called_once_with(30)
+                self.assertIs(states[0], states[1])
+                for client in clients:
+                    client.close.assert_called_once()
+                self.assertNotIn('private', ' '.join(logs.output))
+
+    def test_initialization_and_cleanup_errors_wait_and_allow_shutdown(self):
+        for stage in ('initialization', 'cleanup'):
+            with self.subTest(stage=stage):
+                stop = threading.Event()
+                client = MagicMock()
+                if stage == 'cleanup':
+                    client.close.side_effect = OSError('private')
+                with patch.object(watch_hosted_jobs, '_QueuedClient', return_value=client,
+                                  side_effect=ValueError('private') if stage == 'initialization' else None) as factory, \
+                        patch.object(watch_hosted_jobs, '_score_loop', return_value=0), \
+                        patch.object(stop, 'wait', return_value=True) as wait, \
+                        self.assertLogs(watch_hosted_jobs.logger, level='WARNING'):
+                    watch_hosted_jobs._scoring_supervisor(threading.Lock(), stop, threading.Event())
+                factory.assert_called_once()
+                wait.assert_called_once_with(30)
+                if stage == 'cleanup':
+                    client.close.assert_called_once()
+
+
 class StartupWorkerTests(unittest.TestCase):
     def test_loads_environment_before_full_worker_and_preserves_exit_status(self):
         for status in (0, 1, 130):

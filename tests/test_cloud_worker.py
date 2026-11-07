@@ -76,6 +76,36 @@ class CloudEndpointTests(unittest.TestCase):
         self.assertEqual(self.call("work").status_code, 401)
         self.assertEqual(self.client.post("/settings", headers=HEADERS, json={}).status_code, 401)
 
+    def test_verified_unavailable_posting_preserves_records_and_is_idempotent(self):
+        self.conn.execute("UPDATE companies SET career_source='pwc' WHERE id=1")
+        self.conn.execute("UPDATE jobs SET external_id='123WD',raw_json=? WHERE id=1",
+                          (json.dumps(dict(career_source='pwc')),))
+        self.conn.commit()
+        item = self.item()
+        self.assertEqual(item['job']['id'], 1)
+        data = dict(user_id=1, job_id=1, fingerprint=item['fingerprint'], reason='pwc_detail_403_search_empty')
+        counts = [self.conn.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
+                  for table in ('jobs', 'scores')]
+        self.assertEqual(self.client.post('/internal/worker/job-unavailable', json=data).status_code, 401)
+        self.assertEqual(self.call('job-unavailable', dict(data, reason='http_403')).status_code, 400)
+        self.assertEqual(self.call('job-unavailable', dict(data, fingerprint='0' * 64)).status_code, 409)
+        self.assertEqual(self.call('job-unavailable', data).json, dict(saved=True))
+        self.assertEqual(self.conn.execute('SELECT is_active FROM jobs WHERE id=1').fetchone()[0], 0)
+        self.assertNotIn(1, [entry['job']['id'] for entry in self.call('work').json['items']])
+        self.assertEqual(self.call('job-unavailable', data).json, dict(saved=True, already_inactive=True))
+        self.assertEqual(counts, [self.conn.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0]
+                                  for table in ('jobs', 'scores')])
+
+    def test_unavailability_rejects_unsupported_source_and_changed_inputs(self):
+        item = self.item()
+        data = dict(user_id=1, job_id=item['job']['id'], fingerprint=item['fingerprint'],
+                    reason='pwc_detail_403_search_empty')
+        self.assertEqual(self.call('job-unavailable', data).status_code, 400)
+        self.assertEqual(self.conn.execute('SELECT is_active FROM jobs WHERE id=?', (data['job_id'],)).fetchone()[0], 1)
+        self.conn.execute("UPDATE users SET resume_text='Changed resume' WHERE id=1")
+        self.conn.commit()
+        self.assertEqual(self.call('job-unavailable', data).status_code, 409)
+
     def test_work_is_private_filtered_and_paginated(self):
         payload = self.call("work").json
         self.assertEqual(payload["next"], 1)
@@ -464,6 +494,21 @@ class CloudRunnerTests(unittest.TestCase):
                 pool.score(dict(id=1), dict(id=1), 'Synthetic')
         score.assert_called_once()
         self.assertEqual(pool.states[0], 'failed')
+
+    def test_unavailable_posting_continues_only_after_acknowledgement_or_stale_inputs(self):
+        for reply, continues in ((dict(saved=True), True), (runner.HostedInputsChanged('stale'), True),
+                                 (dict(saved=False), False), (requests.Timeout('private'), False)):
+            with self.subTest(reply=type(reply).__name__):
+                items = [dict(user=dict(id=1, resume_text='Synthetic'), job=dict(id=number, company_id=1),
+                              company_name='Synthetic', fingerprint='0' * 64) for number in (1, 2)]
+                client, pool = MagicMock(), MagicMock()
+                client.call.side_effect = [dict(next=1, items=items), reply, dict(saved=True), dict(next=None, items=[])]
+                with patch.object(runner.career_sources, 'prepare_job', side_effect=[
+                        runner.career_sources.CareerJobUnavailable('withdrawn'), items[1]['job']]), \
+                        patch.object(runner.time, 'monotonic', return_value=0):
+                    self.assertEqual(runner._score_pending(client, 3000, pool), 0 if continues else 1)
+                self.assertEqual(pool.score.call_count, int(continues))
+                self.assertEqual(sum(call.args[0] == 'job-unavailable' for call in client.call.call_args_list), 1)
 
     def test_scoring_failures_continue_only_for_candidate_rejections(self):
         cases = [(status, status in runner.CANDIDATE_HTTP_STATUSES)
