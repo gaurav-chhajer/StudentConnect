@@ -4,6 +4,7 @@ import hashlib
 from io import BytesIO
 import json
 import os
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -124,6 +125,29 @@ class ReleaseTests(unittest.TestCase):
             status = json.loads((data / 'deployment-status.json').read_text())
             self.assertEqual(status, {'run_id': RUN, 'sha': SHA, 'success': False,
                                       'stage': 'extract', 'error_code': 'OSError'})
+
+
+    def test_backup_io_error_records_failure_and_retains_previous_release(self):
+        old_sha = 'c' * 40
+        old_app = object()
+        helper = MagicMock()
+        helper.migrate_pending.side_effect = sqlite3.OperationalError('private disk path')
+        with patch.object(Path, 'exists', return_value=True), \
+                patch.object(release, '_json_file', side_effect=[{'sha': old_sha}, self.request()]), \
+                patch.object(release, '_pipeline_lock'), \
+                patch.object(release, '_extract', return_value=release.RELEASES / SHA), \
+                patch.object(release, '_migration_module', return_value=helper), \
+                patch.object(release, '_atomic_json') as write, \
+                patch.object(release, '_preflight') as preflight, \
+                patch.object(release, '_import_application', return_value=old_app) as imported, \
+                self.assertLogs(release.logger, level='ERROR') as logs:
+            self.assertIs(release.application(), old_app)
+        write.assert_called_once_with(release.STATUS, {
+            'run_id': RUN, 'sha': SHA, 'success': False,
+            'stage': 'migrations', 'error_code': 'OperationalError'})
+        imported.assert_called_once_with(release.RELEASES / old_sha)
+        preflight.assert_not_called()
+        self.assertNotIn('private disk path', ' '.join(logs.output))
 
 
 class ApiTests(unittest.TestCase):

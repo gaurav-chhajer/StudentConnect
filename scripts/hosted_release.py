@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path, PurePosixPath
 import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -186,7 +187,7 @@ def application():
                 _atomic_json(STATUS, {'run_id': request['run_id'], 'sha': request['sha'],
                                       'success': True, 'stage': None})
                 return app
-        except (OSError, ValueError, RuntimeError, TypeError, ImportError,
+        except (OSError, ValueError, RuntimeError, TypeError, ImportError, sqlite3.Error,
                 subprocess.SubprocessError, zipfile.BadZipFile) as error:
             logger.error('Release activation failed stage=%s error=%s', stage, type(error).__name__)
             _atomic_json(STATUS, {'run_id': request['run_id'], 'sha': request['sha'],
