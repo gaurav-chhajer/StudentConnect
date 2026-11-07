@@ -16,7 +16,7 @@ from tests import test_cloud_worker, test_web_flows
 class PreHistoryMigrationTests(unittest.TestCase):
     def setUp(self):
         migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
-        previous = [path for path in migrations if path.name != '008_groq_key_history.sql']
+        previous = [path for path in migrations if path.name not in {'008_groq_key_history.sql', '021_groq_key_job_counts.sql'}]
         # Reproduce a deployed database that predates the new history feature.
         with patch('backend.migrate.Path.glob', return_value=previous):
             test_web_flows.WebFlowTests.setUp(self)
@@ -53,7 +53,7 @@ class GroqHistoryTests(unittest.TestCase):
     call = test_cloud_worker.CloudEndpointTests.call
 
     def initial(self, run_id='a' * 32):
-        return dict(run_id=run_id, revision=0, states=['not_attempted'] * 3, outcome='running')
+        return dict(run_id=run_id, revision=0, states=['not_attempted'] * 3, job_counts=[0] * 3, outcome='running')
 
     def record(self, payload):
         response = self.call('groq-status', payload)

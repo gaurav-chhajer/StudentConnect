@@ -150,7 +150,7 @@ class WebFlowTests(unittest.TestCase):
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 20)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 21)
 
     def test_india_filter_includes_city_only_locations(self):
         from backend import store
