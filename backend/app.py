@@ -321,6 +321,10 @@ def create_app(database_path=None, upload_dir=None):
             company_ids = {store.integer(value, 1, 2147483647) for value in request.form.getlist("companies")}
             if not company_ids.issubset({row["id"] for row in data["available_companies"] if row['active']}):
                 raise ValueError("Select companies from the available list")
+            company_scope = request.form.get("company_scope", "selected")
+            if company_scope not in ("any", "selected"):
+                raise ValueError("Choose a valid company preference")
+            subscriptions_configured = int(company_scope == "selected")
             preferences = {}
             for key in ("roles", "locations"):
                 raw = ",".join(request.form.getlist(key)) if key == "locations" else request.form.get(key, "")
@@ -353,18 +357,19 @@ def create_app(database_path=None, upload_dir=None):
                 raise ValueError('Invalid family mode')
             elif request.form.get('family_mode') is None and 'role_families' in data['preferences']:
                 preferences['role_families']=data['preferences']['role_families']
-            matching_changed = preferences != data["preferences"] or company_ids != data["subscriptions"]
+            matching_changed = (preferences != data["preferences"] or company_ids != data["subscriptions"]
+                                or subscriptions_configured != data["settings"]["subscriptions_configured"])
             with conn:
                 user_id = data["user"]["id"]
                 conn.execute("UPDATE users SET name=?,preferences_json=? WHERE id=?", (name, json.dumps(preferences), user_id))
                 if preferences != data["preferences"]:
                     conn.execute("UPDATE scores SET is_stale=1 WHERE user_id=?", (user_id,))
                 conn.execute("""INSERT INTO user_settings(user_id,university,graduation_year,cadence,send_time,timezone,min_score,include_gaps,subscriptions_configured)
-                    VALUES(?,?,?,?,?,?,?,?,1) ON CONFLICT(user_id) DO UPDATE SET
+                    VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
                     university=excluded.university,graduation_year=excluded.graduation_year,cadence=excluded.cadence,
                     send_time=excluded.send_time,timezone=excluded.timezone,min_score=excluded.min_score,
-                    include_gaps=excluded.include_gaps,subscriptions_configured=1""",
-                    (user_id, university, year, cadence, send_time, zone, minimum, int(request.form.get("include_gaps") == "on")))
+                    include_gaps=excluded.include_gaps,subscriptions_configured=excluded.subscriptions_configured""",
+                    (user_id, university, year, cadence, send_time, zone, minimum, int(request.form.get("include_gaps") == "on"), subscriptions_configured))
                 conn.execute("DELETE FROM company_subscriptions WHERE user_id=?", (user_id,))
                 conn.executemany("INSERT INTO company_subscriptions(user_id,company_id,subscribed_at) VALUES(?,?,?)",
                                  [(user_id, company_id, utc_now().isoformat()) for company_id in company_ids])

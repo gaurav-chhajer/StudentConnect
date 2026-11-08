@@ -14,7 +14,7 @@ import uuid
 import requests
 
 from backend import hosting, pipeline_skeleton as pipeline
-from backend import career_sources, role_titles
+from backend import career_sources, role_titles, tavily_search
 from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, MAX_JOBS, worker_key
 from backend.job_ingestion import deduplicate, mode_for_source, observation_batches
 
@@ -26,6 +26,8 @@ MAX_SCORES = 100
 MAX_ACCOUNTS = 1000
 CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
 GROQ_EVALUATION_RESERVE = 240  # Status reports, one evaluation, hosted save and headroom.
+TAVILY_CYCLE_SECONDS = 300
+TAVILY_COMPANY_SECONDS = 90
 
 
 class HostedInputsChanged(ValueError):
@@ -210,6 +212,9 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
         raise ValueError("Invalid company list")
     successful = set()
     failed = False
+    tavily_key = os.environ.get('TAVILY_API_KEY', '').strip()
+    discovery_seconds = 0
+    logger.info('Supplemental Tavily discovery enabled=%s', bool(tavily_key))
     for company in companies:
         if stop is not None and stop.is_set():
             return 1
@@ -243,6 +248,28 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
                 client.call('snapshot', batch)
             successful.add(company["id"])
             logger.info("Fetched company_id=%s jobs=%s", company["id"], len(jobs))
+            if tavily_key and (stop is None or not stop.is_set()):
+                remaining = min(TAVILY_CYCLE_SECONDS - discovery_seconds,
+                                deadline - 120 - time.monotonic())
+                if remaining < 45:
+                    logger.warning('Tavily discovery budget reached: company_id=%s; ATS results retained', company['id'])
+                    continue
+                started = time.monotonic()
+                stage = 'tavily_discovery'
+                try:
+                    additions = tavily_search.discover(company, jobs, tavily_key,
+                        started + min(TAVILY_COMPANY_SECONDS, remaining))
+                    envelope = dict(company_id=company['id'], fingerprint=company['fingerprint'], mode='observed')
+                    for batch in observation_batches(envelope, additions, MAX_JOBS, MAX_BODY_BYTES):
+                        if stop is not None and stop.is_set():
+                            return 1
+                        if time.monotonic() >= deadline - 120:
+                            raise ValueError('Discovery transfer budget exhausted')
+                        if batch['jobs']:
+                            client.call('observations', batch)
+                    logger.info('Tavily discovery saved: company_id=%s additional_jobs=%s', company['id'], len(additions))
+                finally:
+                    discovery_seconds += time.monotonic() - started
         except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:
             response = error.response if isinstance(error, requests.RequestException) else None
             company_id = company.get("id") if isinstance(company, dict) else None

@@ -218,14 +218,40 @@ def upsert_jobs(conn, company_id, fetched_jobs, *, additive=False):
         now = datetime.now(timezone.utc).isoformat()
         previous_snapshot = {row[0]: row[1] for row in conn.execute(
             "SELECT external_id,raw_json FROM jobs WHERE company_id=? AND is_active=1", (company_id,))}
-        seen_external_ids = []
+        # Search observations are partial; their absence from an ATS feed is not closure evidence.
+        discovery_ids = {identifier for identifier, raw in previous_snapshot.items()
+                         if identifier.startswith('tavily-') and json.loads(raw or '{}').get('discovery_source') == 'tavily'}
+        seen_external_ids = list(discovery_ids)
+        previous_snapshot = {identifier: raw for identifier, raw in previous_snapshot.items()
+                             if identifier not in discovery_ids}
+        # Build this once: checking every ATS listing with a URL scan would be quadratic.
+        discovery_by_url = {row[3].rstrip('/'): row[:3] for row in conn.execute(
+            "SELECT id,external_id,raw_json,url FROM jobs WHERE company_id=? AND external_id LIKE 'tavily-%'",
+            (company_id,)) if row[3] and json.loads(row[2] or '{}').get('discovery_source') == 'tavily'}
         for job in fetched_jobs:
+            incoming = dict(job.get("raw_json", {}))
+            discovery = incoming.get('discovery_source') == 'tavily'
+            if job.get('url'):
+                # Prefer the ATS identity; promote an existing search row without losing its history.
+                existing = (conn.execute('''SELECT id,external_id,raw_json FROM jobs
+                    WHERE company_id=? AND rtrim(url, '/')=? ORDER BY id LIMIT 1''',
+                    (company_id, job['url'].rstrip('/'))).fetchone() if discovery else
+                    discovery_by_url.get(job['url'].rstrip('/')))
+                if existing and existing[1] != job['external_id']:
+                    if discovery:
+                        continue
+                    if (existing[1].startswith('tavily-') and
+                            json.loads(existing[2] or '{}').get('discovery_source') == 'tavily' and
+                            conn.execute('SELECT 1 FROM jobs WHERE company_id=? AND external_id=?',
+                                         (company_id, job['external_id'])).fetchone() is None):
+                        conn.execute('UPDATE jobs SET external_id=? WHERE id=?', (job['external_id'], existing[0]))
+                        if existing[1] in seen_external_ids:
+                            seen_external_ids.remove(existing[1])
             seen_external_ids.append(job["external_id"])
             previous = conn.execute(
                 "SELECT id,raw_json,is_active,title,location,department,url FROM jobs WHERE company_id=? AND external_id=?",
                 (company_id, job["external_id"]),
             ).fetchone()
-            incoming = dict(job.get("raw_json", {}))
             if previous and incoming.get("career_source"):
                 saved = json.loads(previous[1] or '{}')
                 description = saved.pop('descriptionHtml', None)

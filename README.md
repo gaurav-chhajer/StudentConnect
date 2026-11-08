@@ -503,6 +503,37 @@ Windows email-only installer remains unchanged and does not fetch or score.
 
 ### Run frequent hosted checks from your computer
 
+#### Optional supplemental Tavily discovery
+
+Set `TAVILY_API_KEY` in the worker computer's private `.env` to enable Tavily
+alongside the existing ATS/company fetches. A blank key disables it. No new
+worker, dependency, migration, or scoring provider is introduced. The existing
+`scripts.start_hosted_worker` launcher loads this configuration; restart that
+worker after configuration/code changes. Direct module commands use process
+environment variables.
+
+Each successful company fetch can issue one basic search (at most ten leads).
+Discovery is limited to 90 seconds per company and 300 seconds per fetch pass,
+within the existing worker deadline. Only company names and configured career
+domains are sent to Tavily, never resumes or account preferences. Search uses
+the [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search).
+
+Leads must stay on the configured official career host (and the configured ATS
+board/Workday site), without redirects. A single JSON-LD `JobPosting`, matching
+employer name, usable full description, valid metadata and unexpired declared
+timestamp are required. Pages without this evidence are logged and skipped;
+this deliberately limits coverage, including JavaScript-only career sites and
+employer name aliases. Existing ATS results remain authoritative.
+
+Additional postings enter the existing authenticated observations endpoint and
+the normal preference/title filtering and Groq scoring queue. URL deduplication
+prefers ATS records and preserves job history when ATS later discovers a search
+posting. Partial/failed searches never close saved jobs. Tavily-only observations
+remain active until closure is independently confirmed; they are not a complete
+snapshot of openings. Search failures are reported without discarding successful
+ATS snapshots. The hosted app must receive the accompanying storage change before
+enabling Tavily on the PC. No live Tavily calls are part of offline tests.
+
 `scripts.watch_hosted_jobs` runs on your PC against the PythonAnywhere database.
 It defaults to **local similarity**, with no Groq calls or LLM fallback. The
 model runs on your PC; jobs, resume/settings inputs, similarity results, sent

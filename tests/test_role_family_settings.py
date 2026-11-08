@@ -10,6 +10,18 @@ class RoleFamilySettingsTests(unittest.TestCase):
     seed_user = WebFlowTests.seed_user
     post = WebFlowTests.post
 
+    def test_company_scope_controls_subscriptions(self):
+        self.seed_user()
+        data = dict(name='Owner', email='owner@example.test', company_scope='any')
+        self.assertEqual(self.post('/settings', data).status_code, 302)
+        self.assertEqual(self.conn.execute('SELECT subscriptions_configured FROM user_settings WHERE user_id=1').fetchone()[0], 0)
+        data['company_scope'] = 'selected'
+        self.assertEqual(self.post('/settings', data).status_code, 302)
+        self.assertEqual(self.conn.execute('SELECT subscriptions_configured FROM user_settings WHERE user_id=1').fetchone()[0], 1)
+        data['company_scope'] = 'invalid'
+        self.assertEqual(self.post('/settings', data).status_code, 400)
+        self.assertEqual(self.conn.execute('SELECT subscriptions_configured FROM user_settings WHERE user_id=1').fetchone()[0], 1)
+
     def test_custom_families_save_and_control_title_gate(self):
         self.seed_user()
         data=dict(name='Owner',email='owner@example.test',family_mode='custom',
