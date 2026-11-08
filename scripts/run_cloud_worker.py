@@ -14,7 +14,7 @@ import uuid
 import requests
 
 from backend import hosting, pipeline_skeleton as pipeline
-from backend import career_sources, role_titles, tavily_search
+from backend import career_sources, groq_limits, role_titles, tavily_search
 from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, MAX_JOBS, worker_key
 from backend.job_ingestion import deduplicate, mode_for_source, observation_batches
 
@@ -42,8 +42,9 @@ class HostedOperationError(RuntimeError):
 
 class GroqKeyPool:
     """Run-local key selection and credential-free, revisioned status reporting."""
-    def __init__(self, client, deadline):
+    def __init__(self, client, deadline, *, quota=None):
         self.client, self.deadline = client, deadline
+        self.quota = quota if quota is not None else groq_limits.QuotaState()
         self.keys = (pipeline.GROQ_API_KEY.strip(), os.environ.get("GROQ_API_KEY_2", "").strip(),
                      os.environ.get("GROQ_API_KEY_3", "").strip())
         configured = [key for key in self.keys if key]
@@ -87,8 +88,12 @@ class GroqKeyPool:
             self.publish("running")
 
     def observe_limits(self, headers):
-        from backend.groq_limits import capture
-        metrics=capture(headers)
+        metrics=groq_limits.capture(headers)
+        if 'retry_at' in metrics:
+            self.quota.record(self.slot, metrics)
+        self._report_limits(metrics)
+
+    def _report_limits(self, metrics):
         if metrics:
             reply=self.client.call('groq-limits',dict(key_slot=self.slot+1,model=pipeline.GROQ_MODEL,metrics=metrics))
             if reply.get('saved') is not True:
@@ -106,8 +111,11 @@ class GroqKeyPool:
             response_observer=self.observe_limits))
 
     def _request(self, operation):
+        last_error = None
         for slot in range(self.slot, len(self.keys)):
             if not self.keys[slot]:
+                continue
+            if self.quota.delay(slot) > 0:
                 continue
             self.slot = slot
             if time.monotonic() >= self.deadline - GROQ_EVALUATION_RESERVE:
@@ -118,19 +126,34 @@ class GroqKeyPool:
                 result = operation(None if slot == 0 else self.keys[slot])
             except requests.HTTPError as error:
                 limited = error.response is not None and error.response.status_code == 429
+                if error.response is not None and error.response.status_code in (413, 429):
+                    metrics = groq_limits.rejection(error.response)
+                    if limited:
+                        self.quota.record(slot, metrics)
+                    if metrics['rejection_detail'] == 'parsed' or len(metrics) > 3:
+                        self._report_limits(metrics)
+                    logger.warning('Groq rejection: key_slot=%s dimension=%s limit=%s requested=%s fit=%s retry_at=%s',
+                        slot + 1, metrics.get('limited_dimension', 'unavailable'),
+                        metrics.get('rejected_limit', 'unavailable'), metrics.get('rejected_requested', 'unavailable'),
+                        metrics['request_fit'], metrics.get('retry_at', 'unavailable'))
                 self.state("rate_limited" if limited else "failed")
                 if not limited:
                     raise
                 logger.warning("Groq Key %s rate limited; recorded in admin history", slot + 1)
-                if not any(self.keys[slot + 1:]):
-                    raise
+                last_error = error
                 continue
             except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError):
                 self.state("failed")
                 raise
             self.state("succeeded")
             return result
-        raise RuntimeError("No configured Groq key remains")
+        delays = [self.quota.delay(slot) for slot, key in enumerate(self.keys) if key]
+        if all(delay > 0 for delay in delays):
+            raise groq_limits.CooldownPending(min(delays))
+        if last_error is not None:
+            raise last_error
+        # An earlier key may have become ready while this batch's later key cooled.
+        raise groq_limits.CooldownPending(0)
 
 
 class HostedClient:
@@ -289,9 +312,9 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
     return _score_pending(client, deadline, pool, successful, failed)
 
 
-def score_pending(client, deadline, stop):
+def score_pending(client, deadline, stop, *, quota=None):
     """Consume persisted pending jobs without fetching; bounded batches keep email moving."""
-    pool = GroqKeyPool(client, deadline)
+    pool = GroqKeyPool(client, deadline, quota=quota)
     result = 1
     try:
         result = _score_pending(client, deadline, pool, stop=stop)
@@ -429,6 +452,8 @@ def _score_pending(client, deadline, pool, successful=None, failed=False, stop=N
                                           fingerprint=item["fingerprint"], result=result))
                 saved += 1
                 logger.info("Saved score user_id=%s job_id=%s", item["user"]["id"], item["job"]["id"])
+            except groq_limits.CooldownPending:
+                raise
             except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:
                 response = error.response if isinstance(error, requests.RequestException) else None
                 status = (response.status_code if response is not None else

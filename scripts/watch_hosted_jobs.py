@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import requests
+from backend.groq_limits import CooldownPending, QuotaState
 
 from scripts import run_cloud_worker as worker
 from scripts.run_pipeline import exclusive_cycle
@@ -87,12 +88,19 @@ def _fetch_loop(client, stop):
     return 0
 
 
-def _score_loop(client, stop, ready, email_state=None):
+def _score_loop(client, stop, ready, email_state=None, quota=None):
     email_state = email_state if email_state is not None else {"paused": False}
+    quota = quota if quota is not None else QuotaState()
     while not stop.is_set():
         ready.clear()
         logger.info("Queue scoring batch started; fetching runs independently.")
-        status = worker.score_pending(client, time.monotonic() + worker.MATCHING_SECONDS, stop)
+        try:
+            status = worker.score_pending(client, time.monotonic() + worker.MATCHING_SECONDS, stop, quota=quota)
+        except CooldownPending as error:
+            logger.info('Groq provider cooldown: waiting %.3f seconds; fetching remains independent.', error.seconds)
+            if stop.wait(error.seconds):
+                break
+            continue
         if status or stop.is_set():
             if status and not stop.is_set():
                 logger.error("Scoring loop stopped; pending jobs remain queued. Review logs before restarting.")
@@ -115,12 +123,13 @@ def _score_loop(client, stop, ready, email_state=None):
 def _scoring_supervisor(writes, stop, ready):
     """Reconnect the scoring client after failures while preserving email pause state."""
     email_state = {"paused": False}
+    quota = QuotaState()
     while not stop.is_set():
         client = None
         status = 1
         try:
             client = _QueuedClient(writes, stop, ready)
-            status = _score_loop(client, stop, ready, email_state)
+            status = _score_loop(client, stop, ready, email_state, quota)
         except Exception as error:
             status = 1
             logger.error("Scoring/email connection failed (%s); queued scoring will reconnect after %s seconds.",

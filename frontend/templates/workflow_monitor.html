@@ -16,7 +16,28 @@
 <div id="monitor-live" data-updated="{{ monitor.updated_at }}">
 {% if not monitor.available %}<section class="wm-panel"><h2>Monitor setup needed</h2><p>The monitoring tables have not been installed. Existing job data is unchanged.</p><p>Back up and apply the additive migration using the documented recruiter initialization command, then restart the workers.</p></section>
 {% else %}
-<section class="wm-panel" aria-label="Groq key status"><h2>Groq keys</h2><p class="wm-muted">Job count is the number of completed job scoring requests attributed to that key in its latest reported run. Keys in the same Groq organization may share limits. Readings come from Groq responses: requests per day and tokens per minute. Reset timestamps are last reported estimates; elapsed resets do not confirm replenished capacity.</p><div class="wm-table-wrap"><table><thead><tr><th>Key</th><th>Status</th><th>Jobs scored</th><th>Last reported</th><th>Remaining requests / tokens</th><th>Reset time</th></tr></thead><tbody>{% for key in monitor.groq_keys %}<tr><td>Key {{ key.key_slot }}</td><td>{{ key.state|replace('_',' ') }}</td><td>{{ key.job_count }}</td><td>{% if key.updated_at %}<time datetime="{{ key.updated_at }}">{{ key.updated_at }}</time>{% else %}Not reported{% endif %}</td><td>{% if key.limits is defined %}Requests: {{ key.limits.get('remaining_requests','Unavailable') }} / {{ key.limits.get('limit_requests','Unavailable') }}<br>Tokens: {{ key.limits.get('remaining_tokens','Unavailable') }} / {{ key.limits.get('limit_tokens','Unavailable') }}<br><small>{{ key.model }} ? observed <time datetime="{{ key.limits_at }}">{{ key.limits_at }}</time></small>{% else %}Unavailable{% endif %}</td><td>{% if key.limits is defined %}{% for field,label in [('reset_requests','Requests'),('reset_tokens','Tokens')] %}{{ label }}: {% if key.limits.get(field) %}<time datetime="{{ key.limits[field] }}">{{ key.limits[field] }}</time>{% else %}Unavailable{% endif %}<br>{% endfor %}{% else %}Unavailable{% endif %}</td></tr>{% else %}<tr><td colspan="6">No key status history available.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="wm-panel" aria-label="Groq key status">
+<h2>Groq keys</h2>
+<p class="wm-muted">Scored this batch counts completed, validated evaluations in the latest batch. Cumulative evaluations totals retained batch history, including repeated evaluations; it is not a count of unique jobs or confirmed saved scores. Header readings show requests per day and tokens per minute. A rejection can identify another quota. Reset and retry timestamps are provider estimates, not proof of replenished capacity.</p>
+<div class="wm-table-wrap"><table><thead><tr><th>Key</th><th>Status</th><th>Scored this batch</th><th>Cumulative evaluations</th><th>Last reported</th><th>Remaining requests / tokens</th><th>Reset time</th></tr></thead><tbody>
+{% for key in monitor.groq_keys %}<tr>
+<td>Key {{ key.key_slot }}</td><td>{{ key.state|replace('_',' ') }}</td>
+<td class="wm-number">{{ key.job_count }}</td><td class="wm-number">{{ key.total_job_count }}</td>
+<td>{% if key.updated_at %}<time datetime="{{ key.updated_at }}">{{ key.updated_at }}</time>{% else %}Not reported{% endif %}</td>
+<td>{% if key.limits is defined %}
+Requests/day: {{ key.limits.get('remaining_requests','Unavailable') }} / {{ key.limits.get('limit_requests','Unavailable') }}<br>
+Tokens/minute: {{ key.limits.get('remaining_tokens','Unavailable') }} / {{ key.limits.get('limit_tokens','Unavailable') }}<br>
+<small>{{ key.model }} · observed <time datetime="{{ key.limits_at }}">{{ key.limits_at }}</time></small>
+{% if key.limits.get('rejected_at') %}<br><small>Last rejection: {{ key.limits.get('limited_dimension','Unavailable')|replace('_',' ') }}<br>
+Limit: {{ key.limits.get('rejected_limit','Unavailable') }}; requested: {{ key.limits.get('rejected_requested','Unavailable') }}<br>
+{% if key.limits.get('request_fit') == 'oversized' %}One request exceeds the reported quota; waiting alone may not resolve it.{% elif key.limits.get('request_fit') == 'wait_for_reset' %}Request fits the reported quota; capacity may need time to reset.{% else %}Request size versus quota is unknown.{% endif %}<br>
+Observed <time datetime="{{ key.limits.rejected_at }}">{{ key.limits.rejected_at }}</time></small>{% endif %}
+{% else %}Unavailable{% endif %}</td>
+<td>{% if key.limits is defined %}{% for field,label in [('reset_requests','Requests'),('reset_tokens','Tokens'),('retry_at','Retry not before')] %}
+{{ label }}: {% if key.limits.get(field) %}<time datetime="{{ key.limits[field] }}">{{ key.limits[field] }}</time>{% else %}Unavailable{% endif %}<br>
+{% endfor %}{% else %}Unavailable{% endif %}</td>
+</tr>{% else %}<tr><td colspan="7">No key status history available.</td></tr>{% endfor %}
+</tbody></table></div></section>
 <section class="wm-workers" aria-label="Last reported worker status">
 {% for worker in monitor.workers %}<article><div class="wm-worker-label"><h2>{{ worker.name }}</h2><span class="wm-state {{ 'warning' if worker.stale else worker.state }}">{{ 'No recent update' if worker.stale else worker.state|replace('_',' ') }}</span></div><p>{{ worker.detail }}</p><small>Last reported: {% if worker.updated_at %}<time datetime="{{ worker.updated_at }}">{{ worker.updated_at }}</time>{% else %}Not yet reported{% endif %}</small>{% if worker.next_check_at %}<small>Scheduled check: <time datetime="{{ worker.next_check_at }}">{{ worker.next_check_at }}</time></small>{% endif %}</article>{% endfor %}
 </section>

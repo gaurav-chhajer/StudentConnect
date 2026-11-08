@@ -16,6 +16,17 @@ from tests import test_cloud_worker, test_evaluation
 
 
 class ScoringRecoveryTests(unittest.TestCase):
+    def test_provider_cooldown_wait_is_interruptible_and_does_not_send_email(self):
+        stop, ready = MagicMock(), MagicMock()
+        stop.is_set.return_value = False
+        stop.wait.return_value = True
+        with patch.object(runner, 'score_pending', side_effect=watch_hosted_jobs.CooldownPending(60)) as score, \
+                patch.object(runner, 'send_emails') as email:
+            self.assertEqual(watch_hosted_jobs._score_loop('client', stop, ready), 0)
+        stop.wait.assert_called_once_with(60)
+        score.assert_called_once()
+        email.assert_not_called()
+
     def test_failures_reconnect_after_delay_and_preserve_email_pause(self):
         for failure in (requests.ConnectionError('private'), ValueError('private'),
                         RuntimeError('private'), 1):
@@ -24,7 +35,9 @@ class ScoringRecoveryTests(unittest.TestCase):
                 clients = [MagicMock(), MagicMock()]
                 states = []
 
-                def score(client, stop, ready, email_state):
+                quotas = []
+                def score(client, stop, ready, email_state, quota):
+                    quotas.append(quota)
                     states.append(email_state)
                     if len(states) == 1:
                         email_state['paused'] = True
@@ -43,6 +56,7 @@ class ScoringRecoveryTests(unittest.TestCase):
                         threading.Lock(), stop, threading.Event()), 1)
                 wait.assert_called_once_with(30)
                 self.assertIs(states[0], states[1])
+                self.assertIs(quotas[0], quotas[1])
                 for client in clients:
                     client.close.assert_called_once()
                 self.assertNotIn('private', ' '.join(logs.output))
@@ -157,7 +171,7 @@ class QueuedWorkerTests(unittest.TestCase):
                 self.assertTrue(emailed.wait(2))
             return 0
 
-        def score(client, deadline, stop):
+        def score(client, deadline, stop, **kwargs):
             shared_stop.append(stop)
             scoring_started.set()
             self.assertTrue(second_fetch.wait(2))
@@ -200,7 +214,7 @@ class QueuedWorkerTests(unittest.TestCase):
     def test_failed_email_is_not_retried_and_scoring_continues(self):
         stop, ready = threading.Event(), MagicMock()
         batches = []
-        def score(*args):
+        def score(*args, **kwargs):
             batches.append(1)
             if len(batches) == 2:
                 stop.set()
@@ -218,7 +232,7 @@ class QueuedWorkerTests(unittest.TestCase):
             with self.subTest(error=type(error).__name__):
                 stop, ready = threading.Event(), MagicMock()
                 batches = []
-                def score(*args):
+                def score(*args, **kwargs):
                     batches.append(1)
                     if len(batches) == 2:
                         stop.set()
@@ -338,7 +352,7 @@ class QueuedWorkerTests(unittest.TestCase):
 
     def test_loop_exception_is_observed_and_other_loop_still_runs(self):
         sessions = [MagicMock(), MagicMock()]
-        def finish_scoring(client, stop, ready, email_state):
+        def finish_scoring(client, stop, ready, email_state, quota):
             # The supervisor owns repeated batches until explicitly stopped.
             stop.set()
             return 0

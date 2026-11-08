@@ -47,6 +47,29 @@ class WorkflowMonitorTests(unittest.TestCase):
         self.assertIn('Unavailable',page)
         self.assertIn('Reset time',page)
 
+    def test_batch_and_cumulative_evaluations_are_separate_and_updates_do_not_double_count(self):
+        for run_id, count, state in (('a' * 32, 3, 'succeeded'), ('b' * 32, 0, 'rate_limited')):
+            self.conn.execute('''INSERT INTO groq_key_history
+                (run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count)
+                VALUES(?,1,?,'deferred',0,'2026-11-09T00:00:00+00:00','2026-11-09T00:00:00+00:00',?)''',
+                (run_id, state, count))
+        self.conn.commit()
+        key = monitor.snapshot(self.conn, 1)['groq_keys'][0]
+        self.assertEqual((key['job_count'], key['total_job_count']), (0, 3))
+        self.conn.execute("UPDATE groq_key_history SET job_count=4 WHERE run_id=?", ('a' * 32,))
+        self.conn.commit()
+        self.assertEqual(monitor.snapshot(self.conn, 1)['groq_keys'][0]['total_job_count'], 4)
+        metrics = dict(limited_dimension='output_tokens_per_minute', rejected_limit=1000,
+                       rejected_requested=1174, request_fit='oversized',
+                       rejected_at='2026-11-09T00:00:00+00:00', retry_at='2026-11-09T00:02:00+00:00')
+        self.conn.execute('INSERT INTO groq_limits(key_slot,model,metrics_json,updated_at) VALUES(1,?,?,?)',
+                          ('fixture', json.dumps(metrics), '2026-11-09T00:00:00+00:00'))
+        self.conn.commit()
+        page = self.client.get('/admin/workflow-monitor').get_data(as_text=True)
+        for text in ('Scored this batch', 'Cumulative evaluations', 'output tokens per minute',
+                     '1174', 'Retry not before', 'waiting alone may not resolve it'):
+            self.assertIn(text, page)
+
     def test_sort_validation_and_scored_priority(self):
         self.conn.execute("INSERT INTO recruiter_jobs(workflow_id,number,posting_json,facts_json,evaluation_json) VALUES(1,2,?,'{}','{}')",(json.dumps({'title':'Unscored','verified_at':'2026-11-01'}),))
         self.assertEqual(monitor.snapshot(self.conn,1,1)['jobs'][0]['number'],1)

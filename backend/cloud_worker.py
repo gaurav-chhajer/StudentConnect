@@ -176,26 +176,19 @@ def register_routes(application, connection, database):
 
     @routes.post('/groq-limits')
     def groq_limits():
-        from backend.groq_limits import COUNTS, RESETS
+        from backend.groq_limits import REJECTION_FIELDS, validate_metrics
         data=body()
         if set(data)!={'key_slot','model','metrics'}:
             raise ValueError('Invalid limit fields')
         slot,model,metrics=data['key_slot'],data['model'],data['metrics']
         if type(slot) is not int or not 1<=slot<=3 or not isinstance(model,str) or not 1<=len(model)<=200:
             raise ValueError('Invalid limit identity')
-        if not isinstance(metrics,dict) or not metrics or set(metrics)-set(COUNTS+RESETS):
-            raise ValueError('Invalid limit metrics')
-        for field,value in metrics.items():
-            if field in COUNTS:
-                if type(value) is not int or not 0<=value<10**12:
-                    raise ValueError('Invalid limit count')
-            else:
-                if not isinstance(value,str) or len(value)>40:
-                    raise ValueError('Invalid reset time')
-                parsed=datetime.fromisoformat(value)
-                if parsed.tzinfo is None:
-                    raise ValueError('Reset time requires timezone')
+        validate_metrics(metrics)
         with connection() as conn:
+            previous = conn.execute('SELECT model,metrics_json FROM groq_limits WHERE key_slot=?', (slot,)).fetchone()
+            if previous and previous['model'] == model and 'rejected_at' not in metrics:
+                retained = json.loads(previous['metrics_json'])
+                metrics = dict({field: retained[field] for field in REJECTION_FIELDS if field in retained}, **metrics)
             conn.execute("""INSERT INTO groq_limits(key_slot,model,metrics_json,updated_at) VALUES(?,?,?,?) ON CONFLICT(key_slot) DO UPDATE SET model=excluded.model,metrics_json=excluded.metrics_json,updated_at=excluded.updated_at""",
                 (slot,model,json.dumps(metrics),datetime.now(timezone.utc).isoformat()))
         return {'saved':True}
@@ -252,8 +245,8 @@ def register_routes(application, connection, database):
                     raise ValueError("Groq key job counts cannot decrease")
                 for row, state, count in zip(previous, states, job_counts):
                     conn.execute("""UPDATE groq_key_history SET state=?,outcome=?,revision=?,job_count=?,
-                        updated_at=CASE WHEN state<>? THEN ? ELSE updated_at END WHERE id=?""",
-                        (state, outcome, revision, count, state, now, row["id"]))
+                        updated_at=CASE WHEN state<>? OR job_count<>? THEN ? ELSE updated_at END WHERE id=?""",
+                        (state, outcome, revision, count, state, count, now, row["id"]))
         return {"saved": True, "revision": revision}
 
     @routes.post("/observations")

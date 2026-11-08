@@ -751,7 +751,8 @@ Up to 1,000 companies/accounts and 5,000 jobs per snapshot are supported.
 Failed boards retain previous jobs and are skipped for scoring.
 Invalid evaluations and scoring HTTP 400/413/422 rejections defer that candidate
 and continue with the remaining candidates. Cloud matching uses Groq only.
-Every run starts with `GROQ_API_KEY` (Key 1). Only an explicit HTTP 429 advances
+Each batch starts with the first available key, beginning with `GROQ_API_KEY`
+(Key 1). Keys with an observed provider cooldown are skipped. HTTP 429 advances
 to `GROQ_API_KEY_2` (Key 2), then `GROQ_API_KEY_3` (Key 3); blank optional slots
 are skipped and duplicate configured keys fail before network calls. The same
 candidate is evaluated with the next configured key, which remains selected
@@ -773,11 +774,25 @@ after an interrupted run. Scores marked stale after resume or posting changes
 remain eligible for rescoring. Fetching reserves the final two minutes of its
 budget, leaving an 18-minute evening fetching window.
 The worker records three Groq key slot statuses per matching run, including which
-keys hit HTTP 429 and whether work completed or was deferred. The dashboard does
-not display a Groq limit or key-history container. History remains stored for
-diagnostics and is not included in email.
+keys hit HTTP 429 and whether work completed or was deferred. The workflow monitor
+shows completed, validated evaluations in the latest batch and cumulative evaluations
+across retained batch history. These are evaluations, including repeats, rather than
+unique jobs or confirmed saved scores. History is not included in email.
 History is retained without automatic deletion and grows by three small rows per run.
 Statuses describe observed evaluations, not live quotas or predicted reset times.
+Provider `Retry-After` (seconds or HTTP date), or a parsed retry duration in a
+quota rejection, sets a per-key cooldown shared across queue batches and scoring
+client reconnects. When all keys are cooling down, scoring waits interruptibly;
+the single fetch loop continues independently. Cooldowns are held in memory and
+are lost on process restart. Missing usable retry hints retain the existing
+30-second reconnect behavior. Uncertain writes and email sends are not retried.
+The monitor retains only allowlisted quota dimensions, numeric limit/used/requested
+values and timestamps; provider messages and organization details are not stored.
+General header capacity may differ from the specific rejected quota. A request
+larger than that quota is explicitly identified: waiting alone cannot make it fit.
+The model, complete resume/JD and output validation remain unchanged; no automatic
+shortening is performed. Deploy the updated hosted API before the updated worker
+so the new diagnostic fields are accepted. No new migration is needed.
 Key labels identify slots, not accounts; replacing a secret does not relabel old runs.
 Interrupted runs remain marked unfinished with their last acknowledged key states.
 No key values, fragments, hashes, account identities or provider response bodies are
