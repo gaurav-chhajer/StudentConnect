@@ -77,6 +77,152 @@ class TitleTests(unittest.TestCase):
             with self.subTest(title=title):
                 self.assertEqual(role_titles.match_index(title, value), 2)
 
+    def test_family_core_accepts_trailing_team_technology_and_location(self):
+        value = profile()
+        for title, expected in (('Software Engineer - Payments', 2),
+                                ('Software Developer Platform', 2), ('SWE - London', 2),
+                                ('Backend Developer Python', 1),
+                                ('Entry-level Backend Developer - Python', 1),
+                                ('Software Engineer - Backend (Python)', 1),
+                                ('Application Programmer - Payments', 2)):
+            with self.subTest(title=title):
+                self.assertEqual(role_titles.match_index(title, value), expected)
+        jobs = [dict(id=7, title='Software Engineer Payments'),
+                dict(id=3, title='Backend Developer Python'),
+                dict(id=1, title='Software Developer - Platform')]
+        self.assertEqual([job['id'] for job in role_titles.select(jobs, value)], [3, 1, 7])
+
+    def test_family_core_does_not_discard_seniority_levels_or_an_unrelated_prefix(self):
+        value = profile()
+        for title in ('Software Engineer - Senior', 'Software Engineer Lead',
+                      'Software Engineer - Manager', 'Software Engineer II - Payments',
+                      'Software Engineer 5 - Payments', 'Security Software Engineer - Payments',
+                      'Software Engineer IC5 - Payments', 'Software Engineer L3 - Payments',
+                      'Data Scientist - Python'):
+            with self.subTest(title=title):
+                self.assertIsNone(role_titles.match_index(title, value))
+                self.assertEqual(role_titles.select([dict(id=1, title=title)], value), [])
+        value['families'][2]['aliases'].append('Software Engineer II')
+        self.assertEqual(role_titles.match_index('Software Engineer II - Payments', value), 2)
+
+    def test_associate_prefix_matches_core_family_and_decorated_saved_alias(self):
+        value = profile()
+        for title, expected in (('Associate Python Developer', 0),
+                                ('Associate Python Engineer - Platform', 0),
+                                ('Graduate Associate Backend Developer Python', 1)):
+            with self.subTest(title=title):
+                self.assertEqual(role_titles.match_index(title, value), expected)
+                self.assertEqual(len(role_titles.select([dict(id=1, title=title)], value)), 1)
+        value['families'][0]['aliases'] = ['Associate Python Developer']
+        self.assertEqual(role_titles.match_index('Python Engineer - Platform', value), 0)
+        self.assertEqual(role_titles.match_index('Associate Python Engineer - Platform', value), 0)
+
+    def test_associate_prefix_does_not_bypass_levels_or_seniority(self):
+        value = profile()
+        for title in ('Senior Associate Python Developer', 'Associate Python Developer II',
+                      'Associate Python Developer - Manager', 'Associate Python Developer IC5',
+                      'Associate Security Software Engineer', 'Associate Data Scientist'):
+            with self.subTest(title=title):
+                self.assertIsNone(role_titles.match_index(title, value))
+                self.assertEqual(role_titles.select([dict(id=1, title=title)], value), [])
+
+    def test_broad_preferences_accept_associate_without_expanding_explicit_associate_preference(self):
+        self.assertTrue(pipeline._matches_role(
+            dict(title='Associate Python Engineer - Platform', department=None), ['python developer']))
+        self.assertFalse(pipeline._matches_role(
+            dict(title='Python Developer', department=None), ['associate python developer']))
+        user = dict(preferences_json=json.dumps(dict(roles=['Associate Python Developer'])))
+        value = profile()
+        value['families'][0]['aliases'].append('Associate Python Developer')
+        self.assertEqual(json.loads(role_titles.filtering_user(user, value)['preferences_json'])['roles'],
+                         ['Associate Python Developer'])
+
+    def test_technology_prefixes_and_versions_keep_the_role_family(self):
+        value = profile()
+        for title, expected in (('Python Backend Developer', 1), ('Python 3.12 Backend Developer', 1),
+                                ('Python3 Software Engineer', 2), ('Software Engineer - Python 3', 2),
+                                ('Python Developer - Python 3.12', 0), ('SQL Data Analyst', 4)):
+            with self.subTest(title=title):
+                self.assertEqual(role_titles.match_index(title, value), expected)
+        for title in ('Python 3 Backend Developer II', 'Software Engineer - Python 3 - IC5',
+                      'Security Software Engineer - Python 3'):
+            with self.subTest(title=title):
+                self.assertIsNone(role_titles.match_index(title, value))
+
+    def test_common_engineer_abbreviations(self):
+        value = profile()
+        value['families'][3]['aliases'] = ['DevOps Engineer']
+        for title, expected in (('Software Eng. - Payments', 2), ('Backend Engr Python', 1),
+                                ('DevOps Engr', 3)):
+            with self.subTest(title=title):
+                self.assertEqual(role_titles.match_index(title, value), expected)
+        self.assertIsNone(role_titles.match_index('Software Engr II', value))
+
+    def test_explicit_qualifiers_accept_synonyms_but_remain_required(self):
+        for title, preferred in (('Associate Python Engineer - Platform', 'associate python developer'),
+                                 ('Python Engineer Intern', 'python developer internship'),
+                                 ('Jr Python Engineer', 'junior python developer')):
+            with self.subTest(title=title):
+                self.assertTrue(pipeline._matches_role(dict(title=title, department=None), [preferred]))
+        for title, preferred in (('Python Engineer', 'associate python developer'),
+                                 ('Python Engineer', 'python developer internship'),
+                                 ('Python Engineer II', 'python engineer 2'),
+                                 ('Python Engineer II 5', 'python engineer ii')):
+            with self.subTest(title=title):
+                self.assertFalse(pipeline._matches_role(dict(title=title, department=None), [preferred]))
+
+    def test_combined_distinct_roles_are_held_even_when_one_matches(self):
+        value = profile()
+        for title in ('Software Engineer / Data Analyst', 'Software Engineer & Data Analyst',
+                      'Software Engineer and Data Analyst', 'Software Engineer / Backend Developer'):
+            with self.subTest(title=title):
+                self.assertIsNone(role_titles.match_index(title, value))
+                self.assertEqual(role_titles.select([dict(id=1, title=title)], value), [])
+        self.assertEqual(role_titles.match_index('Software Engineer / Software Developer', value), 2)
+        self.assertEqual(role_titles.match_index('Software Engineer - Python/Java', value), 2)
+
+    def test_seniority_checks_use_words_and_keep_real_senior_roles_excluded(self):
+        user = dict(preferences_json='{}')
+        for title in ('Software Engineer - Staffing', 'Managerial Analyst', 'Leadership Analyst'):
+            job = dict(title=title, department=None, location=None, raw_json='{}')
+            with self.subTest(title=title):
+                self.assertEqual(pipeline.filter_jobs_for_user([job], user), [job])
+        for title in ('Staff Engineer', 'Software Engineer Lead', 'Sr. Software Engineer',
+                      'Engineering Manager', 'Vice-President Engineering', 'Senior Associate Developer'):
+            job = dict(title=title, department=None, location=None, raw_json='{}')
+            with self.subTest(title=title):
+                self.assertEqual(pipeline.filter_jobs_for_user([job], user), [])
+
+    def test_employer_levels_require_the_specific_alias(self):
+        value = profile()
+        for title in ('SDE-1', 'Software Engineer II', 'Software Engineer IC2'):
+            with self.subTest(title=title):
+                self.assertIsNone(role_titles.match_index(title, value))
+        value['families'][2]['aliases'].extend(['Software Engineer 1', 'Software Engineer II'])
+        self.assertEqual(role_titles.match_index('SDE-1', value), 2)
+        self.assertEqual(role_titles.match_index('Software Engr II - Python 3', value), 2)
+        self.assertIsNone(role_titles.match_index('Software Engineer IC2', value))
+
+    def test_role_preferences_recognize_equivalent_family_core_without_relaxing_explicit_levels(self):
+        for title, roles in (('SWE - Payments', ['software engineering']),
+                             ('Backend Developer Python', ['backend engineer']),
+                             ('Application Programmer - Platform', ['software engineer'])):
+            job = dict(title=title, department=None)
+            with self.subTest(title=title):
+                self.assertTrue(pipeline._matches_role(job, roles))
+        for title, roles in (('Data Analyst - Payments', ['software engineer']),
+                             ('Software Engineer - Payments', ['software engineer intern']),
+                             ('Software Engineer 5 - Payments', ['software engineer ii'])):
+            with self.subTest(title=title):
+                self.assertFalse(pipeline._matches_role(dict(title=title, department=None), roles))
+        user = dict(preferences_json=json.dumps(dict(roles=['Data Analysis'])))
+        before = copy.deepcopy(user)
+        expanded = role_titles.filtering_user(user, test_cloud_worker.title_profile())
+        roles = pipeline._parse_preferences(expanded)['roles']
+        self.assertTrue(pipeline._matches_role(dict(title='Data Analyst - Payments', department=None), roles))
+        self.assertFalse(pipeline._matches_role(dict(title='Software Engineer - Payments', department=None), roles))
+        self.assertEqual(user, before)
+
     def test_synonymous_families_or_overlapping_aliases_are_rejected(self):
         for change in (dict(family='Software Development'), dict(aliases=['Application Programmer'])):
             value = profile()
@@ -167,6 +313,30 @@ class TitleTests(unittest.TestCase):
 class ProfileEndpointTests(unittest.TestCase):
     setUp = test_cloud_worker.CloudEndpointTests.setUp
     call = test_cloud_worker.CloudEndpointTests.call
+
+    def test_decorated_family_title_passes_preferences_queue_and_score_save(self):
+        self.conn.execute('UPDATE scores SET is_stale=0')
+        self.conn.execute('UPDATE scores SET is_stale=1 WHERE job_id=1')
+        self.conn.execute("UPDATE jobs SET title='Software Developer - Payments' WHERE id=1")
+        self.conn.execute('UPDATE users SET preferences_json=? WHERE id=1',
+                          (json.dumps(dict(roles=['Software Engineering'], locations=['Remote'])),))
+        self.conn.commit()
+        work = self.call('work').json['items']
+        self.assertEqual([item['job']['id'] for item in work], [1])
+        client = MagicMock()
+        def hosted(route, data=None):
+            response = self.call(route, data)
+            self.assertEqual(response.status_code, 200)
+            return response.json
+        client.call.side_effect = hosted
+        pool = MagicMock(reporting_failed=False)
+        pool.score.return_value = test_evaluation.sample_result()
+        with patch.object(runner, 'GroqKeyPool', return_value=pool):
+            self.assertEqual(runner.score_pending(client, runner.time.monotonic() + 3000,
+                                                 threading.Event()), 0)
+        pool.score.assert_called_once()
+        self.assertEqual(pool.score.call_args.args[1]['title'], 'Software Developer - Payments')
+        self.assertEqual(self.call('work').json['items'], [])
 
     def require_profile(self):
         # A changed resume invalidates the saved profile without deleting prior data.

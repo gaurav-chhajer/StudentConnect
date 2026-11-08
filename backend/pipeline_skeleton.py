@@ -310,6 +310,14 @@ SENIOR_TITLE_KEYWORDS = [
     "senior", "sr.", "sr ", "staff", "principal", "director", "vp", "vice president",
     "head of", "chief", "avp", "manager", "lead ",
 ]
+_SENIOR_TITLE_PATTERN = re.compile(r'\b(?:' + '|'.join(
+    r'[\s-]+'.join(re.escape(word.rstrip('.')) for word in keyword.split())
+    for keyword in SENIOR_TITLE_KEYWORDS) + r')\b', re.I)
+
+
+def is_senior_title(title):
+    """Match senior role words, not unrelated words such as staffing or managerial."""
+    return _SENIOR_TITLE_PATTERN.search(title) is not None
 
 # Regex used only as a best-effort stipend/salary sniff over raw_json text.
 # Indian ATS postings rarely expose a structured salary field, so this is a
@@ -347,8 +355,8 @@ def _parse_preferences(user_row):
 def _matches_role(job, roles):
     if not roles:
         return True
-    text = f"{job['title']} {job['department'] or ''}".lower()
-    return any(role in text for role in roles)
+    from backend.role_titles import matches_preference
+    return matches_preference(job['title'], roles, department=job['department'])
 
 
 def _matches_location(job, locations):
@@ -432,8 +440,7 @@ def filter_jobs_for_user(all_candidates, user_row):
             if not any(keywords[kind] in employment for kind in prefs["employment_types"]):
                 excluded_role += 1
                 continue
-        title_lower = job["title"].lower()
-        if any(kw in title_lower for kw in SENIOR_TITLE_KEYWORDS):
+        if is_senior_title(job['title']):
             excluded_senior += 1
             continue
         if not _matches_role(job, prefs["roles"]):

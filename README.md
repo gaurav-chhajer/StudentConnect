@@ -688,17 +688,39 @@ After existing preference, subscription, and senior-title filters, the worker
 compares **job titles only** against each family's aliases before loading full
 descriptions or evaluating JDs. Matching ignores word order, punctuation, and
 junior/graduate/internship markers, and normalizes explicit aliases such as
-SWE/SDE, developer/engineer, and back-end/backend. All remaining title terms must
-match an alias. Extra specializations and unmatched numeric/Roman levels remain held:
+SWE/SDE, developer/engineer, back-end/backend, and Eng./Engr/Engineer. A recognized role may
+have additional team, technology, product or location words: `Software Engineer -
+Payments`, `Backend Developer Python`, and `Application Programmer - London` can
+reach full-JD scoring. Known technology prefixes such as `Python Backend Developer`
+are accepted, and versions attached to known technologies (`Python 3.12`, `Python3`)
+are not treated as employer levels. The technology vocabulary comes from the
+existing skill catalog. Exact matches take precedence; otherwise the most specific
+recognized role selects the family. The `Associate` prefix is ignored
+for this family gate, including saved aliases: `Associate Python Developer` can
+match Python Development. This does not establish experience eligibility; Groq
+checks the full description. Explicit Associate, junior and internship preferences
+accept equivalent role titles but still require their qualifier. For example,
+Associate Python Developer can match Associate Python Engineer, but not Python Engineer.
+Unmatched numeric/Roman levels,
+senior/management suffixes and unrelated leading specializations remain held:
 `Security Software Engineer 5` cannot pass a suggestion of `Software Engineer`.
+Employer levels remain specific to the saved alias; `II`, `IC2` and `2` are not
+assumed equivalent. Combined distinct roles such as `Software Engineer / Data Analyst`
+are held rather than selecting the first role; equivalent combined titles such as
+`Software Engineer / Software Developer` remain eligible. Seniority checks use
+whole words/phrases, so staffing, managerial and leadership are not mistaken for
+staff, manager or lead. Actual senior, manager, staff and lead roles remain excluded.
 Groq supplies semantic variants during family generation; runtime matching uses
 those aliases and known equivalents, not an embedding-similarity cutoff. Unseen
 wording can still remain unmatched. A family match does not establish experience
 eligibility; the complete-JD evaluation remains necessary. Unmatched jobs remain
-stored. Explicit role preferences are expanded only within a matching family in
-a query copy, so selecting Software Engineer also allows Software Developer.
-Other selected families are not implicitly enabled. Explicit level/internship
-wording remains literal, and location/employment/stipend/subscription filters
+stored. Broad role preferences also recognize known equivalent titles and family
+labels such as `Software Engineering`; explicit level/internship preferences are
+not broadened by this recognition. Explicit role preferences are expanded only
+within a matching family in a query copy, so selecting Software Engineer also
+allows Software Developer.
+Other selected families are not implicitly enabled. Explicit qualifier and level
+requirements remain enforced, and location/employment/stipend/subscription filters
 continue to apply. Saved preferences are never overwritten. Until a profile exists,
 the worker checks other filters to discover pending work but returns no scoreable
 jobs; role filtering is applied with aliases once the profile has been generated.
@@ -711,7 +733,8 @@ scores. Title generation shares the 100-operation cycle budget with JD evaluatio
 429 key rotation remains subject to the existing key-pool limits. Suggestions are
 generated only when an account has otherwise eligible pending jobs. Existing scores
 are retained. The separate offline similarity worker and manual local Groq commands
-keep their existing behavior; this title gate applies to the hosted Groq queue.
+retain their scoring providers and do not use the hosted family gate. Their shared
+role-preference filter also recognizes equivalent broad role names.
 
 Apply additive migration `018_resume_role_titles.sql` after a verified database
 backup, then reload the website and restart the hosted Groq worker together. The

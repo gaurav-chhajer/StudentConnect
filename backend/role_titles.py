@@ -17,6 +17,20 @@ MAX_REASON_LENGTH = 500
 MAX_RESPONSE_BYTES = 65536
 MAX_ROLE_PREFERENCES = 20
 MAX_ROLE_PREFERENCE_LENGTH = 100
+_TITLE_TOKEN_PATTERN = r'[a-z0-9]+(?:\+\+|#)?'
+# Reuse the existing vocabulary, limited to technologies rather than domain skills.
+_ROLE_TECHNOLOGIES = ('Python', 'Java', 'JavaScript', 'TypeScript', 'C++', 'C#', '.NET', 'SQL',
+                      'React', 'Angular', 'Vue', 'Node.js', 'Flask', 'Django', 'FastAPI',
+                      'Spring', 'Docker', 'Kubernetes', 'AWS', 'Azure', 'Go', 'Rust', 'Swift', 'Kotlin')
+_TECH_ALIASES = tuple(dict.fromkeys(alias for name in _ROLE_TECHNOLOGIES
+                     for alias in (name.casefold(), *similarity.SKILLS[name])))
+_TECH_VERSION_PATTERN = re.compile(r'(?<![\w+#])(' + '|'.join(
+    re.escape(alias) for alias in sorted(_TECH_ALIASES, key=len, reverse=True)) +
+    r')\s*(?:v(?:ersion)?\s*)?\d+(?:\.\d+)*(?![\w.])', re.I)
+_TECH_PREFIXES = sorted({tuple(re.findall(_TITLE_TOKEN_PATTERN, alias)) for alias in _TECH_ALIASES},
+                        key=len, reverse=True)
+_ROLE_NOUNS = frozenset(('engineer', 'programmer', 'analyst', 'scientist', 'designer',
+                         'consultant', 'administrator', 'specialist', 'manager'))
 
 KNOWN_ALIAS_GROUPS = (
     ("Software Engineer", "Software Developer", "Software Development Engineer", "SDE", "SWE",
@@ -78,8 +92,7 @@ def validate(value, resume):
             if (not isinstance(text, str) or not text.strip() or len(text) > maximum or
                     any(ord(char) < 32 for char in text)):
                 raise ValueError("Invalid suggested title text")
-        family = title_terms(re.sub(r"\bengineering\b", "engineer", re.sub(
-            r"\bdevelopment\b", "developer", entry["family"].casefold())))
+        family = title_terms(_family_title(entry['family']))
         if family in seen or not family:
             raise ValueError("Suggested families must be distinct and usable")
         seen.add(family)
@@ -221,6 +234,11 @@ def title_terms(title):
     return terms
 
 
+def _family_title(name):
+    return re.sub(r'\bengineering\b', 'engineer',
+                  re.sub(r'\bdevelopment\b', 'developer', name.casefold()))
+
+
 def family_aliases(entry):
     """Groq can add employer wording without consuming additional family slots."""
     aliases = list(entry["aliases"])
@@ -249,34 +267,128 @@ def filtering_user(user, profile):
     elif profile["status"] == "ready" and roles:
         expanded = list(roles)
         for role in roles:
-            # An explicit level or internship preference must not be broadened.
-            if re.search(r"\b(?:junior|jr|graduate|intern|internship|trainee|[0-9]+|[ivx]+)\b", role, re.I):
+            # Constrained preferences are checked with their qualifiers at match time.
+            qualifiers, levels = _title_constraints(role)
+            if qualifiers or levels:
                 continue
-            terms = title_terms(role)
+            terms = title_terms(_family_title(role))
             for entry in profile["families"]:
                 aliases = family_aliases(entry)
-                if terms and terms in {title_terms(alias) for alias in aliases}:
+                if terms and (terms == title_terms(_family_title(entry['family'])) or
+                              terms in {title_terms(alias) for alias in aliases}):
                     expanded.extend(aliases)
         preferences["roles"] = list(dict.fromkeys(expanded))
     return dict(user, preferences_json=json.dumps(preferences))
 
 
-def match_index(title, profile):
-    """Unmatched/ambiguous titles wait; a title match is not full-JD eligibility."""
-    if profile["status"] != "ready":
+def _role_text(title):
+    text = re.sub(r'\b(?:eng|engr)\b\.?', 'engineer', title.casefold())
+    return _TECH_VERSION_PATTERN.sub(r'\1', text)
+
+
+def _title_constraints(title):
+    text = _role_text(title)
+    words = re.findall(_TITLE_TOKEN_PATTERN, text)
+    qualifiers = {canonical for word, canonical in (
+        ('associate', 'associate'), ('junior', 'junior'), ('jr', 'junior'),
+        ('graduate', 'graduate'), ('intern', 'internship'), ('internship', 'internship'),
+        ('trainee', 'trainee')) if word in words}
+    if re.search(r'\bentry[ -]level\b', text):
+        qualifiers.add('entry_level')
+    levels = {word for word in words if re.search(r'\d', word) or re.fullmatch(r'[ivx]+', word)}
+    return qualifiers, levels
+
+
+def _combined_roles(title):
+    parts = re.split(r'\s*[/&+]\s*|\s+and\s+', _role_text(title))
+    roles = {title_terms(part) for part in parts if title_terms(part) & _ROLE_NOUNS}
+    return len(roles) > 1
+
+
+def _title_words(title):
+    title = re.sub(r'^(?:(?:associate|entry[ -]level|junior|jr|graduate|internship|intern|trainee)\b[\s:.-]*)+',
+                   '', _role_text(title), flags=re.I)
+    return re.findall(_TITLE_TOKEN_PATTERN, title)
+
+
+def _alias_index(families):
+    indexed, max_words = {}, 0
+    cores = []
+    for index, entry in enumerate(families):
+        for alias in family_aliases(entry):
+            indexed[title_terms(alias)] = index
+            words = _title_words(alias)
+            cores.append((title_terms(_role_text(alias)), index))
+            cores.append((title_terms(' '.join(words)), index))
+            max_words = max(max_words, len(words))
+    # A saved "Associate Python Developer" alias also identifies the core role.
+    # Preserve explicit aliases when a derived core overlaps another family.
+    for terms, index in cores:
+        if terms:
+            indexed.setdefault(terms, index)
+    return indexed, max_words
+
+
+def _match_title(title, indexed, max_words):
+    if pipeline.is_senior_title(title) or _combined_roles(title):
         return None
     terms = title_terms(title)
-    for index, entry in enumerate(profile["families"]):
-        if terms and any(terms == title_terms(alias) for alias in entry["aliases"]):
-            return index
-    return None
+    if terms and terms in indexed:
+        return indexed[terms]
+    terms = title_terms(_role_text(title))
+    if terms and terms in indexed:
+        return indexed[terms]
+    words = _title_words(title)
+    _, levels = _title_constraints(title)
+    starts, offset = [0], 0
+    while offset < len(words):
+        technology = next((prefix for prefix in _TECH_PREFIXES
+                           if list(prefix) == words[offset:offset + len(prefix)]), None)
+        if technology is None:
+            break
+        offset += len(technology)
+        starts.append(offset)
+    matches = []
+    for start in starts:
+        for length in range(1, min(len(words) - start, max_words) + 1):
+            prefix = words[start:start + length]
+            if not levels.issubset(prefix):
+                continue
+            candidate = title_terms(' '.join(prefix))
+            if candidate and candidate in indexed:
+                matches.append(((len(candidate), length, -start), indexed[candidate]))
+    return max(matches)[1] if matches else None
+
+
+def matches_preference(title, roles, *, department=None):
+    """Recognize equivalent roles while retaining explicit qualifier/level requirements."""
+    if pipeline.is_senior_title(title) or _combined_roles(title):
+        return False
+    title_qualifiers, title_levels = _title_constraints(title)
+    text = f'{title} {department or ""}'.casefold()
+    for role in roles:
+        qualifiers, levels = _title_constraints(role)
+        if not qualifiers.issubset(title_qualifiers) or levels and levels != title_levels:
+            continue
+        if role.casefold() in text:
+            return True
+        indexed, max_words = _alias_index([dict(aliases=[_family_title(role)])])
+        if _match_title(title, indexed, max_words) is not None:
+            return True
+    return False
+
+
+def match_index(title, profile):
+    """Match a role core plus descriptive suffix; full-JD evaluation is still required."""
+    if profile["status"] != "ready":
+        return None
+    return _match_title(title, *_alias_index(profile['families']))
 
 
 def select(candidates, profile):
     if profile["status"] != "ready":
         return []
-    families = {title_terms(alias): index for index, entry in enumerate(profile["families"])
-                for alias in entry["aliases"]}
-    matches = [(families.get(title_terms(job["title"])), job) for job in candidates]
+    indexed, max_words = _alias_index(profile['families'])
+    matches = [(_match_title(job['title'], indexed, max_words), job) for job in candidates]
     return [job for index, job in sorted((pair for pair in matches if pair[0] is not None),
                                        key=lambda pair: (pair[0], pair[1]["id"]))]

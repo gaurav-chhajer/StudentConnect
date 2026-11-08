@@ -60,11 +60,14 @@ class QueueDiagnosticTests(unittest.TestCase):
                 self.conn.commit()
                 self.assertEqual(self.inspect()['excluded'][stage], 2)
 
-    def test_seniority_and_title_specialization_can_empty_the_queue(self):
+    def test_seniority_and_unrelated_family_can_empty_the_queue(self):
         self.conn.execute("UPDATE jobs SET title='Senior Software Engineer'")
         self.conn.commit()
         self.assertEqual(self.inspect()['excluded']['employment_and_seniority'], 2)
         self.conn.execute("UPDATE jobs SET title='Software Engineer, Security'")
+        self.conn.commit()
+        self.assertEqual(self.inspect()['remaining']['role_family'], 2)
+        self.conn.execute("UPDATE jobs SET title='Data Scientist'")
         self.conn.commit()
         report = self.inspect()
         self.assertEqual(report['remaining']['stipend'], 2)
