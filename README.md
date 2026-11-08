@@ -505,6 +505,15 @@ Windows email-only installer remains unchanged and does not fetch or score.
 
 #### Optional supplemental Tavily discovery
 
+To diagnose an empty Groq queue, run the read-only report against the authoritative
+database with the same Python environment and `GROQ_MODEL` as the web app:
+`python -B -m scripts.diagnose_groq_queue /absolute/path/to/data/jobs.db`.
+It reports per-account exclusion counts for current scores, subscriptions,
+employment/seniority, role/location/stipend preferences, and role-family aliases.
+It does not print resumes, preferences, job descriptions or credentials, insert
+temporary jobs, change filters, make provider requests, or send emails. A local
+database report does not establish the cause of an empty hosted queue.
+
 Set `TAVILY_API_KEY` in the worker computer's private `.env` to enable Tavily
 alongside the existing ATS/company fetches. A blank key disables it. No new
 worker, dependency, migration, or scoring provider is introduced. The existing
