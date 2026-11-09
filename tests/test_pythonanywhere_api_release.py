@@ -149,6 +149,38 @@ class ReleaseTests(unittest.TestCase):
         preflight.assert_not_called()
         self.assertNotIn('private disk path', ' '.join(logs.output))
 
+    def test_migration_sqlite_diagnostics_are_safe_and_keep_old_release(self):
+        # Real sqlite exceptions establish the runtime's diagnostic attributes.
+        conn = sqlite3.connect(':memory:')
+        try:
+            with self.assertRaises(sqlite3.OperationalError) as raised:
+                conn.execute('SELECT * FROM synthetic_private_table')
+            error = raised.exception
+        finally:
+            conn.close()
+        self.assertEqual((error.sqlite_errorname, error.sqlite_errorcode), ('SQLITE_ERROR', sqlite3.SQLITE_ERROR))
+        error.deployment_migration_step = 'backup'
+        helper = MagicMock()
+        helper.migrate_pending.side_effect = error
+        old_app = object()
+        with patch.object(Path, 'exists', return_value=True), \
+                patch.object(release, '_json_file', side_effect=[{'sha': 'c' * 40}, self.request()]), \
+                patch.object(release, '_pipeline_lock'), \
+                patch.object(release, '_extract', return_value=release.RELEASES / SHA), \
+                patch.object(release, '_migration_module', return_value=helper), \
+                patch.object(release, '_atomic_json') as write, \
+                patch.object(release, '_preflight') as preflight, \
+                patch.object(release, '_import_application', return_value=old_app), \
+                self.assertLogs(release.logger, level='ERROR') as logs:
+            self.assertIs(release.application(), old_app)
+        status = write.call_args.args[1]
+        self.assertEqual(status['migration_step'], 'backup')
+        self.assertEqual(status['sqlite_errorname'], 'SQLITE_ERROR')
+        self.assertEqual(status['sqlite_errorcode'], sqlite3.SQLITE_ERROR)
+        self.assertFalse(status['success'])
+        self.assertNotIn('synthetic_private_table', json.dumps(status) + '\n'.join(logs.output))
+        preflight.assert_not_called()
+
 
 class ApiTests(unittest.TestCase):
     def response(self, status=200, content=b''):
@@ -265,6 +297,29 @@ class ApiTests(unittest.TestCase):
         session = self.reload_session(api.requests.ReadTimeout(), [
             self.response(content=json.dumps(status).encode())])
         self.assertEqual(self.deploy_mock_session(session, [0, 0]), 1)
+
+    def test_ci_prints_validated_sqlite_diagnostics_and_rejects_private_values(self):
+        base = dict(run_id=RUN, sha=SHA, success=False, stage='migrations',
+                    error_code='OperationalError', migration_step='backup',
+                    sqlite_errorname='SQLITE_READONLY', sqlite_errorcode=sqlite3.SQLITE_READONLY)
+        session = self.reload_session(self.response(200), [
+            self.response(content=json.dumps(base).encode())])
+        with self.assertLogs(api.logger, level='ERROR') as logs:
+            self.assertEqual(self.deploy_mock_session(session, [0, 0]), 1)
+        output = '\n'.join(logs.output)
+        self.assertIn('migration_step=backup', output)
+        self.assertIn('sqlite_errorname=SQLITE_READONLY', output)
+        self.assertIn('sqlite_errorcode=8', output)
+        for mutation in (dict(migration_step='private-path'), dict(migration_step=[]),
+                         dict(sqlite_errorname='SQLITE_private_credential'),
+                         dict(sqlite_errorcode=True), dict(sqlite_errorcode=999999),
+                         dict(sqlite_errorcode=sqlite3.SQLITE_BUSY)):
+            with self.subTest(fields=mutation):
+                status = dict(base, **mutation)
+                session = self.reload_session(self.response(200), [
+                    self.response(content=json.dumps(status).encode())])
+                with self.assertRaisesRegex(api.legacy.RemoteDeploymentError, 'invalid_status'):
+                    self.deploy_mock_session(session, [0, 0])
 
     def test_reload_http_rejection_stops_without_status_polling(self):
         session = self.reload_session(self.response(502), [])

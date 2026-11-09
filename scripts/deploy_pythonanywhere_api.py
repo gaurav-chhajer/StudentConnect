@@ -8,6 +8,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import time
 import uuid
@@ -140,7 +141,22 @@ def deploy(sha):
                             code = status.get('error_code')
                             if stage not in ('extract', 'migrations', 'startup') or not isinstance(code, str) or not re.fullmatch(r'[A-Za-z]{2,40}', code):
                                 raise legacy.RemoteDeploymentError('confirmation', 'invalid_status')
+                            step = status.get('migration_step')
+                            name = status.get('sqlite_errorname')
+                            sqlite_code = status.get('sqlite_errorcode')
+                            if (step is not None and (not isinstance(step, str) or
+                                    stage != 'migrations' or step not in legacy.MIGRATION_STEPS)):
+                                raise legacy.RemoteDeploymentError('confirmation', 'invalid_status')
+                            if (name is not None or sqlite_code is not None) and not (
+                                    isinstance(name, str) and name.startswith('SQLITE_') and
+                                    type(sqlite_code) is int and 1 <= sqlite_code <= 65535 and
+                                    getattr(sqlite3, name, None) == sqlite_code):
+                                raise legacy.RemoteDeploymentError('confirmation', 'invalid_status')
                             logger.error('Hosted release failed stage=%s error_code=%s; previous release retained', stage, code)
+                            if step is not None or name is not None:
+                                logger.error('Hosted diagnostics: migration_step=%s sqlite_errorname=%s sqlite_errorcode=%s',
+                                             step or 'unavailable', name or 'unavailable',
+                                             sqlite_code if sqlite_code is not None else 'unavailable')
                             return 1
                         logger.info('Verified release %s activated; reload_acknowledged=%s',
                                     sha[:12], reload_acknowledged)

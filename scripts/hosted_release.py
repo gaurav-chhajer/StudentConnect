@@ -190,8 +190,24 @@ def application():
         except (OSError, ValueError, RuntimeError, TypeError, ImportError, sqlite3.Error,
                 subprocess.SubprocessError, zipfile.BadZipFile) as error:
             logger.error('Release activation failed stage=%s error=%s', stage, type(error).__name__)
+            diagnostics = {}
+            step = getattr(error, 'deployment_migration_step', None)
+            if stage == 'migrations' and step in ('inspect', 'backup', 'apply', 'verify'):
+                diagnostics['migration_step'] = step
+            if isinstance(error, sqlite3.Error):
+                name = getattr(error, 'sqlite_errorname', None)
+                code = getattr(error, 'sqlite_errorcode', None)
+                if (isinstance(name, str) and name.startswith('SQLITE_') and
+                        type(code) is int and 1 <= code <= 65535 and getattr(sqlite3, name, None) == code):
+                    diagnostics.update(sqlite_errorname=name, sqlite_errorcode=code)
+            if diagnostics:
+                logger.error('Release diagnostics: migration_step=%s sqlite_errorname=%s sqlite_errorcode=%s',
+                             diagnostics.get('migration_step', 'unavailable'),
+                             diagnostics.get('sqlite_errorname', 'unavailable'),
+                             diagnostics.get('sqlite_errorcode', 'unavailable'))
             _atomic_json(STATUS, {'run_id': request['run_id'], 'sha': request['sha'],
-                                  'success': False, 'stage': stage, 'error_code': type(error).__name__})
+                                  'success': False, 'stage': stage, 'error_code': type(error).__name__,
+                                  **diagnostics})
             if importing:
                 raise
     return _import_application(RELEASES / active['sha'] if active else ROOT)

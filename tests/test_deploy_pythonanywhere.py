@@ -216,6 +216,24 @@ class RemoteTests(unittest.TestCase):
                 self.assertIsNone(conn.execute("SELECT 1 FROM sqlite_master WHERE name='local_feature'").fetchone())
             self.assertEqual(deploy.pending_migrations(database, migration_dir), [])
 
+    def test_migration_diagnostics_identify_each_step_and_preserve_sqlite_exception(self):
+        for step in ('inspect', 'backup', 'apply', 'verify'):
+            with self.subTest(step=step):
+                error = sqlite3.OperationalError('synthetic private path and credential')
+                pending = [Path('023.sql')]
+                with patch.object(deploy, 'pending_migrations',
+                                  side_effect=error if step == 'inspect' else
+                                  [pending, error] if step == 'verify' else [pending, []]), \
+                        patch.object(deploy, 'backup_database',
+                                     side_effect=error if step == 'backup' else None), \
+                        patch.object(deploy.subprocess, 'run',
+                                     side_effect=error if step == 'apply' else None), \
+                        patch.object(deploy.time, 'time', return_value=0):
+                    with self.assertRaises(sqlite3.OperationalError) as raised:
+                        deploy.migrate_pending(deadline=100)
+                self.assertIs(raised.exception, error)
+                self.assertEqual(error.deployment_migration_step, step)
+
     def test_changed_applied_migration_fails_before_backup_or_command(self):
         with tempfile.TemporaryDirectory(dir='tests') as directory:
             root = Path(directory)

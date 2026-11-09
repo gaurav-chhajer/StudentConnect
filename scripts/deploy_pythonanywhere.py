@@ -1,7 +1,7 @@
 """Deploy reviewed main commits through a dedicated PythonAnywhere Bash console."""
 
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -24,6 +24,17 @@ STATUS = ROOT / 'data/deployment-status.json'
 logger = logging.getLogger(__name__)
 MAX_BACKUP_SECONDS = 60
 MAX_MIGRATION_SECONDS = 90
+MIGRATION_STEPS = frozenset({'inspect', 'backup', 'apply', 'verify'})
+
+
+@contextmanager
+def _migration_step(step):
+    """Attach a fixed diagnostic label without replacing the original exception."""
+    try:
+        yield
+    except Exception as error:
+        error.deployment_migration_step = step
+        raise
 
 
 class RemoteDeploymentError(RuntimeError):
@@ -139,25 +150,29 @@ def migrate_pending(database=None, migration_dir=None, backup_dir=None, deadline
     database = Path(database or ROOT / 'data/jobs.db')
     migration_dir = Path(migration_dir or ROOT / 'backend/migrations')
     deadline = deadline if deadline is not None else time.time() + MAX_MIGRATION_SECONDS
-    pending = pending_migrations(database, migration_dir)
+    with _migration_step('inspect'):
+        pending = pending_migrations(database, migration_dir)
     if not pending:
         logger.info('No pending database migrations')
         return []
     backup_label = deployment_sha[:12] if deployment_sha else 'manual'
-    backup_database(database, backup_label, deadline, backup_dir)
+    with _migration_step('backup'):
+        backup_database(database, backup_label, deadline, backup_dir)
     remaining = deadline - time.time()
     if remaining <= 0:
         raise RuntimeError('Deployment deadline expired before migrations')
     timeout = min(MAX_MIGRATION_SECONDS, remaining)
-    try:
-        subprocess.run([str(python_executable or sys.executable), '-B', '-m', 'backend.migrate'],
-                       cwd=runtime_root or ROOT, check=True,
-                       capture_output=True, text=True, timeout=timeout)
-    except subprocess.SubprocessError as error:
-        raise RuntimeError('Database migration command failed; reload withheld') from error
-    unapplied = pending_migrations(database, migration_dir)
-    if unapplied:
-        raise RuntimeError('Database migration verification failed; reload withheld')
+    with _migration_step('apply'):
+        try:
+            subprocess.run([str(python_executable or sys.executable), '-B', '-m', 'backend.migrate'],
+                           cwd=runtime_root or ROOT, check=True,
+                           capture_output=True, text=True, timeout=timeout)
+        except subprocess.SubprocessError as error:
+            raise RuntimeError('Database migration command failed; reload withheld') from error
+    with _migration_step('verify'):
+        unapplied = pending_migrations(database, migration_dir)
+        if unapplied:
+            raise RuntimeError('Database migration verification failed; reload withheld')
     names = [path.name for path in pending]
     logger.info('Applied and verified database migrations: %s', ','.join(names))
     return names
