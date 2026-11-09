@@ -76,6 +76,26 @@ class EmailTests(unittest.TestCase):
         self.assertEqual(send_digest(self.conn), 2)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sent_log").fetchone()[0], 0)
 
+    def test_email_requires_at_least_sixty_even_with_lower_saved_threshold(self):
+        self.seed_user()
+        self.conn.execute("INSERT INTO user_settings(user_id,min_score) VALUES(1,40)")
+        for score in (40, 59, 60, 61):
+            with self.subTest(score=score):
+                self.conn.execute("UPDATE scores SET fit_score=?", (score,))
+                self.conn.commit()
+                with patch.object(pipeline, "deliver_email") as delivery:
+                    self.assertEqual(send_digest(self.conn, send=True), 2 if score >= 60 else 0)
+                self.assertEqual(delivery.call_count, 1 if score >= 60 else 0)
+                self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM sent_log").fetchone()[0],
+                                 2 if score >= 60 else 0)
+                self.conn.execute("DELETE FROM sent_log")
+        self.assertEqual(pipeline.get_unsent_top_matches(self.conn, 1, min_score=62), [])
+        self.conn.execute("UPDATE scores SET fit_score=59")
+        self.assertEqual(pipeline.get_unsent_top_matches(self.conn, 1, min_score=40), [])
+        self.conn.execute("UPDATE user_settings SET min_score=90")
+        self.conn.execute("UPDATE scores SET fit_score=89")
+        self.assertEqual(pipeline.get_unsent_top_matches(self.conn, 1), [])
+
     def test_send_acceptance_and_repeat_dedup(self):
         self.seed_user()
         pipeline.store_score(self.conn, 1, 1, sample_result())

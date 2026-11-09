@@ -31,6 +31,7 @@ from backend.evaluation import validate_evaluation, RUBRIC_VERSION
 
 DB_PATH = str(Path(__file__).resolve().parents[1] / "data" / "jobs.db")
 FETCH_TIMEOUT_SECONDS = (15, 60)
+MIN_EMAIL_SCORE = 60
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 # Override the documented default with GROQ_MODEL when choosing another model.
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
@@ -786,6 +787,8 @@ def get_unsent_top_matches(conn, user_id, min_score=None, limit=5, channel="emai
             return []
     if min_score is None:
         min_score = settings[1] if channel == "email" and settings else 60
+    if channel == "email":
+        min_score = max(MIN_EMAIL_SCORE, min_score)
     cur = conn.execute(
         """
         SELECT j.title, j.url, c.name as company_name, s.fit_score, s.reasoning, s.matched_skills, s.missing_requirements, s.evaluation_json, j.id as job_id,
