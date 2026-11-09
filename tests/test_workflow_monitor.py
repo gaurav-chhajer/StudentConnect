@@ -66,9 +66,11 @@ class WorkflowMonitorTests(unittest.TestCase):
                           ('fixture', json.dumps(metrics), '2026-11-09T00:00:00+00:00'))
         self.conn.commit()
         page = self.client.get('/admin/workflow-monitor').get_data(as_text=True)
-        for text in ('Scored this batch', 'Cumulative evaluations', 'output tokens per minute',
+        for text in ('Scored today (IST)', 'output tokens per minute',
                      '1174', 'Retry not before', 'waiting alone may not resolve it'):
             self.assertIn(text, page)
+        self.assertNotIn('Scored this batch', page)
+        self.assertNotIn('Cumulative evaluations', page)
 
     def test_sort_validation_and_scored_priority(self):
         self.conn.execute("INSERT INTO recruiter_jobs(workflow_id,number,posting_json,facts_json,evaluation_json) VALUES(1,2,?,'{}','{}')",(json.dumps({'title':'Unscored','verified_at':'2026-11-01'}),))

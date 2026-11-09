@@ -215,7 +215,8 @@ def register_routes(application, connection, database):
         with _groq_status_transaction(connection, database, run_id, revision, started) as conn:
             previous = conn.execute("SELECT * FROM groq_key_history WHERE run_id=? ORDER BY key_slot",
                                     (run_id,)).fetchall()
-            now = datetime.now(timezone.utc).isoformat()
+            reported_at = datetime.now(timezone.utc)
+            now = reported_at.isoformat()
             if not previous:
                 if (revision != 0 or outcome != "running" or states[0] != "not_attempted" or
                         any(state not in {"not_configured", "not_attempted"} for state in states)):
@@ -223,6 +224,7 @@ def register_routes(application, connection, database):
                 conn.executemany("""INSERT INTO groq_key_history
                     (run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count) VALUES(?,?,?,'running',0,?,?,?)""",
                     [(run_id, slot, state, now, now, job_counts[slot - 1]) for slot, state in enumerate(states, 1)])
+                increments = job_counts
             else:
                 if len(previous) != len(states):
                     raise ValueError("Key slot count cannot change within a run")
@@ -246,10 +248,18 @@ def register_routes(application, connection, database):
                         raise ValueError("Invalid key history transition")
                 if any(count < row["job_count"] for count, row in zip(job_counts, previous)):
                     raise ValueError("Groq key job counts cannot decrease")
+                increments = [count - row["job_count"] for count, row in zip(job_counts, previous)]
                 for row, state, count in zip(previous, states, job_counts):
                     conn.execute("""UPDATE groq_key_history SET state=?,outcome=?,revision=?,job_count=?,
                         updated_at=CASE WHEN state<>? OR job_count<>? THEN ? ELSE updated_at END WHERE id=?""",
                         (state, outcome, revision, count, state, count, now, row["id"]))
+            # The revision and daily deltas commit together. Replayed revisions return above.
+            for slot, increment in enumerate(increments, 1):
+                if increment:
+                    conn.execute("""INSERT INTO groq_daily_scores(day_ist,key_slot,job_count)
+                        VALUES(?,?,?) ON CONFLICT(day_ist,key_slot)
+                        DO UPDATE SET job_count=groq_daily_scores.job_count+excluded.job_count""",
+                        (reported_at.astimezone(INDIA).date().isoformat(), slot, increment))
         return {"saved": True, "revision": revision}
 
     @routes.post("/observations")

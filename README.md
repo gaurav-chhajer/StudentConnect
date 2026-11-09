@@ -777,9 +777,16 @@ remain eligible for rescoring. Fetching reserves the final two minutes of its
 budget, leaving an 18-minute evening fetching window.
 The worker records five Groq key slot statuses per matching run, including which
 keys hit HTTP 429 and whether work completed or was deferred. The workflow monitor
-shows completed, validated evaluations in the latest batch and cumulative evaluations
-across retained batch history. These are evaluations, including repeats, rather than
-unique jobs or confirmed saved scores. History is not included in email.
+shows a single Scored today (IST) total per key, combining completed, validated
+evaluations reported across all batches since midnight IST. Positive changes to
+batch counts are recorded atomically with history revisions, so repeated reports
+do not count twice and reports across midnight belong to their respective days.
+These are evaluations, including repeats, rather than unique jobs or confirmed
+saved scores. Failed attempts and title suggestions are excluded. The calendar day
+is separate from Groq's quota reset window. History is not included in email.
+Back up before applying migration `023_groq_daily_scores.sql` using the documented
+migration command. Daily tracking begins after migration and server update;
+older batch history is preserved but is not backfilled into daily totals.
 History is retained without automatic deletion and grows by five small rows per run.
 Statuses describe observed evaluations, not live quotas or predicted reset times.
 Provider `Retry-After` (seconds or HTTP date), or a parsed retry duration in a

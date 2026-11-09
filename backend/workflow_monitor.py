@@ -194,6 +194,13 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
     if not data['available']:
         return data
     data['groq_keys']=[]
+    data['groq_daily_available'] = bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_daily_scores'").fetchone())
+    daily = {}
+    if data['groq_daily_available']:
+        day_ist = now.astimezone(timezone(timedelta(hours=5, minutes=30))).date().isoformat()
+        daily = {row['key_slot']: row['job_count'] for row in conn.execute(
+            'SELECT key_slot,job_count FROM groq_daily_scores WHERE day_ist=?', (day_ist,))}
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone():
         totals = {row['key_slot']: row['total'] for row in conn.execute(
             'SELECT key_slot,COALESCE(SUM(job_count),0) AS total FROM groq_key_history GROUP BY key_slot')}
@@ -201,6 +208,7 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
             row=conn.execute('SELECT key_slot,state,outcome,updated_at,job_count FROM groq_key_history WHERE key_slot=? ORDER BY id DESC LIMIT 1',(slot,)).fetchone()
             key = dict(row) if row else dict(key_slot=slot,state='unreported',outcome=None,updated_at=None,job_count=0)
             key['total_job_count'] = totals.get(slot, 0)
+            key['today_job_count'] = daily.get(slot, 0) if data['groq_daily_available'] else None
             data['groq_keys'].append(key)
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_limits'").fetchone():
         for key in data['groq_keys']:

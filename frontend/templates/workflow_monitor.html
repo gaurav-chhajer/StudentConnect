@@ -18,11 +18,12 @@
 {% else %}
 <section class="wm-panel" aria-label="Groq key status">
 <h2>Groq keys</h2>
-<p class="wm-muted">Scored this batch counts completed, validated evaluations in the latest batch. Cumulative evaluations totals retained batch history, including repeated evaluations; it is not a count of unique jobs or confirmed saved scores. Header readings show requests per day and tokens per minute. A rejection can identify another quota. Reset and retry timestamps are provider estimates, not proof of replenished capacity.</p>
-<div class="wm-table-wrap"><table><thead><tr><th>Key</th><th>Status</th><th>Scored this batch</th><th>Cumulative evaluations</th><th>Last reported</th><th>Remaining requests / tokens</th><th>Reset time</th></tr></thead><tbody>
+<p class="wm-muted">Scored today totals completed, validated evaluations reported across all batches since midnight IST. Repeated evaluations count again; failed attempts and title suggestions do not count. Daily counts start when daily tracking is enabled; earlier evaluations are not included. This calendar-day total is separate from Groq's quota reset times. Header readings show requests per day and tokens per minute. A rejection can identify another quota. Reset and retry timestamps are provider estimates, not proof of replenished capacity.</p>
+{% if not monitor.groq_daily_available %}<p class="wm-muted">Daily tracking is unavailable. Back up the database and apply the daily-score migration.</p>{% endif %}
+<div class="wm-table-wrap"><table><thead><tr><th>Key</th><th>Status</th><th>Scored today (IST)</th><th>Last reported</th><th>Remaining requests / tokens</th><th>Reset time</th></tr></thead><tbody>
 {% for key in monitor.groq_keys %}<tr>
 <td>Key {{ key.key_slot }}</td><td>{{ key.state|replace('_',' ') }}</td>
-<td class="wm-number">{{ key.job_count }}</td><td class="wm-number">{{ key.total_job_count }}</td>
+<td class="wm-number">{{ key.today_job_count if key.today_job_count is not none else 'Unavailable' }}</td>
 <td>{% if key.updated_at %}<time datetime="{{ key.updated_at }}">{{ key.updated_at }}</time>{% else %}Not reported{% endif %}</td>
 <td>{% if key.limits is defined %}
 Requests/day: {{ key.limits.get('remaining_requests','Unavailable') }} / {{ key.limits.get('limit_requests','Unavailable') }}<br>
@@ -36,7 +37,7 @@ Observed <time datetime="{{ key.limits.rejected_at }}">{{ key.limits.rejected_at
 <td>{% if key.limits is defined %}{% for field,label in [('reset_requests','Requests'),('reset_tokens','Tokens'),('retry_at','Retry not before')] %}
 {{ label }}: {% if key.limits.get(field) %}<time datetime="{{ key.limits[field] }}">{{ key.limits[field] }}</time>{% else %}Unavailable{% endif %}<br>
 {% endfor %}{% else %}Unavailable{% endif %}</td>
-</tr>{% else %}<tr><td colspan="7">No key status history available.</td></tr>{% endfor %}
+</tr>{% else %}<tr><td colspan="6">No key status history available.</td></tr>{% endfor %}
 </tbody></table></div></section>
 <section class="wm-workers" aria-label="Last reported worker status">
 {% for worker in monitor.workers %}<article><div class="wm-worker-label"><h2>{{ worker.name }}</h2><span class="wm-state {{ 'warning' if worker.stale else worker.state }}">{{ 'No recent update' if worker.stale else worker.state|replace('_',' ') }}</span></div><p>{{ worker.detail }}</p><small>Last reported: {% if worker.updated_at %}<time datetime="{{ worker.updated_at }}">{{ worker.updated_at }}</time>{% else %}Not yet reported{% endif %}</small>{% if worker.next_check_at %}<small>Scheduled check: <time datetime="{{ worker.next_check_at }}">{{ worker.next_check_at }}</time></small>{% endif %}</article>{% endfor %}
