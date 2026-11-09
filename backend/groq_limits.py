@@ -24,6 +24,7 @@ REJECTION_FIELDS = REJECTION_COUNTS + ('limited_dimension', 'request_fit', 'reje
                                        'rejected_at', 'retry_at')
 MAX_DELAY_SECONDS = 366 * 86400
 MAX_ERROR_BYTES = 32768
+KEY_SLOT_COUNT = 5
 logger = logging.getLogger(__name__)
 
 
@@ -140,13 +141,13 @@ class CooldownPending(RuntimeError):
 
 
 class QuotaState:
-    """Three consumer-owned monotonic deadlines, shared across batches/reconnections."""
+    """Consumer-owned monotonic deadlines, shared across batches/reconnections."""
     def __init__(self):
-        self.until = [0.0, 0.0, 0.0]
+        self.until = [0.0] * KEY_SLOT_COUNT
 
     def record(self, slot, metrics):
         validate_metrics(metrics)
-        if type(slot) is not int or not 0 <= slot < 3:
+        if type(slot) is not int or not 0 <= slot < KEY_SLOT_COUNT:
             raise ValueError('Invalid quota slot')
         if 'retry_at' in metrics:
             delay = (datetime.fromisoformat(metrics['retry_at']) - datetime.now(timezone.utc)).total_seconds()

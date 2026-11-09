@@ -7,7 +7,7 @@ import sqlite3
 
 import requests
 
-from backend import pipeline_skeleton as pipeline, role_titles, store
+from backend import groq_limits, pipeline_skeleton as pipeline, role_titles, store
 
 WORKERS={'fetch':'Job discovery','score':'Local scoring','email':'Email delivery','agent':'Application agent'}
 SOURCE_ISSUES={
@@ -197,7 +197,7 @@ def snapshot(conn,user_id,workflow_id=0,*,page=1,stage='all',severity='all',befo
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='groq_key_history'").fetchone():
         totals = {row['key_slot']: row['total'] for row in conn.execute(
             'SELECT key_slot,COALESCE(SUM(job_count),0) AS total FROM groq_key_history GROUP BY key_slot')}
-        for slot in range(1,4):
+        for slot in range(1,groq_limits.KEY_SLOT_COUNT+1):
             row=conn.execute('SELECT key_slot,state,outcome,updated_at,job_count FROM groq_key_history WHERE key_slot=? ORDER BY id DESC LIMIT 1',(slot,)).fetchone()
             key = dict(row) if row else dict(key_slot=slot,state='unreported',outcome=None,updated_at=None,job_count=0)
             key['total_job_count'] = totals.get(slot, 0)

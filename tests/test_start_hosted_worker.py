@@ -105,10 +105,13 @@ class StartupWorkerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:
             root=Path(folder)
             (root/'data').mkdir()
-            (root/'.env').write_text('GROQ_API_KEY=synthetic-new\nGROQ_API_KEY_2=synthetic-second\n')
+            (root/'.env').write_text('GROQ_API_KEY=synthetic-new\nGROQ_API_KEY_2=synthetic-second\n'
+                                     'GROQ_API_KEY_4=synthetic-fourth\nGROQ_API_KEY_5=\n')
             with patch.dict(os.environ,{'GROQ_API_KEY':'synthetic-old'}), patch.object(start_hosted_worker,'PROJECT_ROOT',root), patch.object(start_hosted_worker,'load_hosted_environment'), patch.object(watch_hosted_jobs,'main',side_effect=lambda args: 0 if os.environ['GROQ_API_KEY']=='synthetic-new' else 1):
                 self.assertEqual(start_hosted_worker.main(),0)
                 self.assertEqual(os.environ['GROQ_API_KEY_2'],'synthetic-second')
+                self.assertEqual(os.environ['GROQ_API_KEY_4'],'synthetic-fourth')
+                self.assertEqual(os.environ['GROQ_API_KEY_5'],'')
 
     def test_default_live_command_uses_independent_groq_queue(self):
         with patch.object(watch_hosted_jobs,'run_queued',return_value=0) as queued, patch.object(watch_hosted_jobs,'run_cycle') as sequential:

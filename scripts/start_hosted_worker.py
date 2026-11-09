@@ -26,7 +26,7 @@ def main():
         load_hosted_environment(PROJECT_ROOT / ".env")
         # Explicitly rotated local Groq credentials must replace stale inherited slots.
         private_values=dotenv_values(PROJECT_ROOT / '.env', interpolate=False)
-        for name in ('GROQ_API_KEY','GROQ_API_KEY_2','GROQ_API_KEY_3'):
+        for name in ('GROQ_API_KEY','GROQ_API_KEY_2','GROQ_API_KEY_3','GROQ_API_KEY_4','GROQ_API_KEY_5'):
             if name in private_values:
                 os.environ[name]=private_values[name] or ''
         from scripts import watch_hosted_jobs

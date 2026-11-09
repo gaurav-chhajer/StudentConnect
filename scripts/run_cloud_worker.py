@@ -46,7 +46,9 @@ class GroqKeyPool:
         self.client, self.deadline = client, deadline
         self.quota = quota if quota is not None else groq_limits.QuotaState()
         self.keys = (pipeline.GROQ_API_KEY.strip(), os.environ.get("GROQ_API_KEY_2", "").strip(),
-                     os.environ.get("GROQ_API_KEY_3", "").strip())
+                     os.environ.get("GROQ_API_KEY_3", "").strip(),
+                     os.environ.get("GROQ_API_KEY_4", "").strip(),
+                     os.environ.get("GROQ_API_KEY_5", "").strip())
         configured = [key for key in self.keys if key]
         if not self.keys[0]:
             raise ValueError("Configure GROQ_API_KEY before matching")
@@ -55,7 +57,7 @@ class GroqKeyPool:
         self.slot = 0
         self.run_id = uuid.uuid4().hex
         self.states = ["not_attempted" if key else "not_configured" for key in self.keys]
-        self.job_counts = [0, 0, 0]
+        self.job_counts = [0] * len(self.keys)
         self.revision = 0
         self.reporting_failed = False
         self.publish("running")

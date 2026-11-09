@@ -204,7 +204,7 @@ def create_app(database_path=None, upload_dir=None):
             data["groq_history"] = []
             run_ids = [run["run_id"] for run in runs[:20]]
             key_rows = conn.execute("""SELECT run_id,key_slot,state,updated_at FROM groq_key_history
-                WHERE run_id IN (""" + ",".join("?" for _ in run_ids) + ") ORDER BY key_slot LIMIT 60",
+                WHERE run_id IN (""" + ",".join("?" for _ in run_ids) + ") ORDER BY key_slot LIMIT 100",
                 run_ids).fetchall() if run_ids else []
             keys_by_run = {run_id: [] for run_id in run_ids}
             for row in key_rows:

@@ -16,7 +16,7 @@ from tests import test_cloud_worker, test_web_flows
 class PreHistoryMigrationTests(unittest.TestCase):
     def setUp(self):
         migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
-        previous = [path for path in migrations if path.name not in {'008_groq_key_history.sql', '021_groq_key_job_counts.sql'}]
+        previous = [path for path in migrations if path.name not in {'008_groq_key_history.sql', '021_groq_key_job_counts.sql', '022_five_groq_keys.sql'}]
         # Reproduce a deployed database that predates the new history feature.
         with patch('backend.migrate.Path.glob', return_value=previous):
             test_web_flows.WebFlowTests.setUp(self)

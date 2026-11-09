@@ -20,6 +20,7 @@ from flask import Blueprint, current_app, request
 
 from backend import match_reminders, matching_tasks, pipeline_skeleton as pipeline, role_titles, similarity, store
 from backend.evaluation import validate_evaluation
+from backend import groq_limits as groq_limits_module
 from scripts import run_pipeline
 
 MAX_BODY_BYTES = 2 * 1024 * 1024
@@ -181,7 +182,7 @@ def register_routes(application, connection, database):
         if set(data)!={'key_slot','model','metrics'}:
             raise ValueError('Invalid limit fields')
         slot,model,metrics=data['key_slot'],data['model'],data['metrics']
-        if type(slot) is not int or not 1<=slot<=3 or not isinstance(model,str) or not 1<=len(model)<=200:
+        if type(slot) is not int or not 1<=slot<=groq_limits_module.KEY_SLOT_COUNT or not isinstance(model,str) or not 1<=len(model)<=200:
             raise ValueError('Invalid limit identity')
         validate_metrics(metrics)
         with connection() as conn:
@@ -205,9 +206,9 @@ def register_routes(application, connection, database):
         allowed = {"not_configured", "not_attempted", "attempting", "succeeded", "rate_limited", "failed"}
         if (not isinstance(run_id, str) or re.fullmatch(r"[a-f0-9]{32}", run_id) is None or
                 type(revision) is not int or not 0 <= revision <= 1000 or
-                not isinstance(states, list) or len(states) != 3 or
+                not isinstance(states, list) or len(states) not in (3, groq_limits_module.KEY_SLOT_COUNT) or
                 any(not isinstance(state, str) or state not in allowed for state in states) or
-                not isinstance(job_counts, list) or len(job_counts) != 3 or
+                not isinstance(job_counts, list) or len(job_counts) != len(states) or
                 any(type(count) is not int or not 0 <= count <= 1000000 for count in job_counts) or
                 not isinstance(outcome, str) or outcome not in {"running", "complete", "deferred"}):
             raise ValueError("Invalid key history")
@@ -223,6 +224,8 @@ def register_routes(application, connection, database):
                     (run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count) VALUES(?,?,?,'running',0,?,?,?)""",
                     [(run_id, slot, state, now, now, job_counts[slot - 1]) for slot, state in enumerate(states, 1)])
             else:
+                if len(previous) != len(states):
+                    raise ValueError("Key slot count cannot change within a run")
                 old_revision = previous[0]["revision"]
                 if revision == old_revision:
                     if (states != [row["state"] for row in previous] or

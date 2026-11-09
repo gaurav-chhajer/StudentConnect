@@ -131,7 +131,8 @@ class HybridEndpointTests(unittest.TestCase):
             return response.json
         client.call.side_effect = hosted_call
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic-1'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2=keys[0], GROQ_API_KEY_3=keys[1]), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2=keys[0], GROQ_API_KEY_3=keys[1],
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5=''), \
                 patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
                 patch.object(runner.time, 'monotonic', return_value=0, side_effect=clock), \
                 patch.object(pipeline, 'score_job_for_user', side_effect=score) as evaluate:
@@ -146,7 +147,8 @@ class HybridEndpointTests(unittest.TestCase):
                          [{}, {'api_key': 'synthetic-2'}, {'api_key': 'synthetic-3'}, {'api_key': 'synthetic-3'}])
         self.assertEqual(evaluate.call_args_list[0].args, evaluate.call_args_list[2].args)
         rows = self.conn.execute('SELECT key_slot,state,outcome FROM groq_key_history ORDER BY key_slot').fetchall()
-        self.assertEqual([row['state'] for row in rows], ['rate_limited', 'rate_limited', 'succeeded'])
+        self.assertEqual([row['state'] for row in rows],
+                         ['rate_limited', 'rate_limited', 'succeeded', 'not_configured', 'not_configured'])
         self.assertTrue(all(row['outcome'] == 'complete' for row in rows))
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 2)
         self.assertNotIn('synthetic', repr([dict(row) for row in self.conn.execute('SELECT * FROM groq_key_history')]))
@@ -162,7 +164,8 @@ class HybridEndpointTests(unittest.TestCase):
         pending = pipeline.filter_candidate_jobs(self.conn, dict(id=1, preferences_json='{}'))
         self.assertEqual(len(pending), 1)
         rows = self.conn.execute('SELECT state,outcome FROM groq_key_history').fetchall()
-        self.assertTrue(all(row['state'] == 'rate_limited' and row['outcome'] == 'deferred' for row in rows))
+        self.assertEqual([row['state'] for row in rows], ['rate_limited'] * 3 + ['not_configured'] * 2)
+        self.assertTrue(all(row['outcome'] == 'deferred' for row in rows))
 
     def test_later_runs_skip_scores_saved_before_rate_limit_interruption(self):
         status, _ = self.run_matching([test_evaluation.sample_result()] + [http_error(429)] * 3)
