@@ -258,6 +258,21 @@ class WorkerSearchTests(unittest.TestCase):
                                       auto_parameters=False, include_domains=['linkedin.com']))
         self.assertEqual(post.call_count, 1)
 
+    def test_configured_tavily_keys_rotate_by_persistent_reservation_id(self):
+        client = MagicMock()
+        reservations = iter([
+            dict(search=dict(id=1, title='Software Engineer', platform='LinkedIn', domain='linkedin.com')),
+            dict(search=dict(id=2, title='Backend Engineer', platform='Indeed', domain='indeed.com')),
+            dict(search=dict(id=3, title='Data Engineer', platform='Wellfound', domain='wellfound.com')),
+            dict(search=None, reason='budget_exhausted'),
+        ])
+        client.call.side_effect = lambda route, payload: (
+            next(reservations) if route == 'discovery/reserve' else dict(saved=0))
+        with patch.object(tavily_search, 'search', return_value=[]) as search:
+            runner.discover_roles(client, ('key-one', 'key-two'), runner.time.monotonic() + 100)
+        self.assertEqual([call.args[1] for call in search.call_args_list],
+                         ['key-one', 'key-two', 'key-one'])
+
     def test_provider_timeout_is_recorded_once_without_retry_or_remaining_budget_burn(self):
         client = MagicMock()
         client.call.side_effect = [self.reservation(), dict(saved=0)]

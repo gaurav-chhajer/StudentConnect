@@ -14,6 +14,15 @@ from tests import test_cloud_worker, test_evaluation
 
 
 class TavilySearchTests(unittest.TestCase):
+    def test_configured_key_slots_skip_blanks_and_reject_duplicates(self):
+        with patch.dict(os.environ, {
+                'TAVILY_API_KEY': 'key-one', 'TAVILY_API_KEY_2': '', 'TAVILY_API_KEY_3': 'key-three'}):
+            self.assertEqual(runner.configured_tavily_keys(), ('key-one', 'key-three'))
+        with patch.dict(os.environ, {
+                'TAVILY_API_KEY': 'same-key', 'TAVILY_API_KEY_2': 'same-key', 'TAVILY_API_KEY_3': ''}):
+            with self.assertRaises(ValueError):
+                runner.configured_tavily_keys()
+
     def response(self, payload):
         response = MagicMock()
         response.status_code = 200

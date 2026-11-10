@@ -27,6 +27,15 @@ MAX_ACCOUNTS = 1000
 CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
 GROQ_EVALUATION_RESERVE = 240  # Status reports, one evaluation, hosted save and headroom.
 TAVILY_CYCLE_SECONDS = 300
+TAVILY_KEY_ENV_NAMES = ('TAVILY_API_KEY', 'TAVILY_API_KEY_2', 'TAVILY_API_KEY_3')
+
+
+def configured_tavily_keys():
+    keys = tuple(os.environ.get(name, '').strip() for name in TAVILY_KEY_ENV_NAMES)
+    configured = tuple(key for key in keys if key)
+    if len(configured) != len(set(configured)):
+        raise ValueError('Configured Tavily key slots must be distinct')
+    return configured
 
 
 class HostedInputsChanged(ValueError):
@@ -236,11 +245,12 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
         raise ValueError("Invalid company list")
     successful = set()
     failed = False
-    tavily_key = os.environ.get('TAVILY_API_KEY', '').strip()
-    logger.info('Role-title web discovery enabled=%s', bool(tavily_key))
-    if tavily_key and (stop is None or not stop.is_set()):
+    tavily_keys = configured_tavily_keys()
+    logger.info('Role-title web discovery enabled=%s configured_key_slots=%s',
+                bool(tavily_keys), len(tavily_keys))
+    if tavily_keys and (stop is None or not stop.is_set()):
         # This pass has its own budget; ATS fetching remains independent of search coverage.
-        discover_roles(client, tavily_key, min(deadline - 120, time.monotonic() + TAVILY_CYCLE_SECONDS), stop)
+        discover_roles(client, tavily_keys, min(deadline - 120, time.monotonic() + TAVILY_CYCLE_SECONDS), stop)
     for company in companies:
         if stop is not None and stop.is_set():
             return 1
@@ -293,8 +303,14 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
     return _score_pending(client, deadline, pool, successful, failed)
 
 
-def discover_roles(client, api_key, deadline, stop=None):
+def discover_roles(client, api_keys, deadline, stop=None):
     """Each charged reservation permits exactly one basic search, with no retries."""
+    if isinstance(api_keys, str):
+        api_keys = (api_keys,)
+    if (not isinstance(api_keys, (tuple, list)) or not api_keys or
+            any(not isinstance(key, str) or not key.strip() for key in api_keys)):
+        raise ValueError('One or more Tavily API keys are required')
+    api_keys = tuple(api_keys)
     for _ in range(web_discovery.DAILY_SEARCHES):
         if time.monotonic() >= deadline - 45 or stop is not None and stop.is_set():
             return
@@ -312,12 +328,13 @@ def discover_roles(client, api_key, deadline, stop=None):
                 not isinstance(search['title'], str) or not 1 <= len(search['title']) <= role_titles.MAX_TITLE_LENGTH or
                 any(ord(c) < 32 for c in search['title'])):
             raise ValueError('Invalid discovery reservation')
+        key_slot = (search['id'] - 1) % len(api_keys)
         postings, rejected, status = [], 0, 'complete'
         try:
-            urls = tavily_search.search(search['title'], api_key, domains=[search['domain']], deadline=deadline)
+            urls = tavily_search.search(search['title'], api_keys[key_slot], domains=[search['domain']], deadline=deadline)
         except (requests.RequestException, ValueError, TypeError) as error:
-            logger.error('Web search failed: search_id=%s platform=%s error=%s; credit retained, no retry',
-                         search['id'], search['platform'], type(error).__name__)
+            logger.error('Web search failed: search_id=%s platform=%s key_slot=%s error=%s; reservation retained, no retry',
+                         search['id'], search['platform'], key_slot + 1, type(error).__name__)
             status = 'failed'
             urls = []
         for url in urls:

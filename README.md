@@ -515,11 +515,15 @@ It does not print resumes, preferences, job descriptions or credentials, insert
 temporary jobs, change filters, make provider requests, or send emails. A local
 database report does not establish the cause of an empty hosted queue.
 
-Set `TAVILY_API_KEY` in the worker computer's private `.env` to enable Tavily
-alongside the existing ATS/company fetches. A blank key disables it. The existing
-`scripts.start_hosted_worker` launcher loads this configuration; restart that
-worker after configuration/code changes. Direct module commands use process
-environment variables.
+Set `TAVILY_API_KEY`, `TAVILY_API_KEY_2`, and optionally `TAVILY_API_KEY_3` in the
+worker computer's private `.env` to enable Tavily alongside the existing ATS/company
+fetches. Blank slots are skipped; if all are blank, Tavily is disabled. The worker
+rotates configured keys by persistent search reservation ID, so restarts do not
+reset which key is next. A failed request is not retried with another key. The
+existing shared 33/day and 1,000/month search caps still apply across every key and
+account. The existing `scripts.start_hosted_worker` launcher loads this
+configuration; restart that worker after configuration/code changes. Direct module
+commands use process environment variables.
 
 Selecting **Any available company** enables broad discovery for that account.
 Each query contains only one title alias from its current resume-supported role

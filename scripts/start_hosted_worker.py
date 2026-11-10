@@ -24,9 +24,10 @@ def main():
     root_logger.addHandler(handler)
     try:
         load_hosted_environment(PROJECT_ROOT / ".env")
-        # Explicitly rotated local Groq credentials must replace stale inherited slots.
+        # Explicitly configured provider key slots must replace stale inherited values.
         private_values=dotenv_values(PROJECT_ROOT / '.env', interpolate=False)
-        for name in ('GROQ_API_KEY','GROQ_API_KEY_2','GROQ_API_KEY_3','GROQ_API_KEY_4','GROQ_API_KEY_5'):
+        for name in ('GROQ_API_KEY','GROQ_API_KEY_2','GROQ_API_KEY_3','GROQ_API_KEY_4','GROQ_API_KEY_5',
+                     'TAVILY_API_KEY','TAVILY_API_KEY_2','TAVILY_API_KEY_3'):
             if name in private_values:
                 os.environ[name]=private_values[name] or ''
         from scripts import watch_hosted_jobs
