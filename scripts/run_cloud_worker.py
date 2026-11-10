@@ -56,7 +56,9 @@ class GroqKeyPool:
         self.keys = (pipeline.GROQ_API_KEY.strip(), os.environ.get("GROQ_API_KEY_2", "").strip(),
                      os.environ.get("GROQ_API_KEY_3", "").strip(),
                      os.environ.get("GROQ_API_KEY_4", "").strip(),
-                     os.environ.get("GROQ_API_KEY_5", "").strip())
+                     os.environ.get("GROQ_API_KEY_5", "").strip(),
+                     os.environ.get("GROQ_API_KEY_6", "").strip(),
+                     os.environ.get("GROQ_API_KEY_7", "").strip())
         configured = [key for key in self.keys if key]
         if not self.keys[0]:
             raise ValueError("Configure GROQ_API_KEY before matching")
@@ -545,10 +547,30 @@ def send_emails(client, deadline, immediate=False, matches_only=False, similarit
             raise ValueError("Invalid email response")
         next_id = cursor(payload["next"], after)
         if next_id is None:
-            return 0
+            break
         logger.info("Email checked user_id=%s accepted=%s", next_id, payload.get("sent") is True)
         after = next_id
-    logger.error("Email account budget reached; remaining accounts deferred")
+    else:
+        logger.error("Email account budget reached; remaining accounts deferred")
+        return 1
+    if immediate or matches_only or similarity_only:
+        return 0
+    return send_onboarding_reminders(client, deadline)
+
+
+def send_onboarding_reminders(client, deadline):
+    for _ in range(MAX_ACCOUNTS):
+        if time.monotonic() >= deadline - 100:
+            logger.error("Onboarding reminder time budget reached; remaining reminders deferred")
+            return 1
+        payload = client.call("email/onboarding-reminder", {})
+        if type(payload.get("sent")) is not bool or type(payload.get("done")) is not bool:
+            raise ValueError("Invalid onboarding reminder response")
+        if payload["done"]:
+            return 0
+        if not payload["sent"]:
+            raise ValueError("Onboarding reminder response made no progress")
+    logger.error("Onboarding reminder account budget reached; remaining reminders deferred")
     return 1
 
 

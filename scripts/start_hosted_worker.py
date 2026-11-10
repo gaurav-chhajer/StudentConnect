@@ -27,6 +27,7 @@ def main():
         # Explicitly configured provider key slots must replace stale inherited values.
         private_values=dotenv_values(PROJECT_ROOT / '.env', interpolate=False)
         for name in ('GROQ_API_KEY','GROQ_API_KEY_2','GROQ_API_KEY_3','GROQ_API_KEY_4','GROQ_API_KEY_5',
+                     'GROQ_API_KEY_6','GROQ_API_KEY_7',
                      'TAVILY_API_KEY','TAVILY_API_KEY_2','TAVILY_API_KEY_3'):
             if name in private_values:
                 os.environ[name]=private_values[name] or ''

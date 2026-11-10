@@ -92,7 +92,7 @@ def redeem_invitation(conn, form, now):
         user_id = invitation["user_id"]
         if user_id is None:
             user_id = conn.execute("INSERT INTO users(name,email,resume_text,preferences_json) VALUES(?,?,'','{}')", (name,email)).lastrowid
-            conn.execute("INSERT INTO user_settings(user_id,subscriptions_configured) VALUES(?,1)",(user_id,))
+            conn.execute("INSERT INTO user_settings(user_id,subscriptions_configured) VALUES(?,0)",(user_id,))
         else:
             user = conn.execute("SELECT email,active FROM users WHERE id=?",(user_id,)).fetchone()
             if user is None or user["email"].lower()!=email or not user["active"]:

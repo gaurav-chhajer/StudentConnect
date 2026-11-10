@@ -476,7 +476,8 @@ class ProfileEndpointTests(unittest.TestCase):
 
         client.call.side_effect = hosted
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(role_titles, 'generate', return_value=profile()) as generate, \
                 patch.object(pipeline, 'score_job_for_user', return_value=test_evaluation.sample_result()) as score, \
                 patch.object(runner.time, 'monotonic', return_value=0):
@@ -511,7 +512,8 @@ class ProfileWorkerTests(unittest.TestCase):
         response = requests.Response()
         response.status_code = 429
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic-1'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic-2', GROQ_API_KEY_3=''), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic-2', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(runner.GroqKeyPool, 'publish'), \
                 patch.object(runner.time, 'monotonic', return_value=0), \
                 patch.object(role_titles, 'generate', side_effect=[requests.HTTPError(response=response), profile()]) as generate, \

@@ -109,7 +109,9 @@ public signup; owner bootstrap requires that no accounts exist yet.
    connecting an existing profile. Reload after configuration and migration.
 
 Choose **Continue with Google** on Sign in or Sign up. Google verifies the email;
-new accounts start with empty private profiles and no company subscriptions.
+new accounts start with an empty resume and are matched against any available
+company. Company selection is available later in Settings. Password sign-up still
+requires the emailed one-time code before an account is created.
 If that verified email already has a profile, Google sign-in sends a separate
 one-time code to the email before connecting the Google identity. The code is
 browser-bound, expires after 10 minutes and is consumed once. You can also sign
@@ -342,6 +344,12 @@ Remove-Item -LiteralPath .\data\email_schedule.paused
 If an email was accepted but not recorded locally, reconcile its included jobs
 first; do not clear the marker and resend blindly. The task result is nonzero
 while paused. No bounce/inbox-delivery tracking is implemented.
+
+The hosted email worker also checks for accounts that are still missing email
+verification or a resume. It sends one reminder at least 24 hours after signup
+and records the attempt before delivery, so uncertain reminders are not retried.
+The reminder is sent only once per email address and asks users to request a new
+sign-up code if the original code expired.
 
 ## Storage and migrations
 
@@ -681,7 +689,7 @@ stale-result checks, sent-history deduplication and uncertain-email pause protec
 remain enforced. No resume rewriting, applications, or no-match reminders run.
 
 Jobs, profiles, scores and email history stay in the hosted database. The PC must
-remain awake and online. Configure GROQ_API_KEY and optional GROQ_API_KEY_2/3/4/5 in
+remain awake and online. Configure GROQ_API_KEY and optional GROQ_API_KEY_2 through _7 in
 private .env; credentials are never displayed. The sign-in installer uses the same
 launcher and refuses to overwrite an existing task:
 
@@ -789,8 +797,9 @@ and continue with the remaining candidates. Cloud matching uses Groq only.
 Each batch starts with the first available key, beginning with `GROQ_API_KEY`
 (Key 1). Keys with an observed provider cooldown are skipped. HTTP 429 advances
 to `GROQ_API_KEY_2` (Key 2), then `GROQ_API_KEY_3` (Key 3),
-`GROQ_API_KEY_4` (Key 4), and `GROQ_API_KEY_5` (Key 5); blank optional slots
-are skipped and duplicate configured keys fail before network calls. The same
+`GROQ_API_KEY_4` (Key 4), `GROQ_API_KEY_5` (Key 5), `GROQ_API_KEY_6` (Key 6),
+and `GROQ_API_KEY_7` (Key 7); blank optional slots are skipped and duplicate
+configured keys fail before network calls. The same
 candidate is evaluated with the next configured key, which remains selected
 for later candidates. Each configured key is attempted at most once per candidate.
 No automatic key switch or retry occurs for authentication, timeouts, network
@@ -809,7 +818,7 @@ Later matching runs skip jobs with a current saved score for that user, includin
 after an interrupted run. Scores marked stale after resume or posting changes
 remain eligible for rescoring. Fetching reserves the final two minutes of its
 budget, leaving an 18-minute evening fetching window.
-The worker records five Groq key slot statuses per matching run, including which
+The worker records seven Groq key slot statuses per matching run, including which
 keys hit HTTP 429 and whether work completed or was deferred. The workflow monitor
 shows a single Scored today (IST) total per key, combining completed, validated
 evaluations reported across all batches since midnight IST. Positive changes to
@@ -821,7 +830,7 @@ is separate from Groq's quota reset window. History is not included in email.
 Back up before applying migration `023_groq_daily_scores.sql` using the documented
 migration command. Daily tracking begins after migration and server update;
 older batch history is preserved but is not backfilled into daily totals.
-History is retained without automatic deletion and grows by five small rows per run.
+History is retained without automatic deletion and grows by seven small rows per run.
 Statuses describe observed evaluations, not live quotas or predicted reset times.
 Provider `Retry-After` (seconds or HTTP date), or a parsed retry duration in a
 quota rejection, sets a per-key cooldown shared across queue batches and scoring
@@ -836,14 +845,15 @@ General header capacity may differ from the specific rejected quota. A request
 larger than that quota is explicitly identified: waiting alone cannot make it fit.
 The model, complete resume/JD and output validation remain unchanged; no automatic
 shortening is performed. Deploy the updated hosted API before the updated worker
-so the new diagnostic fields and five-slot reports are accepted. Back up the hosted
-database before applying migration `022_five_groq_keys.sql` through
+so the new diagnostic fields and three-, five-, and seven-slot reports are accepted.
+Back up the hosted database before applying migration `022_five_groq_keys.sql` through
 `.\.venv\Scripts\python.exe -B -m backend.migrate`. It preserves existing history
 IDs, evaluation counts and quota metadata while widening slot constraints to five.
-The API continues accepting three-slot reports from older workers, but a run's
+Then apply migration `030_seven_groq_keys.sql`, which preserves five-slot history,
+quota metadata and daily totals while widening the constraints to seven. Each run's
 slot count must remain fixed. Deploy and migrate the server before restarting the
-five-key worker. Configure the two new keys privately as `GROQ_API_KEY_4` and
-`GROQ_API_KEY_5`; blank values leave those slots unused.
+seven-key worker. Configure the additional keys privately as `GROQ_API_KEY_6` and
+`GROQ_API_KEY_7`; blank values leave those slots unused.
 Key labels identify slots, not accounts; replacing a secret does not relabel old runs.
 Interrupted runs remain marked unfinished with their last acknowledged key states.
 No key values, fragments, hashes, account identities or provider response bodies are
@@ -1054,8 +1064,7 @@ Activation (no paid PythonAnywhere task is needed; apply catalog migrations firs
    the documented setup; the cloud worker reads existing active boards.
 3. In GitHub **Settings → Secrets and variables → Actions**, add repository
    secrets `STUDENTCONNECT_WORKER_KEY` (same private value) and `GROQ_API_KEY`.
-   Add optional secrets `GROQ_API_KEY_2`, `GROQ_API_KEY_3`, `GROQ_API_KEY_4`,
-   and `GROQ_API_KEY_5` for the four ordered
+   Add optional secrets `GROQ_API_KEY_2` through `GROQ_API_KEY_7` for the six ordered
    fallback slots. Save actual keys only through GitHub's private secret interface,
    never in source, logs or chat. The worker no longer references the Gemini secret
    or its model variables. Optional keys belong only on GitHub for cloud matching;

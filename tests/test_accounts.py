@@ -66,9 +66,23 @@ class AccountTests(unittest.TestCase):
         self.assertNotEqual(account["password_hash"],TEST_PASSWORD)
         self.assertEqual(account["email_verified"],1)
         self.assertEqual(account["is_admin"],0)
+        self.assertEqual(self.conn.execute("SELECT subscriptions_configured FROM user_settings WHERE user_id=?", (account["user_id"],)).fetchone()[0], 0)
         self.assertEqual(self.post("/register",self.form("tester@example.test",code)).status_code,400)
         self.assertEqual(self.login().status_code,302)
         self.assertEqual(self.client.get("/").status_code,200)
+        settings_page = self.client.get("/settings")
+        self.assertNotIn(b'id="companies"', settings_page.data)
+        self.assertNotIn(b'name="company_scope"', settings_page.data)
+        self.assertIn(b'Upload resume', settings_page.data)
+        initial_settings = test_web_flows.WebFlowTests.settings_data(self)
+        initial_settings.update(name="Tester", email="tester@example.test")
+        initial_settings.pop("companies")
+        initial_settings.pop("company_scope")
+        self.assertEqual(self.post("/settings", initial_settings).status_code, 302)
+        self.assertEqual(self.conn.execute("SELECT subscriptions_configured FROM user_settings WHERE user_id=?", (account["user_id"],)).fetchone()[0], 0)
+        self.assertEqual(self.post("/resume", {"consent": "on", "resume_text": "Software engineering student"}).status_code, 302)
+        self.assertIn(b'name="company_scope"', self.client.get("/settings").data)
+        self.assertIn(b"Email me a code", self.client.get("/register").data)
 
     def test_public_email_signup_requires_emailed_code_and_can_sign_in(self):
         initial = self.client.get("/register")
@@ -85,6 +99,7 @@ class AccountTests(unittest.TestCase):
         self.assertEqual(self.login().status_code, 302)
         account = self.conn.execute("SELECT is_admin,email_verified FROM accounts").fetchone()
         self.assertEqual(tuple(account), (0, 1))
+        self.assertEqual(self.conn.execute("SELECT subscriptions_configured FROM user_settings").fetchone()[0], 0)
         self.assertEqual(self.post("/register", self.form("tester@example.test", code)).status_code, 400)
 
     def test_public_code_request_does_not_reveal_existing_account(self):

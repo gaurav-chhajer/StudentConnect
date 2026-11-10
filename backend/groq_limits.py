@@ -24,7 +24,7 @@ REJECTION_FIELDS = REJECTION_COUNTS + ('limited_dimension', 'request_fit', 'reje
                                        'rejected_at', 'retry_at')
 MAX_DELAY_SECONDS = 366 * 86400
 MAX_ERROR_BYTES = 32768
-KEY_SLOT_COUNT = 5
+KEY_SLOT_COUNT = 7
 logger = logging.getLogger(__name__)
 
 

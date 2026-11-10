@@ -52,7 +52,7 @@ def google_account(conn, claims, now, linking_user=None, linking_version=None):
             if conn.execute("SELECT 1 FROM users WHERE lower(email)=?", (email,)).fetchone():
                 raise ValueError("This email already has a profile. Sign in with your password first, then open Sign in and choose Continue with Google to link it.")
             user_id = conn.execute("INSERT INTO users(name,email,resume_text,preferences_json) VALUES(?,?,'','{}')", (name, email)).lastrowid
-            conn.execute("INSERT INTO user_settings(user_id,subscriptions_configured) VALUES(?,1)", (user_id,))
+            conn.execute("INSERT INTO user_settings(user_id,subscriptions_configured) VALUES(?,0)", (user_id,))
             # A Google account has no usable password until its owner requests recovery.
             random_password = accounts.secrets.token_urlsafe(48)
             hashed = accounts.password_hash(random_password, random_password)

@@ -65,7 +65,7 @@ class WebFlowTests(unittest.TestCase):
     def settings_data(self, **overrides):
         values = dict(name="Owner", email="owner@example.test", university="College", graduation_year="2027",
                       cadence="daily", send_time="08:00", timezone="Asia/Kolkata", min_score="70", include_gaps="on",
-                      roles="Software Engineer", locations="Remote", companies=["1"])
+                      roles="Software Engineer", locations="Remote", company_scope="selected", companies=["1"])
         values.update(overrides)
         return values
 
@@ -150,7 +150,7 @@ class WebFlowTests(unittest.TestCase):
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 28)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 30)
 
     def test_india_filter_includes_city_only_locations(self):
         from backend import store

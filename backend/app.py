@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, feedback, google_accounts, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
+from backend import accounts, automatic_matching, cloud_worker, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -208,8 +208,8 @@ def create_app(database_path=None, upload_dir=None):
             data["groq_history"] = []
             run_ids = [run["run_id"] for run in runs[:20]]
             key_rows = conn.execute("""SELECT run_id,key_slot,state,updated_at FROM groq_key_history
-                WHERE run_id IN (""" + ",".join("?" for _ in run_ids) + ") ORDER BY key_slot LIMIT 100",
-                run_ids).fetchall() if run_ids else []
+                WHERE run_id IN (""" + ",".join("?" for _ in run_ids) + ") ORDER BY key_slot LIMIT ?",
+                (*run_ids, len(run_ids) * groq_limits.KEY_SLOT_COUNT)).fetchall() if run_ids else []
             keys_by_run = {run_id: [] for run_id in run_ids}
             for row in key_rows:
                 keys_by_run[row["run_id"]].append(row)
@@ -322,13 +322,17 @@ def create_app(database_path=None, upload_dir=None):
             if cadence not in ("daily", "weekly", "off") or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", send_time) or zone not in ("Asia/Kolkata", "UTC"):
                 raise ValueError("Invalid email schedule preference")
             minimum = store.integer(request.form.get("min_score", "60"), 0, 100)
-            company_ids = {store.integer(value, 1, 2147483647) for value in request.form.getlist("companies")}
-            if not company_ids.issubset({row["id"] for row in data["available_companies"] if row['active']}):
-                raise ValueError("Select companies from the available list")
-            company_scope = request.form.get("company_scope", "selected")
-            if company_scope not in ("any", "selected"):
-                raise ValueError("Choose a valid company preference")
-            subscriptions_configured = int(company_scope == "selected")
+            company_scope = request.form.get("company_scope")
+            if company_scope is None:
+                company_ids = set(data["subscriptions"])
+                subscriptions_configured = int(data["settings"]["subscriptions_configured"])
+            else:
+                company_ids = {store.integer(value, 1, 2147483647) for value in request.form.getlist("companies")}
+                if not company_ids.issubset({row["id"] for row in data["available_companies"] if row['active']}):
+                    raise ValueError("Select companies from the available list")
+                if company_scope not in ("any", "selected"):
+                    raise ValueError("Choose a valid company preference")
+                subscriptions_configured = int(company_scope == "selected")
             preferences = {}
             for key in ("roles", "locations"):
                 raw = ",".join(request.form.getlist(key)) if key == "locations" else request.form.get(key, "")

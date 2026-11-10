@@ -72,7 +72,7 @@ class GoogleAccountTests(unittest.TestCase):
         account = self.conn.execute("SELECT * FROM accounts").fetchone()
         self.assertEqual((account["is_admin"], account["email_verified"]), (0, 1))
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM account_tokens").fetchone()[0], 0)
-        self.assertEqual(self.conn.execute("SELECT subscriptions_configured FROM user_settings").fetchone()[0], 1)
+        self.assertEqual(self.conn.execute("SELECT subscriptions_configured FROM user_settings").fetchone()[0], 0)
         self.assertEqual(self.client.get("/settings").status_code, 200)
         second = self.app.test_client()
         state, _, _ = self.start(second)

@@ -102,14 +102,14 @@ class DailyScoreTests(unittest.TestCase):
         self.assertNotIn('Scored this batch', page)
         self.assertNotIn('Cumulative evaluations', page)
         self.assertEqual(page.count('<td class="wm-number">7</td>'), 1)
-        self.assertEqual(page.count('<td class="wm-number">0</td>'), 4)
+        self.assertEqual(page.count('<td class="wm-number">0</td>'), 6)
 
 
 class DailyMigrationTests(unittest.TestCase):
     def test_migration_preserves_old_history_without_guessing_daily_totals(self):
         migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
         with patch('backend.migrate.Path.glob', return_value=[path for path in migrations
-                                                           if path.name != '023_groq_daily_scores.sql']):
+                if path.name not in {'023_groq_daily_scores.sql', '030_seven_groq_keys.sql'}]):
             test_web_flows.WebFlowTests.setUp(self)
         self.conn.execute("""INSERT INTO groq_key_history
             (run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count)

@@ -132,7 +132,7 @@ class HybridEndpointTests(unittest.TestCase):
         client.call.side_effect = hosted_call
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic-1'), \
                 patch.dict(pipeline.os.environ, GROQ_API_KEY_2=keys[0], GROQ_API_KEY_3=keys[1],
-                           GROQ_API_KEY_4='', GROQ_API_KEY_5=''), \
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(pipeline, 'fetch_jobs_for_company', return_value=[]), \
                 patch.object(runner.time, 'monotonic', return_value=0, side_effect=clock), \
                 patch.object(pipeline, 'score_job_for_user', side_effect=score) as evaluate:
@@ -148,7 +148,7 @@ class HybridEndpointTests(unittest.TestCase):
         self.assertEqual(evaluate.call_args_list[0].args, evaluate.call_args_list[2].args)
         rows = self.conn.execute('SELECT key_slot,state,outcome FROM groq_key_history ORDER BY key_slot').fetchall()
         self.assertEqual([row['state'] for row in rows],
-                         ['rate_limited', 'rate_limited', 'succeeded', 'not_configured', 'not_configured'])
+                         ['rate_limited', 'rate_limited', 'succeeded'] + ['not_configured'] * 4)
         self.assertTrue(all(row['outcome'] == 'complete' for row in rows))
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores WHERE is_stale=0').fetchone()[0], 2)
         self.assertNotIn('synthetic', repr([dict(row) for row in self.conn.execute('SELECT * FROM groq_key_history')]))
@@ -164,7 +164,7 @@ class HybridEndpointTests(unittest.TestCase):
         pending = pipeline.filter_candidate_jobs(self.conn, dict(id=1, preferences_json='{}'))
         self.assertEqual(len(pending), 1)
         rows = self.conn.execute('SELECT state,outcome FROM groq_key_history').fetchall()
-        self.assertEqual([row['state'] for row in rows], ['rate_limited'] * 3 + ['not_configured'] * 2)
+        self.assertEqual([row['state'] for row in rows], ['rate_limited'] * 3 + ['not_configured'] * 4)
         self.assertTrue(all(row['outcome'] == 'deferred' for row in rows))
 
     def test_later_runs_skip_scores_saved_before_rate_limit_interruption(self):
@@ -235,7 +235,8 @@ class HybridEndpointTests(unittest.TestCase):
 
     def test_duplicate_keys_rejected_without_status_or_provider_calls(self):
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic', GROQ_API_KEY_3=''), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(pipeline, 'score_job_for_user') as evaluate:
             client = MagicMock()
             with self.assertRaises(ValueError):

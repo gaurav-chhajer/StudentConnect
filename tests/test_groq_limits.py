@@ -61,7 +61,8 @@ class LimitsTests(unittest.TestCase):
         with patch.object(groq_limits, 'datetime', wraps=datetime) as dates, \
                 patch.object(groq_limits.time, 'monotonic', return_value=100), \
                 patch.object(runner.pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.dict(runner.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                patch.dict(runner.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(GroqKeyPool, 'publish'):
             dates.now.return_value = now
             quota = groq_limits.QuotaState()
@@ -83,7 +84,8 @@ class LimitsTests(unittest.TestCase):
         with patch.object(groq_limits, 'datetime', wraps=datetime) as dates, \
                 patch.object(groq_limits.time, 'monotonic', return_value=100), \
                 patch.object(runner.pipeline, 'GROQ_API_KEY', 'synthetic-one'), \
-                patch.dict(runner.os.environ, GROQ_API_KEY_2='synthetic-two', GROQ_API_KEY_3=''), \
+                patch.dict(runner.os.environ, GROQ_API_KEY_2='synthetic-two', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(GroqKeyPool, 'publish'):
             dates.now.return_value = now
             quota = groq_limits.QuotaState()

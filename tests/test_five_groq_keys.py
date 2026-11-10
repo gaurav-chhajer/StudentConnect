@@ -24,7 +24,7 @@ class FiveKeyPoolTests(unittest.TestCase):
             patch.object(runner.pipeline, 'GROQ_API_KEY', 'synthetic-one'),
             patch.dict(runner.os.environ, GROQ_API_KEY_2='synthetic-two',
                        GROQ_API_KEY_3='synthetic-three', GROQ_API_KEY_4='synthetic-four',
-                       GROQ_API_KEY_5='synthetic-five'),
+                       GROQ_API_KEY_5='synthetic-five', GROQ_API_KEY_6='', GROQ_API_KEY_7=''),
             patch.object(runner.time, 'monotonic', side_effect=lambda: self.clock),
             patch.object(runner.GroqKeyPool, 'publish'),
             patch.object(groq_limits, 'datetime', wraps=datetime),
@@ -81,10 +81,10 @@ class FiveKeyPoolTests(unittest.TestCase):
 
     def test_new_quota_slots_preserve_bounds(self):
         quota = groq_limits.QuotaState()
-        for slot in (3, 4):
+        for slot in (5, 6):
             quota.record(slot, {'retry_at': (self.now + timedelta(seconds=60)).isoformat()})
             self.assertEqual(quota.delay(slot), 60)
-        for slot in (-1, 5, True):
+        for slot in (-1, 7, True):
             with self.assertRaises(ValueError):
                 quota.record(slot, {'remaining_tokens': 0})
 
@@ -118,13 +118,15 @@ class FiveKeyEndpointTests(unittest.TestCase):
         self.assertEqual(self.call('groq-status', data).status_code, 200)
         data.update(revision=2, states=['not_attempted'] * 4 + ['succeeded'], job_counts=[0] * 4 + [1])
         self.assertEqual(self.call('groq-status', data).status_code, 200)
-        for slot in (4, 5):
+        for slot in (4, 5, 6, 7):
             payload = dict(key_slot=slot, model='fixture', metrics={'remaining_tokens': 42})
             self.assertEqual(self.call('groq-limits', payload).status_code, 200)
         keys = workflow_monitor.snapshot(self.conn, 1)['groq_keys']
-        self.assertEqual([key['key_slot'] for key in keys], [1, 2, 3, 4, 5])
+        self.assertEqual([key['key_slot'] for key in keys], [1, 2, 3, 4, 5, 6, 7])
         self.assertEqual(keys[4]['job_count'], 1)
         self.assertEqual(keys[4]['limits']['remaining_tokens'], 42)
+        self.assertEqual(keys[5]['limits']['remaining_tokens'], 42)
+        self.assertEqual(keys[6]['limits']['remaining_tokens'], 42)
         for length in (0, 1, 4, 6):
             bad = dict(data, run_id='f' * 32, revision=0, states=['not_attempted'] * length,
                        job_counts=[0] * length)
@@ -132,14 +134,14 @@ class FiveKeyEndpointTests(unittest.TestCase):
         self.assertEqual(self.call('groq-status', dict(data, job_counts=[0] * 3)).status_code, 400)
         self.assertEqual(self.call('groq-status', dict(data, states=data['states'][:3],
                                                     job_counts=[0] * 3)).status_code, 400)
-        self.assertEqual(self.call('groq-limits', dict(payload, key_slot=6)).status_code, 400)
+        self.assertEqual(self.call('groq-limits', dict(payload, key_slot=8)).status_code, 400)
 
 
 class FiveKeyMigrationTests(unittest.TestCase):
     def test_migration_retains_history_limits_and_ids_and_is_idempotent(self):
         migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
         with patch('backend.migrate.Path.glob', return_value=[path for path in migrations
-                                                           if path.name != '022_five_groq_keys.sql']):
+                if path.name not in {'022_five_groq_keys.sql', '030_seven_groq_keys.sql'}]):
             test_web_flows.WebFlowTests.setUp(self)
         self.conn.execute("""INSERT INTO groq_key_history
             (id,run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count)
@@ -150,7 +152,9 @@ class FiveKeyMigrationTests(unittest.TestCase):
         history = [tuple(row) for row in self.conn.execute('SELECT * FROM groq_key_history')]
         limits = [tuple(row) for row in self.conn.execute('SELECT * FROM groq_limits')]
         for _ in range(2):
-            apply_migrations(self.conn)
+            with patch('backend.migrate.Path.glob', return_value=[path for path in migrations
+                    if path.name != '030_seven_groq_keys.sql']):
+                apply_migrations(self.conn)
             self.assertEqual([tuple(row) for row in self.conn.execute('SELECT * FROM groq_key_history')], history)
             self.assertEqual([tuple(row) for row in self.conn.execute('SELECT * FROM groq_limits')], limits)
         self.conn.execute("INSERT INTO groq_limits VALUES(5,'fixture','{}','2026-11-09')")
@@ -161,3 +165,83 @@ class FiveKeyMigrationTests(unittest.TestCase):
             self.conn.execute("INSERT INTO groq_limits VALUES(6,'fixture','{}','2026-11-09')")
         with self.assertRaises(sqlite3.IntegrityError):
             self.conn.execute("UPDATE groq_key_history SET key_slot=6 WHERE key_slot=5")
+
+
+class SevenKeyPoolTests(unittest.TestCase):
+    def test_pool_rotates_to_sixth_and_seventh_configured_keys(self):
+        with patch.object(runner.pipeline, 'GROQ_API_KEY', 'synthetic-one'), \
+                patch.dict(runner.os.environ, GROQ_API_KEY_2='synthetic-two', GROQ_API_KEY_3='synthetic-three',
+                           GROQ_API_KEY_4='synthetic-four', GROQ_API_KEY_5='synthetic-five',
+                           GROQ_API_KEY_6='synthetic-six', GROQ_API_KEY_7='synthetic-seven'), \
+                patch.object(runner.GroqKeyPool, 'publish'):
+            client = MagicMock()
+            client.call.return_value = {'saved': True}
+            pool = runner.GroqKeyPool(client, runner.time.monotonic() + 3000)
+            provider = MagicMock(side_effect=[groq_rate_limit_error() for _ in range(5)] +
+                                 ['six', groq_rate_limit_error(), 'seven'])
+            self.assertEqual(pool._request(provider), 'six')
+            self.assertEqual(pool._request(provider), 'seven')
+            self.assertEqual(provider.call_args_list[-3].args, ('synthetic-six',))
+            self.assertEqual(provider.call_args_list[-2].args, ('synthetic-six',))
+            self.assertEqual(provider.call_args_list[-1].args, ('synthetic-seven',))
+            self.assertEqual(len(pool.states), 7)
+
+    def test_new_quota_slots_accept_six_and_seven_and_reject_eight(self):
+        quota = groq_limits.QuotaState()
+        for slot in (5, 6):
+            quota.record(slot, {'remaining_tokens': 10})
+            self.assertEqual(quota.delay(slot), 0)
+        for slot in (-1, 7, True):
+            with self.assertRaises(ValueError):
+                quota.record(slot, {'remaining_tokens': 10})
+
+
+def groq_rate_limit_error():
+    response = requests.Response()
+    response.status_code = 429
+    response.headers['retry-after'] = '120'
+    response._content = b'{}'
+    return requests.HTTPError(response=response)
+
+
+class SevenKeyEndpointTests(unittest.TestCase):
+    setUp = test_cloud_worker.CloudEndpointTests.setUp
+    call = test_cloud_worker.CloudEndpointTests.call
+
+    def test_seven_key_reports_and_quota_slots_are_accepted(self):
+        data = dict(run_id='d' * 32, revision=0, states=['not_attempted'] * 7,
+                    job_counts=[0] * 7, outcome='running')
+        self.assertEqual(self.call('groq-status', data).status_code, 200)
+        for slot in (6, 7):
+            self.assertEqual(self.call('groq-limits', dict(key_slot=slot, model='fixture',
+                metrics={'remaining_tokens': 70 + slot})).status_code, 200)
+        keys = workflow_monitor.snapshot(self.conn, 1)['groq_keys']
+        self.assertEqual([item['key_slot'] for item in keys], list(range(1, 8)))
+        self.assertEqual([keys[index]['limits']['remaining_tokens'] for index in (5, 6)], [76, 77])
+
+
+class SevenKeyMigrationTests(unittest.TestCase):
+    def test_migration_preserves_five_slot_history_limits_daily_totals_and_widens_to_seven(self):
+        migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
+        with patch('backend.migrate.Path.glob', return_value=[path for path in migrations
+                                                             if path.name != '030_seven_groq_keys.sql']):
+            test_web_flows.WebFlowTests.setUp(self)
+        self.conn.execute("""INSERT INTO groq_key_history
+            (id,run_id,key_slot,state,outcome,revision,started_at,updated_at,job_count)
+            VALUES(42,?,5,'succeeded','complete',2,'2026-11-09','2026-11-09',7)""", ('b' * 32,))
+        self.conn.execute("INSERT INTO groq_limits VALUES(5,'fixture',?,'2026-11-09')",
+                          (json.dumps({'remaining_tokens': 55}),))
+        self.conn.execute("INSERT INTO groq_daily_scores VALUES('2026-11-09',5,7)")
+        self.conn.commit()
+        history = [tuple(row) for row in self.conn.execute('SELECT * FROM groq_key_history')]
+        limits = [tuple(row) for row in self.conn.execute('SELECT * FROM groq_limits')]
+        totals = [tuple(row) for row in self.conn.execute('SELECT * FROM groq_daily_scores')]
+        apply_migrations(self.conn)
+        apply_migrations(self.conn)
+        self.assertEqual([tuple(row) for row in self.conn.execute('SELECT * FROM groq_key_history')], history)
+        self.assertEqual([tuple(row) for row in self.conn.execute('SELECT * FROM groq_limits')], limits)
+        self.assertEqual([tuple(row) for row in self.conn.execute('SELECT * FROM groq_daily_scores')], totals)
+        self.conn.execute("INSERT INTO groq_limits VALUES(7,'fixture','{}','2026-11-10')")
+        self.conn.execute("INSERT INTO groq_daily_scores VALUES('2026-11-10',7,1)")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.conn.execute("INSERT INTO groq_limits VALUES(8,'fixture','{}','2026-11-10')")

@@ -16,7 +16,7 @@ from tests import test_cloud_worker, test_web_flows
 class PreHistoryMigrationTests(unittest.TestCase):
     def setUp(self):
         migrations = sorted((Path(__file__).parents[1] / 'backend/migrations').glob('*.sql'))
-        previous = [path for path in migrations if path.name not in {'008_groq_key_history.sql', '021_groq_key_job_counts.sql', '022_five_groq_keys.sql'}]
+        previous = [path for path in migrations if path.name not in {'008_groq_key_history.sql', '021_groq_key_job_counts.sql', '022_five_groq_keys.sql', '030_seven_groq_keys.sql'}]
         # Reproduce a deployed database that predates the new history feature.
         with patch('backend.migrate.Path.glob', return_value=previous):
             test_web_flows.WebFlowTests.setUp(self)
@@ -212,7 +212,8 @@ class GroqReportingFailureTests(unittest.TestCase):
         client = MagicMock()
         client.call.side_effect = requests.ReadTimeout('private credential response')
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(pipeline, 'score_job_for_user') as score, \
                 patch.object(runner.time, 'monotonic', side_effect=[100.0, 120.5]), \
                 self.assertLogs(runner.logger, level='ERROR') as logs:
@@ -234,7 +235,8 @@ class GroqReportingFailureTests(unittest.TestCase):
         error.__cause__ = OSError('private path')
         client.call.side_effect = error
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 self.assertLogs(runner.logger, level='ERROR') as logs:
             with self.assertRaisesRegex(RuntimeError, 'Could not record'):
                 runner.GroqKeyPool(client, 2100)
@@ -248,7 +250,8 @@ class GroqReportingFailureTests(unittest.TestCase):
         client = MagicMock()
         client.call.side_effect = requests.ReadTimeout('private details')
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3=''), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(pipeline, 'score_job_for_user') as score:
             with self.assertRaisesRegex(RuntimeError, 'Could not record'):
                 runner.fetch_and_score(client, 2100)
@@ -267,7 +270,8 @@ class GroqReportingFailureTests(unittest.TestCase):
         response = requests.Response()
         response.status_code = 429
         with patch.object(pipeline, 'GROQ_API_KEY', 'synthetic-1'), \
-                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic-2', GROQ_API_KEY_3='synthetic-3'), \
+                patch.dict(pipeline.os.environ, GROQ_API_KEY_2='synthetic-2', GROQ_API_KEY_3='synthetic-3',
+                           GROQ_API_KEY_4='', GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7=''), \
                 patch.object(runner.time, 'monotonic', return_value=0), \
                 patch.object(pipeline, 'score_job_for_user', side_effect=requests.HTTPError(response=response)) as score:
             pool = runner.GroqKeyPool(client, 2100)

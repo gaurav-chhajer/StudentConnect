@@ -49,6 +49,50 @@ class CloudEndpointTests(unittest.TestCase):
         self.addCleanup(response.request.input_stream.close)
         return response
 
+    def test_onboarding_reminder_is_due_once_for_incomplete_resume(self):
+        self.conn.execute("UPDATE users SET resume_text='' WHERE id=1")
+        self.conn.commit()
+        with patch.object(cloud_worker.time, "time", return_value=1791513000), \
+                patch.object(pipeline, "validate_email_configuration"), \
+                patch.object(pipeline, "deliver_account_email") as mail:
+            response = self.call("email/onboarding-reminder", {})
+            self.assertEqual(response.status_code, 200, response.json)
+            self.assertEqual(response.json, {"done": False, "sent": True})
+            self.assertEqual(self.call("email/onboarding-reminder", {}).json,
+                             {"done": True, "sent": False})
+        mail.assert_called_once()
+        self.assertEqual(mail.call_args.args[:2], (
+            "owner@example.test", "Finish setting up your StudentConnect account"))
+        self.assertIn("Upload your resume from My Resume", mail.call_args.args[2])
+        self.assertNotIn("Verify your email", mail.call_args.args[2])
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) FROM onboarding_reminders WHERE sent_at IS NOT NULL").fetchone()[0], 1)
+
+    def test_pending_signup_reminder_explains_expired_code_and_resume(self):
+        self.conn.execute("INSERT INTO account_tokens(token_hash,purpose,email,expires_at,created_at) "
+                          "VALUES('synthetic','invite','new@example.test',1,1791426600)")
+        self.conn.commit()
+        with patch.object(cloud_worker.time, "time", return_value=1791513000), \
+                patch.object(pipeline, "validate_email_configuration"), \
+                patch.object(pipeline, "deliver_account_email") as mail:
+            response = self.call("email/onboarding-reminder", {})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(mail.call_args.args[0], "new@example.test")
+        self.assertIn("request a new code", mail.call_args.args[2])
+        self.assertIn("Upload your resume", mail.call_args.args[2])
+
+    def test_uncertain_onboarding_reminder_is_reserved_and_pauses_email(self):
+        self.conn.execute("UPDATE users SET resume_text='' WHERE id=1")
+        self.conn.commit()
+        with patch.object(cloud_worker.time, "time", return_value=1791513000), \
+                patch.object(pipeline, "validate_email_configuration"), \
+                patch.object(pipeline, "deliver_account_email", side_effect=smtplib.SMTPServerDisconnected("private")) as mail:
+            self.assertEqual(self.call("email/onboarding-reminder", {}).status_code, 503)
+            self.assertEqual(self.call("email/onboarding-reminder", {}).status_code, 503)
+        mail.assert_called_once()
+        self.assertTrue((self.database.parent / "email_schedule.paused").exists())
+        self.assertEqual(self.conn.execute("SELECT sent_at FROM onboarding_reminders").fetchone()[0], None)
+
     def test_groq_limits_validated_and_saved(self):
         payload=dict(key_slot=1,model='fixture',metrics=dict(limit_requests=1000,remaining_requests=990,reset_tokens='2026-11-02T12:00:00+00:00'))
         self.assertEqual(self.call('groq-limits',payload).status_code,200)
@@ -478,7 +522,8 @@ class CloudRunnerTests(unittest.TestCase):
         reporter = patch.object(runner.GroqKeyPool, 'publish', autospec=True)
         reporter.start()
         self.addCleanup(reporter.stop)
-        env = patch.dict(os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='')
+        env = patch.dict(os.environ, GROQ_API_KEY_2='', GROQ_API_KEY_3='', GROQ_API_KEY_4='',
+                         GROQ_API_KEY_5='', GROQ_API_KEY_6='', GROQ_API_KEY_7='')
         env.start()
         self.addCleanup(env.stop)
 
@@ -814,10 +859,13 @@ class CloudRunnerTests(unittest.TestCase):
 
     def test_email_pagination_budget_and_failure(self):
         client = MagicMock()
-        client.call.side_effect = [dict(next=1, sent=True), dict(next=None, sent=False)]
+        client.call.side_effect = [dict(next=1, sent=True), dict(next=None, sent=False),
+                                   dict(done=True, sent=False)]
         with patch.object(runner.time, "monotonic", return_value=0):
             self.assertEqual(runner.send_emails(client, 420), 0)
-        self.assertEqual(client.call.call_args.args, ("email", {"after": 1}))
+        self.assertEqual([call.args for call in client.call.call_args_list], [
+            ("email", {"after": 0}), ("email", {"after": 1}),
+            ("email/onboarding-reminder", {})])
         client.reset_mock()
         with patch.object(runner.time, "monotonic", return_value=400):
             self.assertEqual(runner.send_emails(client, 420), 1)
@@ -827,6 +875,14 @@ class CloudRunnerTests(unittest.TestCase):
             self.assertEqual(runner.main(["email"]), 1)
         client.close.assert_called_once()
         self.assertNotIn("private", " ".join(logs.output))
+
+    def test_onboarding_reminders_continue_until_hosted_queue_is_done(self):
+        client = MagicMock()
+        client.call.side_effect = [dict(done=False, sent=True), dict(done=True, sent=False)]
+        with patch.object(runner.time, "monotonic", return_value=0):
+            self.assertEqual(runner.send_onboarding_reminders(client, 420), 0)
+        self.assertEqual([call.args for call in client.call.call_args_list], [
+            ("email/onboarding-reminder", {}), ("email/onboarding-reminder", {})])
 
     def test_cursor_and_configuration_validation(self):
         for value in (True, 0, -1, "1"):

@@ -208,7 +208,7 @@ def register_routes(application, connection, database):
         allowed = {"not_configured", "not_attempted", "attempting", "succeeded", "rate_limited", "failed"}
         if (not isinstance(run_id, str) or re.fullmatch(r"[a-f0-9]{32}", run_id) is None or
                 type(revision) is not int or not 0 <= revision <= 1000 or
-                not isinstance(states, list) or len(states) not in (3, groq_limits_module.KEY_SLOT_COUNT) or
+                not isinstance(states, list) or len(states) not in (3, 5, groq_limits_module.KEY_SLOT_COUNT) or
                 any(not isinstance(state, str) or state not in allowed for state in states) or
                 not isinstance(job_counts, list) or len(job_counts) != len(states) or
                 any(type(count) is not int or not 0 <= count <= 1000000 for count in job_counts) or
@@ -615,6 +615,73 @@ def register_routes(application, connection, database):
                 return {"error": "Delivery uncertain; inspect Gmail and hosted send records"}, 503
             current_app.logger.info("Gmail accepted cloud email (user_id=%s matches=%s reminder=%s)", user["id"], len(matches), reminder)
             return {"next": user["id"], "sent": True}
+
+    @routes.post("/email/onboarding-reminder")
+    def onboarding_reminder_email():
+        if body():
+            raise ValueError("Onboarding reminder request must be empty")
+        conn = connection()
+        pause = Path(database).parent / "email_schedule.paused"
+        now_epoch = int(time.time())
+        cutoff = now_epoch - 24 * 60 * 60
+        with run_pipeline.exclusive_cycle(Path(database).parent / "pipeline.lock"), conn:
+            if pause.exists():
+                raise RuntimeError("Email delivery paused; reconcile Gmail and sent_log")
+            conn.execute("BEGIN IMMEDIATE")
+            candidate = conn.execute("""SELECT email,name,email_verified,resume_missing FROM (
+                    SELECT u.email,u.name,a.email_verified,
+                        CASE WHEN trim(u.resume_text)='' THEN 1 ELSE 0 END AS resume_missing,
+                        CAST(strftime('%s',a.created_at) AS INTEGER) AS created_epoch
+                    FROM accounts a JOIN users u ON u.id=a.user_id
+                    WHERE u.active=1 AND (a.email_verified=0 OR trim(u.resume_text)='')
+                    UNION ALL
+                    SELECT t.email,COALESCE(u.name,''),0,
+                        CASE WHEN u.id IS NULL OR trim(u.resume_text)='' THEN 1 ELSE 0 END,
+                        t.created_at
+                    FROM account_tokens t LEFT JOIN users u ON u.id=t.user_id
+                    LEFT JOIN accounts a ON a.user_id=u.id
+                    WHERE t.purpose='invite' AND t.consumed_at IS NULL AND a.user_id IS NULL
+                ) eligible WHERE created_epoch<=?
+                    AND NOT EXISTS(SELECT 1 FROM onboarding_reminders r
+                        WHERE r.email=eligible.email COLLATE NOCASE)
+                ORDER BY created_epoch,email LIMIT 1""", (cutoff,)).fetchone()
+            if candidate is None:
+                return {"done": True, "sent": False}
+            try:
+                pipeline.validate_email_configuration()
+            except ValueError as error:
+                current_app.logger.error("Onboarding reminder email configuration unavailable")
+                raise RuntimeError("Onboarding reminder email configuration unavailable") from error
+            conn.execute("INSERT INTO onboarding_reminders(email,attempted_at) VALUES(?,?)",
+                         (candidate["email"], now_epoch))
+            conn.commit()
+            try:
+                with pause.open("x", encoding="utf-8") as marker:
+                    marker.write("Onboarding email attempt requires review unless completed.\n")
+                steps = []
+                if not candidate["email_verified"]:
+                    steps.append("- Verify your email using the sign-up code. If it expired, request a new code on the StudentConnect sign-up page.")
+                if candidate["resume_missing"]:
+                    steps.append("- Upload your resume from My Resume in StudentConnect.")
+                name = candidate["name"].strip() or "there"
+                message = (f"Hi {name},\n\n"
+                    "You’re almost ready to receive job matches. Please complete the remaining step(s):\n\n"
+                    + "\n".join(steps) + "\n\n"
+                    "Once your email is verified and your resume is saved, matching can start. "
+                    "You’ll be matched against any available company by default; you can choose specific companies later in Settings.\n\n"
+                    "If you’ve already completed these steps, you can ignore this message.\n\n"
+                    "—StudentConnect")
+                pipeline.deliver_account_email(candidate["email"],
+                    "Finish setting up your StudentConnect account", message)
+                conn.execute("UPDATE onboarding_reminders SET sent_at=? WHERE email=?",
+                             (int(time.time()), candidate["email"]))
+                conn.commit()
+                pause.unlink()
+            except (smtplib.SMTPException, OSError, ValueError, RuntimeError):
+                current_app.logger.error("Onboarding reminder failed or is uncertain; delivery paused")
+                return {"error": "Delivery uncertain; inspect Gmail and hosted send records"}, 503
+            current_app.logger.info("Gmail accepted onboarding reminder")
+            return {"done": False, "sent": True}
 
     from backend import web_discovery
     web_discovery.register_routes(routes, connection, database)
