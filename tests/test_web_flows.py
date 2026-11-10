@@ -45,7 +45,7 @@ class WebFlowTests(unittest.TestCase):
 
     def seed_user(self):
         self.conn.execute("INSERT INTO users(id,name,email,resume_text) VALUES(1,'Owner','owner@example.test','Python resume')")
-        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00')")
+        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at,email_verified) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00',1)")
         for number, score in ((1, 85), (2, 75)):
             store_score(self.conn, number, 1, dict(fit_score=score, reasoning="Good fit", matched_skills=["Python"], missing_requirements=["SQL"]))
         self.conn.commit()
@@ -201,8 +201,12 @@ class WebFlowTests(unittest.TestCase):
         for route in routes:
             with self.subTest(route=route):
                 response = self.client.get(route)
-                self.assertEqual(response.status_code, 302)
-                self.assertEqual(response.headers["Location"], "/feedback" if route == "/" else "/login")
+                if route == "/":
+                    self.assertEqual(response.status_code, 200)
+                    self.assertIn(b"StudentConnect", response.data)
+                else:
+                    self.assertEqual(response.status_code, 302)
+                    self.assertEqual(response.headers["Location"], "/login?next=" + route)
         self.seed_user()
         for route in routes:
             response=self.client.get(route)

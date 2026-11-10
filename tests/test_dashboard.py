@@ -31,7 +31,7 @@ class DashboardTests(unittest.TestCase):
 
     def seed(self):
         self.conn.execute("INSERT INTO users(id,name,email,resume_text) VALUES (1,?,?,?)", ("Student <script>alert(1)</script>", "one@example.test", "Private resume"))
-        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00')")
+        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at,email_verified) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00',1)")
         self.conn.execute("INSERT INTO companies(id,name,ats_type,board_slug) VALUES(1,'Example','lever','example')")
         for number, score, active in ((1, 85, 1), (2, 55, 1), (3, 99, 0)):
             self.conn.execute("""INSERT INTO jobs(id,company_id,external_id,title,location,url,first_seen_at,last_seen_at,is_active)
@@ -45,8 +45,8 @@ class DashboardTests(unittest.TestCase):
 
     def test_empty_profile(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"],"/feedback")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"StudentConnect", response.data)
 
     def test_saved_matches_are_rendered_safely_without_writes(self):
         self.seed()
@@ -92,8 +92,8 @@ class DashboardTests(unittest.TestCase):
 
     def test_missing_database_and_missing_schema(self):
         response = create_app(Path(self.directory.name) / "absent.db").test_client().get("/")
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"],"/feedback")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"StudentConnect", response.data)
         self.conn.execute("DROP TABLE scores")
         self.seed_user_only()
         with self.assertLogs(self.application.logger, level="ERROR"):
@@ -101,7 +101,7 @@ class DashboardTests(unittest.TestCase):
 
     def seed_user_only(self):
         self.conn.execute("INSERT INTO users(name,email,resume_text) VALUES('Student','one@example.test','Resume')")
-        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00')")
+        self.conn.execute("INSERT INTO accounts(user_id,password_hash,created_at,email_verified) VALUES(1,'unused-test-fixture','2026-10-01T00:00:00+00:00',1)")
         self.conn.commit()
         with self.client.session_transaction() as session:
             session["user_id"],session["session_version"] = 1,0

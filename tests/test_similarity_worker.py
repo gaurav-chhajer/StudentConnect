@@ -69,9 +69,9 @@ class SimilarityEndpointTests(unittest.TestCase):
         self.assertEqual(self.client.get("/jobs/local").status_code, 302)
         with self.client.session_transaction() as session:
             session["user_id"], session["session_version"] = 1, 0
-        page = self.client.get("/jobs/local")
+        self.assertEqual(self.client.get("/jobs/local").headers["Location"], "/jobs")
+        page = self.client.get("/jobs")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Relevance index", page.data)
         self.assertNotIn(b"Strong Match", page.data)
         self.assertEqual(similarity.matches(self.conn, 2, 1)[0], [])
         self.conn.execute("UPDATE jobs SET raw_json=? WHERE id=?", (json.dumps({"content": "New SQL description"}), item["job"]["id"]))
