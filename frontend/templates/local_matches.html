@@ -17,6 +17,6 @@
 <p class="sub">A mention does not establish proficiency. Skills not mentioned are unknown, rather than confirmed missing qualifications. The index combines 70% nonnegative cosine similarity and 30% skill overlap; if no JD skills are recognized, it uses cosine similarity alone.</p></div></details>
 {% if item.url %}<span class="jt-cta" aria-hidden="true">Read posting<svg class="ic" viewBox="0 0 24 24" focusable="false"><path d="M7 17L17 7M9 7h8v8"></path></svg></span>{% endif %}</div>
 </article>
-{% else %}<div class="empty-tile"><strong>No current local rankings yet.</strong><p class="sub">Select companies, save your resume, and run the local similarity worker.</p><a class="btn" href="{{ url_for('settings_page') }}#companies">Select companies</a></div>{% endfor %}</div>
+{% else %}<div class="empty-tile"><strong>No current local rankings yet.</strong><p class="sub">Choose companies and save your resume. Eligible jobs will appear here after similarity analysis.</p><a class="btn" href="{{ url_for('settings_page') }}#companies">Select companies</a></div>{% endfor %}</div>
 {{ pagination('local_matches') }}
 {% endblock %}

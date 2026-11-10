@@ -153,8 +153,10 @@ def create_app(database_path=None, upload_dir=None):
 
     def database_error(error):
         application.logger.error("Web data operation failed (%s)", type(error).__name__)
+        message = ("Saved dashboard data could not be loaded. Please try again later." if hosted else
+                   "Saved dashboard data could not be loaded. Check the local database and application logs.")
         return render("empty", dict(user=None, navigation=NAVIGATION, active=request.endpoint,
-            message="Saved dashboard data could not be loaded. Check the local database and application logs."), 503)
+            message=message), 503)
 
     application.register_error_handler(sqlite3.Error, database_error)
     application.register_error_handler(ValueError, database_error)
@@ -164,7 +166,8 @@ def create_app(database_path=None, upload_dir=None):
     def populate(data):
         if not data["user"]:
             data["message"] = ("No active profile yet. Create your profile in Settings." if database.is_file()
-                               else "No job database yet. Run the documented local migration command first.")
+                               else "Job data is temporarily unavailable. Please try again later." if hosted else
+                               "No job database yet. Run the documented local migration command first.")
             return
         conn = connection()
         user_id = data["user"]["id"]
@@ -303,10 +306,13 @@ def create_app(database_path=None, upload_dir=None):
         data['role_profile']=role_titles.current(conn,data['user']) if conn and data['user'] else None
         if request.method == "GET":
             if not conn:
-                data["message"] = "Run the documented migration command to initialize the database first."
+                data["message"] = ("Settings are temporarily unavailable. Please try again later." if hosted else
+                                    "Run the documented migration command to initialize the database first.")
             return render("settings", data)
         if not conn:
-            return render("settings", dict(data, message="Initialize the local database first."), 409)
+            message = ("Settings are temporarily unavailable. Please try again later." if hosted else
+                       "Initialize the local database first.")
+            return render("settings", dict(data, message=message), 409)
         try:
             name, email = request.form.get("name", "").strip(), request.form.get("email", "").strip()
             university = request.form.get("university", "").strip()
@@ -565,6 +571,7 @@ def create_app(database_path=None, upload_dir=None):
     def account_navigation():
         user = getattr(g, 'user', None)
         return dict(is_account_admin=bool(getattr(g,"account",None) and g.account["is_admin"]),
+                    hosted=hosted,
                     cloud_schedule=bool(cloud_worker.worker_key()),
                     matching_status=matching_tasks.status(connection(), user['id']) if user else None)
 

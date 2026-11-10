@@ -20,7 +20,7 @@
 {% if endpoint == 'applications' %}<a href="{{ url_for('settings_page') }}#email">{{ icon('email') }}Email alerts</a>{% endif %}
 {% endfor %}<a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Give feedback</a>{% if is_account_admin %}<div class="cap">Admin</div><a href="{{ url_for('admin_users_page') }}" {% if active == 'admin_users_page' %}class="on" aria-current="page"{% endif %}>{{ icon('invite') }}Users</a><a href="{{ url_for('workflow_monitor_page') }}" {% if active == 'workflow_monitor_page' %}class="on" aria-current="page"{% endif %}>{{ icon('workflow') }}Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">{{ icon('invite') }}Invite testers</a><a href="{{ url_for('feedback.review') }}" {% if active == 'feedback.review' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Tester feedback</a>{% endif %}</nav>{% if active == 'workflow_monitor_page' %}</details>{% endif %}{% else %}<nav class="nav" aria-label="Main"><a href="{{ url_for('feedback.submit') }}" class="on" aria-current="page">{{ icon('feedback') }}Give feedback</a></nav>{% endif %}
 {% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Sign out</button></form>{% endif %}
-{% if user %}<div class="me"><div class="av">{{ (user.name or 'Student')[0]|upper }}</div><div><strong>{{ user.name or 'Student' }}</strong><div class="co">{{ settings.university if settings is defined else 'Local workspace' }}</div></div></div>{% endif %}
+{% if user %}<div class="me"><div class="av">{{ (user.name or 'Student')[0]|upper }}</div><div><strong>{{ user.name or 'Student' }}</strong><div class="co">{{ settings.university if settings is defined else 'Account' }}</div></div></div>{% endif %}
 </aside><main class="main" id="main" tabindex="-1">
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message and active != 'feedback.submit' %}<p class="notice" role="status">{{ message }}</p>{% endif %}
@@ -41,5 +41,5 @@
 {% endif %}</p>{% endif %}
 {% if not user and active not in ('settings_page', 'feedback.submit', 'feedback.review') %}<p><a class="btn p" href="{{ url_for('settings_page') }}">Set up your profile</a></p>{% endif %}
 {% block content %}{% endblock %}
-{% if active not in ('feedback.submit', 'feedback.review') %}<p class="sub">Fit scores estimate resume compatibility, not hiring probability. This workspace is local to your computer.</p>{% endif %}
+{% if active not in ('feedback.submit', 'feedback.review') %}<p class="sub">Fit scores estimate resume compatibility, not hiring probability.</p>{% endif %}
 </main></div></body></html>
