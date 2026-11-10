@@ -159,7 +159,7 @@ def register_routes(application, connection, database):
 
     @routes.post('/sync-catalog')
     def sync_catalog():
-        from backend.career_sources import SOURCES, UNVERIFIED_SOURCES
+        from backend.career_sources import SOURCES, UNVERIFIED_SOURCES, VERIFIED_WORLDWIDE_SOURCES
         sources = body().get('sources')
         if (not isinstance(sources, list) or len(sources) > MAX_COMPANIES or
                 any(not isinstance(key, str) or key not in SOURCES or
@@ -170,6 +170,8 @@ def register_routes(application, connection, database):
             conn.execute('BEGIN IMMEDIATE')
             for key in sources:
                 if conn.execute('SELECT 1 FROM companies WHERE career_source=?', (key,)).fetchone():
+                    if key in VERIFIED_WORLDWIDE_SOURCES:
+                        conn.execute('UPDATE companies SET active=1 WHERE career_source=? AND active=0', (key,))
                     continue
                 conn.execute('''INSERT INTO companies(name,ats_type,board_slug,career_source,active)
                     VALUES(?,'greenhouse',?,?,1)''', (SOURCES[key][0], 'career-site-' + key, key))

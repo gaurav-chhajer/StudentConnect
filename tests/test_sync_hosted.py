@@ -19,6 +19,17 @@ class ObservationEndpointTests(CloudEndpointTests):
         self.assertEqual(self.call('sync-catalog', {'sources': ['unknown']}).status_code, 400)
         self.assertEqual(self.call('sync-catalog', {'sources': ['meta']}).status_code, 400)
 
+    def test_catalog_reactivates_only_verified_worldwide_existing_sources(self):
+        self.conn.executemany(
+            "INSERT INTO companies(name,ats_type,board_slug,career_source,active) VALUES(?, 'greenhouse', ?, ?, 0)",
+            [('CloudLinux', 'career-site-cloudlinux', 'cloudlinux'),
+             ('HSBC', 'career-site-hsbc', 'hsbc')])
+        self.conn.commit()
+        self.assertEqual(self.call('sync-catalog', {'sources': ['cloudlinux', 'hsbc']}).status_code, 200)
+        states = dict(self.conn.execute(
+            "SELECT career_source,active FROM companies WHERE career_source IN ('cloudlinux','hsbc')"))
+        self.assertEqual(states, {'cloudlinux': 1, 'hsbc': 0})
+
     def test_partial_observations_preserve_other_hosted_jobs(self):
         company = self.call('companies').json['companies'][0]
         before = self.conn.execute('SELECT count(*) FROM jobs WHERE is_active=1').fetchone()[0]
