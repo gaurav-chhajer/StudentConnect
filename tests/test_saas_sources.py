@@ -21,13 +21,18 @@ class SaasSourceTests(unittest.TestCase):
             kind = sources.SOURCES[key][1]
             if kind == 'lever':
                 continue  # Lever's array response and description sections are covered separately.
-            payload = self.payload('airbnb' if kind == 'greenhouse' else 'notion')
+            payload = self.payload(key if kind in ('workable', 'pinpoint') else
+                                   'airbnb' if kind == 'greenhouse' else 'notion')
             with self.subTest(key=key), patch.object(sources.Feed, 'json', return_value=payload) as request:
                 rows = sources.fetch(key)
             slug = sources.BOARD_SLUGS.get(key, key)
-            expected = ('/v1/boards/' + slug + '/jobs?content=true' if kind == 'greenhouse'
-                        else '/posting-api/job-board/' + slug)
+            expected = ('/v1/boards/' + slug + '/jobs?content=true' if kind == 'greenhouse' else
+                        '/posting-api/job-board/' + slug if kind == 'ashby' else
+                        '/api/v1/widget/accounts/' + sources.WORKABLE_ACCOUNTS[key]
+                        if kind == 'workable' else '/postings.json')
             self.assertEqual(request.call_args.args[0], expected)
+            if kind == 'workable':
+                self.assertEqual(request.call_args.kwargs['params'], {'details': 'true'})
             self.assertEqual(mode_for_source(key), 'snapshot')
             self.assertIn('FINAL REQUIREMENT', pipeline.extract_job_description(
                 dict(rows[0], raw_json=json.dumps(rows[0]['raw_json']))))
@@ -67,9 +72,52 @@ class SaasSourceTests(unittest.TestCase):
             return dict(meta=dict(total=1), jobs=[dict(
                 id=123, title=title, location=dict(name='India'), departments=[dict(name='Engineering')],
                 absolute_url='https://careers.airbnb.com/positions/123/', content=description)])
+        if key in ('cloudlinux', 'passion'):
+            shortcode = 'WL1'
+            return dict(jobs=[dict(shortcode=shortcode, title=title, department='Engineering',
+                                   employment_type='full_time', locations=[dict(country='India')],
+                                   application_url='https://apply.workable.com/j/' + shortcode + '/apply',
+                                   description=description)])
+        if key == 'safetywing':
+            posting_id = 'posting-123'
+            return dict(data=[dict(id=posting_id, title=title,
+                url='https://safetywing.pinpointhq.com/en/postings/' + posting_id,
+                path='/en/postings/' + posting_id, location=dict(name='Remote'),
+                department=dict(name='Engineering'), employment_type='full_time',
+                description=description)])
         return dict(jobs=[dict(id='123', title=title, location='India', department='Engineering',
                               jobUrl='https://jobs.ashbyhq.com/notion/123', descriptionHtml=description,
                               employmentType='FullTime', descriptionPlain='Python FINAL REQUIREMENT')])
+
+    def test_workable_and_pinpoint_validate_complete_public_snapshots(self):
+        for key in ('cloudlinux', 'passion', 'safetywing'):
+            with self.subTest(key=key), patch.object(sources.Feed, 'json', return_value=self.payload(key)):
+                rows = sources.fetch(key)
+            candidate = dict(rows[0], raw_json=json.dumps(rows[0]['raw_json']))
+            self.assertIn('FINAL REQUIREMENT', pipeline.extract_job_description(candidate))
+            with patch.object(sources.Feed, 'request') as request:
+                self.assertEqual(sources.prepare_job(candidate), candidate)
+            request.assert_not_called()
+            self.assertEqual(mode_for_source(key), 'snapshot')
+
+        invalid = [dict(jobs=None), dict(jobs=[dict(self.payload('cloudlinux')['jobs'][0], description='')]),
+                   dict(jobs=[dict(self.payload('cloudlinux')['jobs'][0],
+                                   application_url='https://example.com/j/WL1/apply')]),
+                   dict(data=None), dict(data=[dict(self.payload('safetywing')['data'][0], description='')]),
+                   dict(data=[dict(self.payload('safetywing')['data'][0],
+                                   url='https://example.com/en/postings/posting-123')])]
+        keys = ('cloudlinux', 'cloudlinux', 'cloudlinux', 'safetywing', 'safetywing', 'safetywing')
+        for key, payload in zip(keys, invalid):
+            with self.subTest(key=key, payload=payload), patch.object(sources.Feed, 'json', return_value=payload), \
+                    self.assertRaises((ValueError, KeyError, TypeError)):
+                sources.fetch(key)
+        for key, empty in (('cloudlinux', dict(jobs=[])), ('safetywing', dict(data=[]))):
+            with self.subTest(key=key), patch.object(sources.Feed, 'json', return_value=empty):
+                self.assertEqual(sources.fetch(key), [])
+        for key in ('cloudlinux', 'safetywing'):
+            with self.subTest(key=key), patch.object(sources.Feed, 'json', side_effect=requests.Timeout), \
+                    self.assertRaises(requests.Timeout):
+                sources.fetch(key)
 
     def test_native_boards_preserve_descriptions_metadata_and_snapshot_policy(self):
         for key, path in [('airbnb', '/v1/boards/airbnb/jobs?content=true'),

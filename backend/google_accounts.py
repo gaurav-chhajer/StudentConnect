@@ -64,6 +64,7 @@ def google_account(conn, claims, now, linking_user=None, linking_version=None):
             raise ValueError("This profile is unavailable for Google sign-in. Use your existing sign-in method or contact the owner.")
         if not linked:
             conn.execute("INSERT INTO google_accounts(subject,user_id) VALUES(?,?)", (subject, account["user_id"]))
+        conn.execute("UPDATE accounts SET last_login_at=? WHERE user_id=?", (now.isoformat(), account["user_id"]))
     return dict(account)
 
 
@@ -241,6 +242,7 @@ def register_routes(app, connection, now):
                     raise ValueError("This profile is unavailable for Google sign-in.")
                 conn.execute("INSERT INTO google_accounts(subject,user_id) VALUES(?,?)", (challenge["subject"], user["id"]))
                 conn.execute("DELETE FROM google_link_challenges WHERE browser_hash=?", (browser_hash,))
+                conn.execute("UPDATE accounts SET last_login_at=? WHERE user_id=?", (now().isoformat(), user["id"]))
                 account = conn.execute("SELECT * FROM accounts WHERE user_id=?", (user["id"],)).fetchone()
         except (ValueError, sqlite3.IntegrityError) as error:
             return link_page(str(error) if isinstance(error, ValueError) else "This profile is already linked. Use Sign in.", 400)

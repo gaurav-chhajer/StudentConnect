@@ -14,7 +14,7 @@ import uuid
 import requests
 
 from backend import hosting, pipeline_skeleton as pipeline
-from backend import career_sources, groq_limits, role_titles, tavily_search
+from backend import career_sources, groq_limits, role_titles, tavily_search, web_discovery
 from backend.cloud_worker import MAX_BODY_BYTES, MAX_COMPANIES, MAX_WORK_ITEMS, MAX_JOBS, worker_key
 from backend.job_ingestion import deduplicate, mode_for_source, observation_batches
 
@@ -27,7 +27,6 @@ MAX_ACCOUNTS = 1000
 CANDIDATE_HTTP_STATUSES = frozenset({400, 413, 422})
 GROQ_EVALUATION_RESERVE = 240  # Status reports, one evaluation, hosted save and headroom.
 TAVILY_CYCLE_SECONDS = 300
-TAVILY_COMPANY_SECONDS = 90
 
 
 class HostedInputsChanged(ValueError):
@@ -238,8 +237,10 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
     successful = set()
     failed = False
     tavily_key = os.environ.get('TAVILY_API_KEY', '').strip()
-    discovery_seconds = 0
-    logger.info('Supplemental Tavily discovery enabled=%s', bool(tavily_key))
+    logger.info('Role-title web discovery enabled=%s', bool(tavily_key))
+    if tavily_key and (stop is None or not stop.is_set()):
+        # This pass has its own budget; ATS fetching remains independent of search coverage.
+        discover_roles(client, tavily_key, min(deadline - 120, time.monotonic() + TAVILY_CYCLE_SECONDS), stop)
     for company in companies:
         if stop is not None and stop.is_set():
             return 1
@@ -273,28 +274,6 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
                 client.call('snapshot', batch)
             successful.add(company["id"])
             logger.info("Fetched company_id=%s jobs=%s", company["id"], len(jobs))
-            if tavily_key and (stop is None or not stop.is_set()):
-                remaining = min(TAVILY_CYCLE_SECONDS - discovery_seconds,
-                                deadline - 120 - time.monotonic())
-                if remaining < 45:
-                    logger.warning('Tavily discovery budget reached: company_id=%s; ATS results retained', company['id'])
-                    continue
-                started = time.monotonic()
-                stage = 'tavily_discovery'
-                try:
-                    additions = tavily_search.discover(company, jobs, tavily_key,
-                        started + min(TAVILY_COMPANY_SECONDS, remaining))
-                    envelope = dict(company_id=company['id'], fingerprint=company['fingerprint'], mode='observed')
-                    for batch in observation_batches(envelope, additions, MAX_JOBS, MAX_BODY_BYTES):
-                        if stop is not None and stop.is_set():
-                            return 1
-                        if time.monotonic() >= deadline - 120:
-                            raise ValueError('Discovery transfer budget exhausted')
-                        if batch['jobs']:
-                            client.call('observations', batch)
-                    logger.info('Tavily discovery saved: company_id=%s additional_jobs=%s', company['id'], len(additions))
-                finally:
-                    discovery_seconds += time.monotonic() - started
         except (requests.RequestException, ValueError, KeyError, TypeError, RuntimeError) as error:
             response = error.response if isinstance(error, requests.RequestException) else None
             company_id = company.get("id") if isinstance(company, dict) else None
@@ -312,6 +291,57 @@ def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_par
             return 0
         return int(failed)
     return _score_pending(client, deadline, pool, successful, failed)
+
+
+def discover_roles(client, api_key, deadline, stop=None):
+    """Each charged reservation permits exactly one basic search, with no retries."""
+    for _ in range(web_discovery.DAILY_SEARCHES):
+        if time.monotonic() >= deadline - 45 or stop is not None and stop.is_set():
+            return
+        reservation = client.call('discovery/reserve', {})
+        search = reservation.get('search')
+        if search is None:
+            if reservation.get('reason') not in ('budget_exhausted', 'no_ready_role_titles'):
+                raise ValueError('Invalid discovery reservation response')
+            logger.info('Web discovery deferred: reason=%s daily_used=%s monthly_used=%s',
+                        reservation['reason'], reservation.get('daily_used'), reservation.get('monthly_used'))
+            return
+        if (not isinstance(search, dict) or set(search) != {'id', 'title', 'platform', 'domain'} or
+                type(search['id']) is not int or search['id'] <= 0 or search['platform'] not in web_discovery.PLATFORMS or
+                search['domain'] != web_discovery.PLATFORMS[search['platform']] or
+                not isinstance(search['title'], str) or not 1 <= len(search['title']) <= role_titles.MAX_TITLE_LENGTH or
+                any(ord(c) < 32 for c in search['title'])):
+            raise ValueError('Invalid discovery reservation')
+        postings, rejected, status = [], 0, 'complete'
+        try:
+            urls = tavily_search.search(search['title'], api_key, domains=[search['domain']], deadline=deadline)
+        except (requests.RequestException, ValueError, TypeError) as error:
+            logger.error('Web search failed: search_id=%s platform=%s error=%s; credit retained, no retry',
+                         search['id'], search['platform'], type(error).__name__)
+            status = 'failed'
+            urls = []
+        for url in urls:
+            if time.monotonic() >= deadline - 1 or stop is not None and stop.is_set():
+                rejected += 1
+                continue
+            try:
+                posting = web_discovery.verify(url, search['platform'], deadline)
+                payload = dict(id=search['id'], status=status, postings=[*postings, posting], rejected=tavily_search.MAX_RESULTS)
+                if len(json.dumps(payload, allow_nan=False).encode()) > MAX_BODY_BYTES:
+                    raise ValueError('Verified postings exceed transfer budget')
+                postings.append(posting)
+            except (requests.RequestException, ValueError, KeyError, TypeError, UnicodeError) as error:
+                rejected += 1
+                logger.warning('Web posting unverified: search_id=%s platform=%s error=%s',
+                               search['id'], search['platform'], type(error).__name__)
+        # A hosted write failure propagates; uncertain saves are never replayed here.
+        reply = client.call('discovery/results', dict(id=search['id'], status=status, postings=postings, rejected=rejected))
+        if type(reply.get('saved')) is not int or not 0 <= reply['saved'] <= len(postings):
+            raise RuntimeError('Discovery results were not acknowledged')
+        logger.info('Web discovery checked: search_id=%s platform=%s verified=%s rejected=%s saved=%s',
+                    search['id'], search['platform'], len(postings), rejected, reply['saved'])
+        if status == 'failed':
+            return  # Provider failure must not consume the rest of the daily budget.
 
 
 def score_pending(client, deadline, stop, *, quota=None):

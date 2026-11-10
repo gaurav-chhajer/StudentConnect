@@ -62,6 +62,9 @@ def fetch_cycle(conn, company_ids=None):
     for company in conn.execute("SELECT * FROM companies WHERE active=1 ORDER BY id").fetchall():
         if company_ids is not None and company['id'] not in company_ids:
             continue
+        if company['discovery_only']:
+            successful.add(company['id'])
+            continue  # Partial web observations are already stored, never an ATS snapshot.
         try:
             jobs = pipeline.fetch_jobs_for_company(company)
         except (requests.RequestException, ValueError, KeyError, TypeError) as error:

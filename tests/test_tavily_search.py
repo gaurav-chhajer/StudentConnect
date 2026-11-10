@@ -172,13 +172,13 @@ class SupplementalWorkerTests(unittest.TestCase):
                     raw_json=dict(descriptionHtml='Python and SQL', discovery_source='tavily'))
 
     def test_combined_fetch_observations_enter_existing_groq_queue(self):
+        from tests.test_web_discovery import posting
         client = MagicMock()
         client.call.side_effect = self.call
-        addition = self.posting()
-        def discover(company, existing, key, deadline):
-            return [addition] if company['id'] == 1 else []
+        addition = posting(employer='Alpha')
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', return_value=[]), \
-                patch.object(runner.tavily_search, 'discover', side_effect=discover):
+                patch.object(runner.tavily_search, 'search', return_value=[addition['url']]), \
+                patch.object(runner.web_discovery, 'verify', side_effect=lambda url, platform, deadline: posting(platform, employer='Alpha')):
             self.assertEqual(runner._fetch_and_score(client, runner.time.monotonic() + 3000, True, None), 0)
         work = self.call('work')['items']
         self.assertEqual(len(work), 1)
@@ -192,7 +192,6 @@ class SupplementalWorkerTests(unittest.TestCase):
         # The next ATS snapshot must not close or invalidate the independently discovered job.
         company = self.call('companies')['companies'][0]
         self.call('snapshot', dict(company_id=1, fingerprint=company['fingerprint'], jobs=[]))
-        self.call('observations', dict(company_id=1, fingerprint=company['fingerprint'], mode='observed', jobs=[addition]))
         self.assertEqual(self.call('work')['items'], [])
         self.assertEqual(self.conn.execute('SELECT is_active FROM jobs WHERE external_id=?', (addition['external_id'],)).fetchone()[0], 1)
 
@@ -202,13 +201,14 @@ class SupplementalWorkerTests(unittest.TestCase):
         normal = dict(self.posting(), external_id='native', raw_json={'descriptionHtml': 'Python and SQL'})
         with patch.dict(os.environ, TAVILY_API_KEY=''), \
                 patch.object(runner.pipeline, 'fetch_jobs_for_company', return_value=[normal]), \
-                patch.object(runner.tavily_search, 'discover') as discover:
+                patch.object(runner.tavily_search, 'search') as discover:
             self.assertEqual(runner._fetch_and_score(client, runner.time.monotonic() + 3000, True, None), 0)
         discover.assert_not_called()
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', return_value=[normal]), \
-                patch.object(runner.tavily_search, 'discover', side_effect=requests.Timeout), \
+                patch.object(runner.tavily_search, 'search', side_effect=requests.Timeout), \
                 self.assertLogs(runner.logger, level='ERROR'):
-            self.assertEqual(runner._fetch_and_score(client, runner.time.monotonic() + 3000, True, None), 1)
+            self.assertEqual(runner._fetch_and_score(client, runner.time.monotonic() + 3000, True, None), 0)
+        self.assertEqual(self.conn.execute("SELECT status FROM tavily_searches ORDER BY id DESC LIMIT 1").fetchone()[0], 'failed')
         self.assertEqual(self.conn.execute("SELECT count(*) FROM jobs WHERE external_id='native' AND is_active=1").fetchone()[0], 2)
 
     def test_storage_prefers_native_and_promotes_discovery_preserving_job_id(self):
@@ -228,14 +228,13 @@ class SupplementalWorkerTests(unittest.TestCase):
         client = MagicMock()
         client.call.side_effect = self.call
         clock = [100]
-        def discovery(company, jobs, key, deadline):
-            self.assertEqual(deadline, 190)
+        def discovery(client, key, deadline, stop):
+            self.assertEqual(deadline, 400)
             clock[0] += 260
             return []
         with patch.object(runner.time, 'monotonic', side_effect=lambda: clock[0]), \
                 patch.object(runner.pipeline, 'fetch_jobs_for_company', return_value=[]) as fetch, \
-                patch.object(runner.tavily_search, 'discover', side_effect=discovery) as discover, \
-                self.assertLogs(runner.logger, level='WARNING'):
+                patch.object(runner, 'discover_roles', side_effect=discovery) as discover:
             self.assertEqual(runner._fetch_and_score(client, 3000, True, None), 0)
         self.assertEqual(fetch.call_count, 2)
         discover.assert_called_once()

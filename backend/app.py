@@ -11,13 +11,14 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
+from backend import accounts, automatic_matching, cloud_worker, feedback, google_accounts, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
 NAVIGATION = (("dashboard", "Dashboard"), ("jobs", "Job matches"),
               ("resume", "My resume"), ("applications", "Applications"),
               ("analytics", "Analytics"), ("settings_page", "Settings"))
+ADMIN_USERS_PAGE_SIZE = 100
 
 
 def utc_now():
@@ -103,6 +104,7 @@ def create_app(database_path=None, upload_dir=None):
                 g.account = dict(account)
                 g.user = dict(connection().execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone())
         public = {"accounts.login", "accounts.register", "accounts.registration_code", "accounts.forgot", "accounts.reset",
+                  "dashboard", "feedback.submit",
                   "google_accounts.login", "google_accounts.callback", "google_accounts.complete_link", "static"}
         if request.url_rule is not None and request.endpoint not in public and g.user is None:
             if request.method == "GET":
@@ -175,6 +177,8 @@ def create_app(database_path=None, upload_dir=None):
     @application.get("/")
     def dashboard():
         data = context()
+        if not data["user"]:
+            return redirect(url_for("feedback.submit"))
         try:
             args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days'))
             data.update(store.filters(args))
@@ -495,6 +499,47 @@ def create_app(database_path=None, upload_dir=None):
             return 'Administrator access required.',403
         return workflow_monitor.groq_queue_counts(connection())
 
+    @application.get('/admin/users')
+    def admin_users_page():
+        if not g.account['is_admin']:
+            return 'Administrator access required.',403
+        try:
+            requested_page = store.integer(request.args.get('page', '1'), 1, 1000000)
+        except ValueError:
+            return 'Choose a valid user page.',400
+        conn = connection()
+        user_total = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+        page_total = max(1, (user_total + ADMIN_USERS_PAGE_SIZE - 1) // ADMIN_USERS_PAGE_SIZE)
+        page = min(requested_page, page_total)
+        users = conn.execute("""WITH match_counts AS (
+                SELECT s.user_id,COUNT(*) match_count
+                FROM scores s JOIN jobs j ON j.id=s.job_id JOIN companies c ON c.id=j.company_id
+                WHERE s.is_stale=0 AND j.is_active=1 AND c.active=1
+                  AND (NOT EXISTS (SELECT 1 FROM user_settings us
+                                   WHERE us.user_id=s.user_id AND us.subscriptions_configured=1)
+                       OR EXISTS (SELECT 1 FROM company_subscriptions sub
+                                  WHERE sub.user_id=s.user_id AND sub.company_id=c.id))
+                GROUP BY s.user_id
+            )
+            SELECT a.user_id,u.name,u.email,u.active,a.email_verified,a.is_admin,a.created_at,
+                   a.last_login_at,COALESCE(mc.match_count,0) match_count
+            FROM accounts a JOIN users u ON u.id=a.user_id
+            LEFT JOIN match_counts mc ON mc.user_id=a.user_id
+            ORDER BY a.last_login_at IS NULL,a.last_login_at DESC,a.created_at DESC,a.user_id
+            LIMIT ? OFFSET ?""", (ADMIN_USERS_PAGE_SIZE, (page - 1) * ADMIN_USERS_PAGE_SIZE)).fetchall()
+        ist = timezone(timedelta(hours=5, minutes=30))
+        account_users = []
+        for account in users:
+            display_account = dict(account)
+            if display_account['last_login_at']:
+                sign_in = datetime.fromisoformat(display_account['last_login_at']).astimezone(ist)
+                display_account['last_login_display'] = sign_in.strftime('%d %b %Y, %I:%M %p')
+            else:
+                display_account['last_login_display'] = None
+            account_users.append(display_account)
+        return render('admin_users', dict(context(), account_users=account_users, user_total=user_total,
+                                          user_page=page, user_pages=page_total))
+
     @application.get("/analytics")
     def analytics():
         data = context()
@@ -520,6 +565,7 @@ def create_app(database_path=None, upload_dir=None):
                     matching_status=matching_tasks.status(connection(), user['id']) if user else None)
 
     accounts.register_routes(application, connection, context, lambda: utc_now())
+    feedback.register_routes(application, connection, context, lambda: utc_now())
     google_accounts.register_routes(application, connection, lambda: utc_now())
     cloud_worker.register_routes(application, connection, database)
     return application

@@ -11,7 +11,7 @@ from contextlib import closing, redirect_stdout
 
 from backend.pipeline_skeleton import SCHEMA
 from backend.migrate import apply_migrations
-from backend.career_sources import SOURCES
+from backend.career_sources import SOURCES, VERIFIED_WORLDWIDE_SOURCES
 from scripts.run_local_fetch import seed_companies
 from scripts import seed_companies as importer
 
@@ -91,6 +91,9 @@ class CompanySeedTests(unittest.TestCase):
                              [('Futures First', 0), ('ICICI Bank', 0)])
             self.assertEqual(conn.execute("SELECT name,active FROM companies WHERE career_source IN ('wipro','jpmorgan') ORDER BY name").fetchall(),
                              [('JPMorgan Chase', 1), ('Wipro', 1)])
+            self.assertEqual({key for key, active in conn.execute(
+                'SELECT career_source,active FROM companies WHERE career_source IS NOT NULL AND active=1')
+                if key in VERIFIED_WORLDWIDE_SOURCES}, set(VERIFIED_WORLDWIDE_SOURCES))
 
     def test_verified_source_activation_preserves_other_disabled_companies(self):
         with closing(sqlite3.connect(':memory:')) as conn:
@@ -105,6 +108,9 @@ class CompanySeedTests(unittest.TestCase):
             states = dict(conn.execute('SELECT career_source,active FROM companies WHERE career_source IS NOT NULL'))
             self.assertEqual(states['wipro'], 1)
             self.assertEqual(states['jpmorgan'], 1)
+            for key in ('xapo', 'counterpart', 'clearer', 'metabase', 'coinmarketcap',
+                        'superside', 'fingerprint', 'vrchat', 'kinsta', 'raya'):
+                self.assertEqual(states[key], 1)
             for key in ('pwc', 'icici', 'futuresfirst', 'microsoft', 'meta'):
                 self.assertEqual(states[key], 0)
 
@@ -128,7 +134,7 @@ class CompanySeedTests(unittest.TestCase):
                 self.assertEqual(saved.execute('SELECT name FROM companies').fetchall(), [('Original',)])
                 self.assertNotIn('career_source', [row[1] for row in saved.execute('PRAGMA table_info(companies)')])
                 self.assertEqual(current.execute("SELECT id,name FROM companies WHERE board_slug='original'").fetchall(), [(1, 'Original')])
-                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 24)
+                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 28)
 
     def test_source_extension_preserves_existing_source_and_constraints(self):
         import hashlib

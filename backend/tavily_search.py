@@ -18,19 +18,26 @@ MAX_RESULTS = 10
 logger = logging.getLogger(__name__)
 
 
-def search(query, api_key, *, deadline=None):
+def search(query, api_key, *, deadline=None, domains=None):
     """Return HTTPS leads from one basic search, without sending resume data."""
     if not isinstance(query, str) or not query.strip() or len(query) > 400:
         raise ValueError('Invalid search query')
     if not isinstance(api_key, str) or not api_key.strip():
         raise ValueError('Tavily API key is required')
+    if domains is not None:
+        from backend.web_discovery import PLATFORMS
+        if not isinstance(domains, list) or not domains or any(domain not in PLATFORMS.values() for domain in domains):
+            raise ValueError('Invalid search domains')
     deadline = time.monotonic() + 45 if deadline is None else deadline
     remaining = deadline - time.monotonic()
     if remaining < 1:
         raise ValueError('Search time budget exhausted')
+    payload = {'query': query.strip(), 'search_depth': 'basic',
+               'max_results': MAX_RESULTS, 'auto_parameters': False}
+    if domains is not None:
+        payload['include_domains'] = domains
     with requests.post(ENDPOINT, headers={'Authorization': 'Bearer ' + api_key},
-                       json={'query': query.strip(), 'search_depth': 'basic',
-                             'max_results': MAX_RESULTS, 'auto_parameters': False},
+                       json=payload,
                        timeout=(min(15, remaining), min(30, remaining)), allow_redirects=False, stream=True) as response:
         response.raise_for_status()
         if response.status_code != 200:
@@ -88,9 +95,6 @@ def canonical_url(url):
 
 def verify_posting(url, company, deadline):
     """Verify one employer-owned JSON-LD posting without following redirects."""
-    from backend.career_sources import Page, MAX_DESCRIPTION
-    from backend.pipeline_skeleton import _clean_description
-    from backend.recruiter_sources import schema_jobs
     host, prefix = posting_scope(company)
     if not isinstance(url, str) or len(url) > 2000 or any(ord(char) < 33 for char in url):
         raise ValueError('Invalid posting URL')
@@ -99,6 +103,13 @@ def verify_posting(url, company, deadline):
             or parsed.username or parsed.password or not parsed.path.startswith(prefix)
             or '%' in parsed.path or '\\' in parsed.path or any(part in ('.', '..') for part in parsed.path.split('/'))):
         raise ValueError('Search lead is outside the configured company site')
+    return posting_from_record(read_record(url, deadline), url, company['name'])
+
+
+def read_record(url, deadline):
+    """Read one bounded page; callers validate the destination before requesting it."""
+    from backend.career_sources import Page
+    from backend.recruiter_sources import schema_jobs
     remaining = deadline - time.monotonic()
     if remaining < 1:
         raise ValueError('Discovery time budget exhausted')
@@ -117,9 +128,15 @@ def verify_posting(url, company, deadline):
                for record in schema_jobs(block)]
     if len(records) != 1:
         raise ValueError('A single structured job posting is required')
-    record = records[0]
+    return records[0]
+
+
+def posting_from_record(record, url, employer_name):
+    """Validate structured evidence rather than treating a search snippet as a job."""
+    from backend.career_sources import MAX_DESCRIPTION
+    from backend.pipeline_skeleton import _clean_description
     employer = record.get('hiringOrganization')
-    if not isinstance(employer, dict) or not isinstance(employer.get('name'), str) or employer['name'].strip().casefold() != company['name'].strip().casefold():
+    if not isinstance(employer, dict) or not isinstance(employer.get('name'), str) or employer['name'].strip().casefold() != employer_name.strip().casefold():
         raise ValueError('Posting employer does not match company')
     title, description = record.get('title'), record.get('description')
     if (not isinstance(title, str) or not title.strip() or len(title) > 1000

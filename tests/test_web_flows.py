@@ -150,7 +150,7 @@ class WebFlowTests(unittest.TestCase):
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 24)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 28)
 
     def test_india_filter_includes_city_only_locations(self):
         from backend import store
@@ -202,7 +202,7 @@ class WebFlowTests(unittest.TestCase):
             with self.subTest(route=route):
                 response = self.client.get(route)
                 self.assertEqual(response.status_code, 302)
-                self.assertEqual(response.headers["Location"], "/login")
+                self.assertEqual(response.headers["Location"], "/feedback" if route == "/" else "/login")
         self.seed_user()
         for route in routes:
             response=self.client.get(route)

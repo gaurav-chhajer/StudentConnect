@@ -62,7 +62,7 @@ class _QueuedClient:
             if self.stop.is_set():
                 raise RuntimeError("Queue worker is stopping")
             result = self.client.call(path, data)
-            if path == "snapshot":
+            if path in ("snapshot", "discovery/results"):
                 self.ready.set()
             return result
         finally:

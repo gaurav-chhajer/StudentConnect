@@ -55,7 +55,7 @@ def seed_companies(conn):
 
 
 def fetch_all(conn):
-    companies = conn.execute("SELECT * FROM companies WHERE active=1").fetchall()
+    companies = conn.execute("SELECT * FROM companies WHERE active=1 AND discovery_only=0").fetchall()
     total_jobs = 0
     errors = []
 

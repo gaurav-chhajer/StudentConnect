@@ -66,3 +66,21 @@
 @media (max-width:860px){.app .side>form .btn{width:auto}}
 
 .kan{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+
+/* ---------- Feedback ---------- */
+.feedback-card{width:100%;max-width:820px}
+.feedback-card .page-form{max-width:680px}
+.feedback-card textarea{min-height:112px}
+.feedback-card .actions{margin-top:4px}
+.feedback-admin-list{display:grid;gap:12px;margin-top:16px}
+.feedback-admin-list>.card{padding:16px}
+.feedback-admin-list>.card p:first-child{margin-top:0}
+.feedback-admin-list>.card p:last-child{margin-bottom:0}
+.admin-users-card .hd{margin-bottom:8px}
+.admin-users-table{min-width:760px}
+.admin-users-table th{font-size:13px;letter-spacing:0;text-transform:none;background:transparent;color:var(--mute)}
+.admin-users-table .admin-users-number{text-align:right;font-variant-numeric:tabular-nums}
+.admin-users-table td{overflow-wrap:anywhere}
+.admin-users-note{margin-top:16px;max-width:760px}
+.admin-users-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}
+@media (max-width:520px){.admin-users-pagination{align-items:flex-start;flex-direction:column}}

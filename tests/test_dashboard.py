@@ -46,7 +46,7 @@ class DashboardTests(unittest.TestCase):
     def test_empty_profile(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"],"/login")
+        self.assertEqual(response.headers["Location"],"/feedback")
 
     def test_saved_matches_are_rendered_safely_without_writes(self):
         self.seed()
@@ -93,7 +93,7 @@ class DashboardTests(unittest.TestCase):
     def test_missing_database_and_missing_schema(self):
         response = create_app(Path(self.directory.name) / "absent.db").test_client().get("/")
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"],"/login")
+        self.assertEqual(response.headers["Location"],"/feedback")
         self.conn.execute("DROP TABLE scores")
         self.seed_user_only()
         with self.assertLogs(self.application.logger, level="ERROR"):

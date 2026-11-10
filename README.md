@@ -504,7 +504,7 @@ Windows email-only installer remains unchanged and does not fetch or score.
 
 ### Run frequent hosted checks from your computer
 
-#### Optional supplemental Tavily discovery
+#### Role-title discovery with Tavily
 
 To diagnose an empty Groq queue, run the read-only report against the authoritative
 database with the same Python environment and `GROQ_MODEL` as the web app:
@@ -516,33 +516,63 @@ temporary jobs, change filters, make provider requests, or send emails. A local
 database report does not establish the cause of an empty hosted queue.
 
 Set `TAVILY_API_KEY` in the worker computer's private `.env` to enable Tavily
-alongside the existing ATS/company fetches. A blank key disables it. No new
-worker, dependency, migration, or scoring provider is introduced. The existing
+alongside the existing ATS/company fetches. A blank key disables it. The existing
 `scripts.start_hosted_worker` launcher loads this configuration; restart that
 worker after configuration/code changes. Direct module commands use process
 environment variables.
 
-Each successful company fetch can issue one basic search (at most ten leads).
-Discovery is limited to 90 seconds per company and 300 seconds per fetch pass,
-within the existing worker deadline. Only company names and configured career
-domains are sent to Tavily, never resumes or account preferences. Search uses
-the [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search).
+Selecting **Any available company** enables broad discovery for that account.
+Each query contains only one title alias from its current resume-supported role
+families (or explicitly edited role families). No resume text, evidence, name,
+email, location or other preferences are sent to Tavily. A separate domain filter
+rotates through LinkedIn, Indeed, Wellfound, Greenhouse, Lever, Ashby and HiringCafe
+(`hiringcafe.com`). Titles and eligible accounts rotate persistently too.
+Selected-company accounts do not trigger broad searches; existing company feeds
+continue and matching stays restricted to their selected employers.
 
-Leads must stay on the configured official career host (and the configured ATS
-board/Workday site), without redirects. A single JSON-LD `JobPosting`, matching
-employer name, usable full description, valid metadata and unexpired declared
-timestamp are required. Pages without this evidence are logged and skipped;
-this deliberately limits coverage, including JavaScript-only career sites and
-employer name aliases. Existing ATS results remain authoritative.
+The [Tavily free plan](https://help.tavily.com/articles/8298987937-billing-credits-usage-limits)
+provides 1,000 credits/month; basic searches cost one credit. This worker uses
+basic searches only, with at most ten leads per call and 300 seconds per fetch pass.
+An authenticated hosted reservation commits **before** each provider request.
+The shared limits are `1000 // 30 = 33` searches/day across all accounts and
+**1,000/month**, preventing 31-day overspend. Daily and calendar-month boundaries
+use Asia/Kolkata. Reservations count even after a timeout, crash, cancelled run or
+invalid response and are never automatically refunded or retried. Restarting the
+PC does not reset usage. These limits account for this deployment's reservations,
+not previous credit usage, other applications, or a differently aligned provider
+billing period; check the Tavily dashboard for the account's actual balance.
+The previous per-company Tavily loop is replaced rather than given a second budget.
+Search uses the [Tavily Search API](https://docs.tavily.com/documentation/api-reference/endpoint/search).
 
-Additional postings enter the existing authenticated observations endpoint and
-the normal preference/title filtering and Groq scoring queue. URL deduplication
-prefers ATS records and preserves job history when ATS later discovers a search
-posting. Partial/failed searches never close saved jobs. Tavily-only observations
+Leads must stay on the searched platform, without redirects or login/CAPTCHA
+bypasses. A single JSON-LD `JobPosting`, an employer name, usable full description,
+valid metadata and an unexpired declared timestamp are required. Search snippets
+are never treated as job descriptions. Pages without this evidence are logged
+and counted as unverified; JavaScript-only or inaccessible pages may therefore
+produce no verified postings. Searching a platform does not guarantee coverage.
+Each reservation retains its platform, outcome, verified/rejected counts and saved
+count in `tavily_searches`; worker logs report the same coverage without private
+resume content. Existing ATS results remain authoritative.
+
+Verified postings use authenticated discovery-result ingestion and enter the
+normal preference/title filtering and Groq scoring queue. Newly found employers
+are saved with `discovery_only=1`; they are selectable but are never fetched as
+guessed ATS boards. Identical employer/title/location/description discoveries are
+deduplicated across platforms; matching URLs prefer existing ATS records. This
+cannot identify every cross-platform repost with different wording or URLs.
+Changed account inputs discard outdated results without refunding a reservation.
+Result saves are atomic and repeated acknowledgements do not duplicate jobs.
+Partial/failed searches never close saved jobs. Tavily-only observations
 remain active until closure is independently confirmed; they are not a complete
 snapshot of openings. Search failures are reported without discarding successful
-ATS snapshots. The hosted app must receive the accompanying storage change before
-enabling Tavily on the PC. No live Tavily calls are part of offline tests.
+ATS snapshots. Before upgrading, stop the old worker so its unmetered search loop
+cannot run alongside the new version. Free enough hosted account disk quota for
+a full database backup, deploy the new hosted code, and run the backup-producing
+`python -B -m scripts.seed_companies` in the hosted application environment. It
+applies additive migration `025_web_discovery.sql` and retains existing data.
+Reload the hosted app, then update and restart the PC worker. An older hosted app
+does not support the new reservation endpoints. No live Tavily calls are part of
+offline tests; no new dependency or scoring provider is introduced.
 
 `scripts.watch_hosted_jobs` runs on your PC against the PythonAnywhere database.
 It defaults to **local similarity**, with no Groq calls or LLM fallback. The
@@ -1226,6 +1256,19 @@ SQLite transactions and local worker locks. A telemetry database failure is not
 silently ignored. These audit tables grow with recorded activity; no automatic
 deletion or retention policy is introduced.
 
+### Admin user activity
+
+Administrators can open **Users** at `/admin/users` to see registered account
+names and email addresses, active/disabled status, current match counts, and each
+account's latest successful sign-in in UTC. Match counts include non-stale scores
+for active jobs at active companies and respect a user's selected-company settings.
+The list is paginated at 100 accounts per page and is restricted to administrators.
+
+Migration `028_account_last_login.sql` adds the latest-sign-in timestamp. It records
+successful password sign-ins and Google sign-ins going forward; earlier sign-ins
+cannot be reconstructed and display as not recorded. Back up the database, apply
+the normal migration command, and restart the website before using this page.
+
 Monitor checks:
 
 ```powershell
@@ -1610,15 +1653,18 @@ Location searches and pre-scoring preferences share offline worldwide country/ci
 Settings > Job preferences > Matching families & titles displays the effective role families and aliases. Choose Customize families to save one to seven families, with one to twenty titles each, through the existing CSRF-protected Settings form. Overrides are private user preferences; no migration is required. They remain selected across resume changes until edited or Use Groq suggestions is saved. Review manual selections after changing a resume. Saving matching preferences marks existing fit scores stale and queues matching through the existing settings flow. Equivalent title aliases must remain in one family, and existing company, seniority and location filters still apply.
 
 The worldwide PDF catalog contains 30 companies. Supabase, Camunda, LiveKit,
-Atticus, Alpaca, Canonical, Kindred, AssemblyAI, Instrumentl, HappyCo, Wishpond and
-Sourcegraph use verified Ashby, Greenhouse or Lever
-feeds with full descriptions through the existing snapshot, matching and hosted
-worker paths. Other PDF entries remain unavailable for automatic fetching until
-their feeds are verified. After deploying this source revision to the hosted app
+Atticus, Alpaca, Canonical, Kindred, AssemblyAI, Instrumentl, HappyCo, Wishpond,
+Sourcegraph, Xapo Bank, Counterpart, Clearer.io, Metabase, CoinMarketCap,
+Superside, Fingerprint, VRChat, Kinsta, Raya, CloudLinux, Passion.io and SafetyWing
+use verified Ashby, Greenhouse, Lever, Workable or Pinpoint feeds with full
+descriptions through the existing snapshot, matching and hosted worker paths.
+Workable location-specific duplicates are combined into one posting. The other
+five PDF entries remain unavailable for automatic fetching until their feeds are
+verified. After deploying this source revision to the hosted app
 and worker, run `python -B -m scripts.seed_companies` in the hosted application
 environment. This command backs up SQLite, applies migration
-`024_worldwide_company_sources.sql`, seeds the catalog and activates these twelve
+`024_worldwide_company_sources.sql`, seeds the catalog and activates these twenty-five
 previously disabled entries without changing their IDs or subscriptions. It does
 not fetch jobs, score resumes or send email. The next existing worker cycle can
 fetch selected enabled companies. Read-only live checks are available with
-`python -B -m scripts.check_career_sources supabase camunda livekit atticus alpaca canonical kindred assemblyai instrumentl happyco wishpond sourcegraph`.
+`python -B -m scripts.check_career_sources supabase camunda livekit atticus alpaca canonical kindred assemblyai instrumentl happyco wishpond sourcegraph xapo counterpart clearer metabase coinmarketcap superside fingerprint vrchat kinsta raya cloudlinux passion safetywing`.

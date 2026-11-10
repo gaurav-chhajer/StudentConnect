@@ -131,7 +131,8 @@ def authenticate(conn, email, password, now):
             failures = (account["failed_logins"] if account["locked_until"] == 0 else 0) + 1
             conn.execute("UPDATE accounts SET failed_logins=?,locked_until=? WHERE user_id=?", (failures,timestamp+LOGIN_LOCK_SECONDS if failures>=5 else 0,account["user_id"]))
             return None
-        conn.execute("UPDATE accounts SET failed_logins=0,locked_until=0 WHERE user_id=?",(account["user_id"],))
+        conn.execute("UPDATE accounts SET failed_logins=0,locked_until=0,last_login_at=? WHERE user_id=?",
+                     (now.isoformat(),account["user_id"]))
     return dict(account)
 
 

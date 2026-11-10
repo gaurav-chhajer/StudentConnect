@@ -10,7 +10,8 @@ def mode_for_source(source):
     from backend.career_sources import SOURCES
     if source not in SOURCES or SOURCES[source][1] == 'blocked':
         raise ValueError('Unsupported career source')
-    return 'snapshot' if SOURCES[source][1] in ('morgan', 'sitemap', 'greenhouse', 'ashby', 'lever') else 'observed'
+    return 'snapshot' if SOURCES[source][1] in (
+        'morgan', 'sitemap', 'greenhouse', 'ashby', 'lever', 'workable', 'pinpoint') else 'observed'
 
 
 def deduplicate(jobs, mode):

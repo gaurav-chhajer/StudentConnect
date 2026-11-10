@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}Tester feedback · StudentConnect{% endblock %}
+{% block content %}<div class="top2"><div><h1>Tester feedback</h1>
+{% if totals.count %}<p class="sub">{{ totals.count }} response{{ '' if totals.count == 1 else 's' }} · Average accuracy {{ totals.accuracy }}/5 · Average ease {{ totals.ease }}/5 · Would use: {{ totals.yes }} yes, {{ totals.maybe }} maybe, {{ totals.no }} no</p>
+{% else %}<p class="sub">No feedback yet.</p>{% endif %}</div></div>
+<section class="feedback-admin-list" aria-label="Recent feedback responses">
+{% for row in rows %}<article class="card"><p><strong>{{ row.name }}</strong> <span class="sub">{{ row.email }} · <time>{{ row.created_at }}</time></span></p>
+<p>Accuracy {{ row.accuracy }}/5 · Ease {{ row.ease }}/5 · Would use: {{ row.would_use|title }}</p>
+{% if row.issues %}<p><strong>Problems:</strong> {{ row.issues }}</p>{% endif %}
+{% if row.feature_request %}<p><strong>Feature request:</strong> {{ row.feature_request }}</p>{% endif %}</article>
+{% else %}<section class="card"><p class="sub">There are no feedback responses to show yet.</p></section>{% endfor %}
+</section><p class="sub">Shows the latest 200 responses.</p>{% endblock %}

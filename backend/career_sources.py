@@ -56,43 +56,48 @@ SOURCES = {
     'supabase': ('Supabase', 'ashby', 'https://api.ashbyhq.com'),
     'camunda': ('Camunda', 'ashby', 'https://api.ashbyhq.com'),
     'livekit': ('LiveKit', 'ashby', 'https://api.ashbyhq.com'),
-    'cloudlinux': ('CloudLinux', 'blocked', 'https://cloudlinux.com/careers'),
+    'cloudlinux': ('CloudLinux', 'workable', 'https://apply.workable.com'),
     'clutch': ('Clutch', 'blocked', 'https://clutch.io/careers'),
-    'fingerprint': ('Fingerprint', 'blocked', 'https://fingerprint.com/careers/'),
-    'clearer': ('Clearer', 'blocked', 'https://clearer.com'),
+    'fingerprint': ('Fingerprint', 'greenhouse', 'https://boards-api.greenhouse.io'),
+    'clearer': ('Clearer', 'lever', 'https://api.lever.co'),
     'instrumentl': ('Instrumentl', 'lever', 'https://api.lever.co'),
-    'xapo': ('Xapo Bank', 'blocked', 'https://xapobank.com/careers'),
+    'xapo': ('Xapo Bank', 'greenhouse', 'https://boards-api.greenhouse.io'),
     'sourcegraph': ('Sourcegraph', 'greenhouse', 'https://boards-api.greenhouse.io'),
-    'passion': ('Passion.io', 'blocked', 'https://passion.io/careers'),
+    'passion': ('Passion.io', 'workable', 'https://apply.workable.com'),
     'duckduckgo': ('DuckDuckGo', 'blocked', 'https://duckduckgo.com/hiring'),
-    'safetywing': ('SafetyWing', 'blocked', 'https://safetywing.com'),
+    'safetywing': ('SafetyWing', 'pinpoint', 'https://safetywing.pinpointhq.com'),
     'alpaca': ('Alpaca', 'greenhouse', 'https://boards-api.greenhouse.io'),
     'atticus': ('Atticus', 'ashby', 'https://api.ashbyhq.com'),
-    'counterpart': ('Counterpart', 'blocked', 'https://yourcounterpart.com/careers'),
+    'counterpart': ('Counterpart', 'greenhouse', 'https://boards-api.greenhouse.io'),
     'happyco': ('HappyCo', 'lever', 'https://api.lever.co'),
-    'metabase': ('Metabase', 'blocked', 'https://metabase.com/jobs'),
+    'metabase': ('Metabase', 'lever', 'https://api.lever.co'),
     'paradox': ('Paradox', 'blocked', 'https://paradox.ai/careers'),
-    'superside': ('Superside', 'blocked', 'https://superside.com/careers'),
-    'coinmarketcap': ('CoinMarketCap', 'blocked', 'https://coinmarketcap.com/careers'),
-    'vrchat': ('VRChat', 'blocked', 'https://vrchat.com/careers'),
-    'raya': ('Raya', 'blocked', 'https://rayatheapp.com'),
+    'superside': ('Superside', 'lever', 'https://api.lever.co'),
+    'coinmarketcap': ('CoinMarketCap', 'lever', 'https://api.lever.co'),
+    'vrchat': ('VRChat', 'lever', 'https://api.lever.co'),
+    'raya': ('Raya', 'lever', 'https://api.lever.co'),
     'canonical': ('Canonical', 'greenhouse', 'https://boards-api.greenhouse.io'),
     'circle': ('Circle', 'blocked', 'https://circle.com/careers'),
     'uscreen': ('Uscreen', 'blocked', 'https://uscreen.tv/careers'),
     'kindred': ('Kindred', 'ashby', 'https://api.ashbyhq.com'),
     'wishpond': ('Wishpond', 'lever', 'https://api.lever.co'),
-    'kinsta': ('Kinsta', 'blocked', 'https://kinsta.com/careers'),
+    'kinsta': ('Kinsta', 'lever', 'https://api.lever.co'),
     'assemblyai': ('AssemblyAI', 'greenhouse', 'https://boards-api.greenhouse.io'),
 }
 VERIFIED_WORLDWIDE_SOURCES = ('supabase', 'camunda', 'livekit', 'atticus', 'alpaca',
                               'canonical', 'kindred', 'assemblyai', 'instrumentl',
-                              'sourcegraph', 'happyco', 'wishpond')
-BOARD_SLUGS = {'instrumentl': 'Instrumentl', 'sourcegraph': 'sourcegraph91'}
+                              'sourcegraph', 'happyco', 'wishpond', 'xapo',
+                              'counterpart', 'clearer', 'metabase', 'coinmarketcap',
+                              'superside', 'fingerprint', 'vrchat', 'kinsta', 'raya',
+                              'cloudlinux', 'passion', 'safetywing')
+BOARD_SLUGS = {'instrumentl': 'Instrumentl', 'sourcegraph': 'sourcegraph91',
+               'xapo': 'xapo61', 'clearer': 'Clearer'}
 WORKDAY = {'synechron': ('synechron', 'SynechronCareers'), 'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
            'postman': ('postman', 'careers'), 'pwc': ('pwc', 'Global_Experienced_Careers'),
            'salesforce': ('salesforce', 'External_Career_Site'),
            'adobe': ('adobe', 'external_experienced'), 'slack': ('salesforce', 'Slack')}
 ORACLE = {'dpworld': 'CX_1', 'jpmorgan': 'CX_1001'}
+WORKABLE_ACCOUNTS = {'cloudlinux': 'cloudlinux-1', 'passion': 'passionio'}
 # Keep the adapters available for explicit read-only verification, but do not
 # enable new subscriptions until live listing and full-description checks pass.
 UNVERIFIED_SOURCES = frozenset(('microsoft',))
@@ -410,6 +415,95 @@ def _listings(feed, rows=None):
     rows = [] if rows is None else rows
     expected = None
     slug = BOARD_SLUGS.get(key, key)
+    if kind in ('workable', 'pinpoint'):
+        if kind == 'workable':
+            account = WORKABLE_ACCOUNTS[key]
+            payload = feed.json('/api/v1/widget/accounts/' + account, params={'details': 'true'})
+            items = payload['jobs']
+        else:
+            payload = feed.json('/postings.json')
+            items = payload['data']
+        if not isinstance(items, list) or len(items) > MAX_LISTINGS:
+            raise ValueError('Career board snapshot is invalid or oversized')
+        if kind == 'workable':
+            # Workable repeats a posting once per configured location. Merge
+            # those records while retaining every location on the one job.
+            consolidated = {}
+            invariant_fields = ('title', 'description', 'department', 'employment_type',
+                                'application_url', 'published_on')
+            for item in items:
+                if not isinstance(item, dict):
+                    raise ValueError('Workable career listing is invalid')
+                identifier = item.get('shortcode')
+                if not isinstance(identifier, str) or not identifier or len(identifier) > 300:
+                    raise ValueError('Workable career identifier is invalid')
+                locations = item.get('locations') or []
+                if not isinstance(locations, list) or any(not isinstance(value, dict) for value in locations):
+                    raise ValueError('Workable career locations are invalid')
+                previous = consolidated.get(identifier)
+                if previous is None:
+                    consolidated[identifier] = dict(item, locations=list(locations))
+                    continue
+                if any(previous.get(field) != item.get(field) for field in invariant_fields):
+                    raise ValueError('Workable repeated job records conflict')
+                previous['locations'].extend(locations)
+            items = list(consolidated.values())
+        count = len(items)
+        batch = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError('Career board listing is invalid')
+            if kind == 'workable':
+                identifier = item['shortcode']
+                title, description = item['title'], item['description']
+                location_parts = []
+                locations = item.get('locations') or []
+                for place in locations:
+                    location_parts.append(', '.join(value.strip() for value in
+                        (place.get('city'), place.get('region'), place.get('country'))
+                        if isinstance(value, str) and value.strip()))
+                location = '; '.join(value for value in location_parts if value) or None
+                department, employment = item.get('department'), item.get('employment_type')
+                url = item['application_url']
+                parts = urlsplit(url) if isinstance(url, str) else None
+                expected_paths = ('/j/' + quote(str(identifier), safe=''),
+                                  '/j/' + quote(str(identifier), safe='') + '/apply')
+                if (not isinstance(identifier, str) or not identifier or len(identifier) > 300 or
+                        parts is None or parts.scheme != 'https' or parts.netloc != 'apply.workable.com' or
+                        parts.path not in expected_paths):
+                    raise ValueError('Workable career job URL or identifier is invalid')
+            else:
+                identifier = item['id']
+                title, description = item['title'], item['description']
+                location_value, department_value = item.get('location'), item.get('department')
+                if location_value is not None and not isinstance(location_value, dict):
+                    raise ValueError('Pinpoint career location is invalid')
+                if department_value is not None and not isinstance(department_value, dict):
+                    raise ValueError('Pinpoint career department is invalid')
+                location = location_value.get('name') if location_value else None
+                department = department_value.get('name') if department_value else None
+                employment = item.get('employment_type_text') or item.get('employment_type')
+                url = item['url']
+                parts = urlsplit(url) if isinstance(url, str) else None
+                public_path = item.get('path')
+                if (parts is None or parts.scheme != 'https' or parts.netloc != urlsplit(origin).netloc or
+                        not isinstance(public_path, str) or parts.path != public_path or
+                        re.fullmatch(r'/(?:en/)?postings/[A-Za-z0-9-]{1,100}', public_path) is None):
+                    raise ValueError('Pinpoint career job URL or identifier is invalid')
+            if department is not None and not isinstance(department, str):
+                raise ValueError('Career department is invalid')
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError('Full career description is missing')
+            row = job(key, identifier, title, location, url,
+                      version=item.get('published_on') or item.get('deadline_at'),
+                      description=description, department=department, employment=employment)
+            raw = dict(item)
+            raw.pop('description', None)
+            raw.update(row['raw_json'])
+            row['raw_json'] = raw
+            batch.append(row)
+        rows.extend(batch)
+        return rows
     if kind == 'lever':
         items = json.loads(feed.request('/v0/postings/' + slug, params={'mode': 'json'}))
         if not isinstance(items, list) or len(items) > MAX_LISTINGS:

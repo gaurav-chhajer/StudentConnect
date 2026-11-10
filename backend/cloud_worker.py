@@ -152,7 +152,7 @@ def register_routes(application, connection, database):
     @routes.get("/companies")
     def companies():
         rows = connection().execute("""SELECT id,name,ats_type,board_slug,career_source FROM companies
-            WHERE active=1 ORDER BY id LIMIT ?""", (MAX_COMPANIES + 1,)).fetchall()
+            WHERE active=1 AND discovery_only=0 ORDER BY id LIMIT ?""", (MAX_COMPANIES + 1,)).fetchall()
         if len(rows) > MAX_COMPANIES:
             raise ValueError("Too many companies for one daily cycle")
         return {"companies": [dict(row, fingerprint=fingerprint(dict(row))) for row in rows]}
@@ -324,7 +324,8 @@ def register_routes(application, connection, database):
         if company_values:
             # Failed boards must not consume the bounded batch's candidate slots.
             candidates = [job for job in candidates if job["company_id"] in company_ids]
-        if not candidates:
+        if not candidates and (profile is not None or conn.execute(
+                'SELECT 1 FROM user_settings WHERE user_id=? AND subscriptions_configured=1', (user['id'],)).fetchone()):
             return {"items": [], "next": user["id"]}
         if profile is None:
             return {"items": [], "next": user["id"], "role_profile_required": {
@@ -613,4 +614,6 @@ def register_routes(application, connection, database):
             current_app.logger.info("Gmail accepted cloud email (user_id=%s matches=%s reminder=%s)", user["id"], len(matches), reminder)
             return {"next": user["id"], "sent": True}
 
+    from backend import web_discovery
+    web_discovery.register_routes(routes, connection, database)
     application.register_blueprint(routes)

@@ -1,0 +1,298 @@
+diff --git a/backend/app.py b/backend/app.py
+index 0290012..cab58f4 100644
+--- a/backend/app.py
++++ b/backend/app.py
+@@ -11,7 +11,7 @@ from pathlib import Path
+ from flask import Flask, flash, g, redirect, render_template, request, session, url_for
+ from werkzeug.utils import secure_filename
+ 
+-from backend import accounts, automatic_matching, cloud_worker, google_accounts, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
++from backend import accounts, automatic_matching, cloud_worker, feedback, google_accounts, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
+ from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+@@ -520,6 +520,7 @@ def create_app(database_path=None, upload_dir=None):
+                     matching_status=matching_tasks.status(connection(), user['id']) if user else None)
+ 
+     accounts.register_routes(application, connection, context, lambda: utc_now())
++    feedback.register_routes(application, connection, context, lambda: utc_now())
+     google_accounts.register_routes(application, connection, lambda: utc_now())
+     cloud_worker.register_routes(application, connection, database)
+     return application
+diff --git a/backend/feedback.py b/backend/feedback.py
+new file mode 100644
+index 0000000..ae1cc7b
+--- /dev/null
++++ b/backend/feedback.py
+@@ -0,0 +1,66 @@
++"""Tester feedback: a signed-in form plus an owner-only review page."""
++
++from datetime import timedelta
++
++from flask import Blueprint, flash, g, redirect, render_template, request, url_for
++
++from backend import store
++
++MAX_TEXT = 2000
++DAILY_LIMIT = 10
++ANSWERS = ("yes", "maybe", "no")
++
++
++def save_feedback(conn, user_id, form, now):
++    """Validate and store one submission; raises ValueError with a user-facing reason."""
++    try:
++        accuracy = store.integer(form.get("accuracy", ""), 1, 5)
++        ease = store.integer(form.get("ease", ""), 1, 5)
++    except ValueError:
++        raise ValueError("Choose a rating from 1 to 5 for both questions") from None
++    would_use = form.get("would_use", "")
++    issues = form.get("issues", "").strip()
++    feature_request = form.get("feature_request", "").strip()
++    if would_use not in ANSWERS:
++        raise ValueError("Choose Yes, Maybe or No for the last question")
++    if len(issues) > MAX_TEXT or len(feature_request) > MAX_TEXT:
++        raise ValueError(f"Comments can be at most {MAX_TEXT} characters")
++    cutoff = (now - timedelta(days=1)).isoformat()
++    with conn:
++        conn.execute("BEGIN IMMEDIATE")
++        recent = conn.execute("SELECT COUNT(*) FROM feedback WHERE user_id=? AND created_at>=?",
++                              (user_id, cutoff)).fetchone()[0]
++        if recent >= DAILY_LIMIT:
++            raise ValueError("You have reached today's feedback limit. Please try again tomorrow")
++        conn.execute("""INSERT INTO feedback(user_id,accuracy,ease,would_use,issues,feature_request,created_at)
++            VALUES(?,?,?,?,?,?,?)""", (user_id, accuracy, ease, would_use, issues, feature_request, now.isoformat()))
++
++
++def register_routes(app, connection, context, now):
++    routes = Blueprint("feedback", __name__)
++
++    @routes.route("/feedback", methods=["GET", "POST"])
++    def submit():
++        data = context()
++        if request.method == "POST":
++            try:
++                save_feedback(connection(), g.user["id"], request.form, now())
++            except ValueError as error:
++                return render_template("feedback.html", **dict(data, message=str(error))), 400
++            flash("Thank you. Your feedback was saved.")
++            return redirect(url_for("feedback.submit"))
++        return render_template("feedback.html", **data)
++
++    @routes.get("/admin/feedback")
++    def review():
++        if not g.account["is_admin"]:
++            return "Only the owner can read tester feedback.", 403
++        conn = connection()
++        rows = conn.execute("""SELECT f.*,u.name,u.email FROM feedback f JOIN users u ON u.id=f.user_id
++            ORDER BY f.created_at DESC,f.id DESC LIMIT 200""").fetchall()
++        totals = conn.execute("""SELECT COUNT(*) count,ROUND(AVG(accuracy),2) accuracy,ROUND(AVG(ease),2) ease,
++            COALESCE(SUM(would_use='yes'),0) yes,COALESCE(SUM(would_use='maybe'),0) maybe,
++            COALESCE(SUM(would_use='no'),0) no FROM feedback""").fetchone()
++        return render_template("feedback_admin.html", **dict(context(), rows=rows, totals=totals))
++
++    app.register_blueprint(routes)
+diff --git a/backend/migrations/025_feedback.sql b/backend/migrations/025_feedback.sql
+new file mode 100644
+index 0000000..5f1f7a1
+--- /dev/null
++++ b/backend/migrations/025_feedback.sql
+@@ -0,0 +1,12 @@
++CREATE TABLE feedback (
++    id INTEGER PRIMARY KEY AUTOINCREMENT,
++    user_id INTEGER NOT NULL REFERENCES users(id),
++    accuracy INTEGER NOT NULL CHECK(accuracy BETWEEN 1 AND 5),
++    ease INTEGER NOT NULL CHECK(ease BETWEEN 1 AND 5),
++    would_use TEXT NOT NULL CHECK(would_use IN ('yes','maybe','no')),
++    issues TEXT NOT NULL DEFAULT '',
++    feature_request TEXT NOT NULL DEFAULT '',
++    created_at TEXT NOT NULL
++);
++CREATE INDEX feedback_user_created ON feedback(user_id,created_at);
++CREATE INDEX feedback_created ON feedback(created_at);
+diff --git a/frontend/templates/base.html b/frontend/templates/base.html
+index 4523ba7..f04a278 100644
+--- a/frontend/templates/base.html
++++ b/frontend/templates/base.html
+@@ -18,7 +18,7 @@
+ <a {% if active == endpoint %}class="on" aria-current="page" role="link" aria-disabled="true"{% else %}href="{{ url_for(endpoint) }}"{% endif %}>{{ icon(endpoint) }}{{ 'Upload resume' if endpoint == 'resume' and not has_resume else label }}</a>
+ {% if endpoint == 'jobs' %}<a {% if active == 'local_matches' %}class="on" aria-current="page"{% endif %} href="{{ url_for('local_matches') }}">{{ icon('local_matches') }}Local similarity</a><a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}{{ 'Select companies' if not has_companies else 'Target companies' }}</a>{% endif %}
+ {% if endpoint == 'applications' %}<a href="{{ url_for('settings_page') }}#email">{{ icon('email') }}Email alerts</a>{% endif %}
+-{% endfor %}{% if is_account_admin %}<div class="cap">Admin</div><a href="{{ url_for('workflow_monitor_page') }}" {% if active == 'workflow_monitor_page' %}class="on" aria-current="page"{% endif %}>{{ icon('workflow') }}Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">{{ icon('invite') }}Invite testers</a>{% endif %}</nav>{% if active == 'workflow_monitor_page' %}</details>{% endif %}
++{% endfor %}{% if user %}<a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Give feedback</a>{% endif %}{% if is_account_admin %}<div class="cap">Admin</div><a href="{{ url_for('workflow_monitor_page') }}" {% if active == 'workflow_monitor_page' %}class="on" aria-current="page"{% endif %}>{{ icon('workflow') }}Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">{{ icon('invite') }}Invite testers</a><a href="{{ url_for('feedback.review') }}" {% if active == 'feedback.review' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Tester feedback</a>{% endif %}</nav>{% if active == 'workflow_monitor_page' %}</details>{% endif %}
+ {% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Sign out</button></form>{% endif %}
+ <div class="me"><div class="av">{{ (user.name or 'Student')[0]|upper if user else 'S' }}</div><div><strong>{{ user.name or 'Student' if user else 'Your profile' }}</strong><div class="co">{{ settings.university if user and settings is defined else 'Local workspace' }}</div></div></div>
+ </aside><main class="main" id="main" tabindex="-1">
+diff --git a/frontend/templates/feedback.html b/frontend/templates/feedback.html
+new file mode 100644
+index 0000000..5e4f728
+--- /dev/null
++++ b/frontend/templates/feedback.html
+@@ -0,0 +1,19 @@
++{% extends 'base.html' %}{% from 'macros.html' import csrf %}
++{% block title %}Feedback · StudentConnect{% endblock %}
++{% block content %}<section class="card"><h1>Tell us how it went</h1>
++<p class="sub">This takes about two minutes. Your answers are saved with your account so the owner can follow up; they are not shared with other testers.</p>
++<form method="post" class="page-form">{{ csrf() }}
++<label class="field">How accurate were the match scores for your resume?
++<select name="accuracy" required><option value="" selected disabled>Choose 1 to 5</option>
++<option value="1">1 · Not accurate</option><option value="2">2</option><option value="3">3 · Okay</option><option value="4">4</option><option value="5">5 · Very accurate</option></select></label>
++<label class="field">How easy was StudentConnect to use?
++<select name="ease" required><option value="" selected disabled>Choose 1 to 5</option>
++<option value="1">1 · Hard</option><option value="2">2</option><option value="3">3 · Okay</option><option value="4">4</option><option value="5">5 · Very easy</option></select></label>
++<label class="field">Did anything break, feel slow, or confuse you?
++<textarea name="issues" maxlength="2000" rows="4"></textarea></label>
++<label class="field">What feature would make this more useful?
++<textarea name="feature_request" maxlength="2000" rows="4"></textarea></label>
++<label class="field">Would you use this for real applications?
++<select name="would_use" required><option value="" selected disabled>Choose one</option>
++<option value="yes">Yes</option><option value="maybe">Maybe</option><option value="no">No</option></select></label>
++<button class="btn p" type="submit">Send feedback</button></form></section>{% endblock %}
+diff --git a/frontend/templates/feedback_admin.html b/frontend/templates/feedback_admin.html
+new file mode 100644
+index 0000000..736d784
+--- /dev/null
++++ b/frontend/templates/feedback_admin.html
+@@ -0,0 +1,10 @@
++{% extends 'base.html' %}
++{% block title %}Tester feedback · StudentConnect{% endblock %}
++{% block content %}<section class="card"><h1>Tester feedback</h1>
++{% if totals.count %}<p class="sub">{{ totals.count }} response{{ '' if totals.count == 1 else 's' }} · accuracy {{ totals.accuracy }}/5 · ease {{ totals.ease }}/5 · would use: {{ totals.yes }} yes, {{ totals.maybe }} maybe, {{ totals.no }} no</p>
++{% else %}<p class="sub">No feedback yet.</p>{% endif %}
++{% for row in rows %}<article class="card"><p><strong>{{ row.name }}</strong> <span class="sub">{{ row.email }} · <time>{{ row.created_at }}</time></span></p>
++<p>Accuracy {{ row.accuracy }}/5 · Ease {{ row.ease }}/5 · Would use: {{ row.would_use|title }}</p>
++{% if row.issues %}<p><strong>Problems:</strong> {{ row.issues }}</p>{% endif %}
++{% if row.feature_request %}<p><strong>Feature request:</strong> {{ row.feature_request }}</p>{% endif %}</article>{% endfor %}
++<p class="sub">Shows the latest 200 responses.</p></section>{% endblock %}
+diff --git a/frontend/templates/macros.html b/frontend/templates/macros.html
+index ca77df1..d9c864d 100644
+--- a/frontend/templates/macros.html
++++ b/frontend/templates/macros.html
+@@ -32,7 +32,7 @@
+ {% endif %}
+ {% endmacro %}
+ {% macro icon(name) %}
+-{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3M4 13h16', 'local_matches':'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 3v3M12 18v3M3 12h3M18 12h3', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5', 'applications':'M9 11l2 2 4-4M6 4h12v17H6zM9 4V3h6v1', 'email':'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6zM10 19a2 2 0 0 0 4 0', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M6 15v4', 'workflow':'M3 12h4l3-8 4 16 3-8h4', 'invite':'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 8v6M22 11h-6'} %}
++{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3M4 13h16', 'local_matches':'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 3v3M12 18v3M3 12h3M18 12h3', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5', 'applications':'M9 11l2 2 4-4M6 4h12v17H6zM9 4V3h6v1', 'email':'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6zM10 19a2 2 0 0 0 4 0', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M6 15v4', 'workflow':'M3 12h4l3-8 4 16 3-8h4', 'feedback':'M4 5h16v11H9l-5 4zM8 9h8M8 12h5', 'invite':'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 8v6M22 11h-6'} %}
+ <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="{{ paths[name] }}"></path></svg>
+ {% endmacro %}
+ {% macro score_trend(items) %}
+diff --git a/tests/test_company_seed.py b/tests/test_company_seed.py
+index b30384d..838bd2a 100644
+--- a/tests/test_company_seed.py
++++ b/tests/test_company_seed.py
+@@ -128,7 +128,7 @@ class CompanySeedTests(unittest.TestCase):
+                 self.assertEqual(saved.execute('SELECT name FROM companies').fetchall(), [('Original',)])
+                 self.assertNotIn('career_source', [row[1] for row in saved.execute('PRAGMA table_info(companies)')])
+                 self.assertEqual(current.execute("SELECT id,name FROM companies WHERE board_slug='original'").fetchall(), [(1, 'Original')])
+-                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 24)
++                self.assertEqual(current.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0], 25)
+ 
+     def test_source_extension_preserves_existing_source_and_constraints(self):
+         import hashlib
+diff --git a/tests/test_feedback.py b/tests/test_feedback.py
+new file mode 100644
+index 0000000..0131cef
+--- /dev/null
++++ b/tests/test_feedback.py
+@@ -0,0 +1,88 @@
++import re
++import unittest
++from datetime import datetime, timezone
++from unittest.mock import patch
++
++from tests import test_web_flows
++
++NOW = datetime(2026, 11, 10, 12, tzinfo=timezone.utc)
++VALID = dict(accuracy="4", ease="5", would_use="yes", issues="Upload was slow", feature_request="Dark mode")
++
++
++class FeedbackTests(unittest.TestCase):
++    seed_user = test_web_flows.WebFlowTests.seed_user
++
++    def setUp(self):
++        test_web_flows.WebFlowTests.setUp(self)
++        clock = patch("backend.app.utc_now", return_value=NOW)
++        clock.start()
++        self.addCleanup(clock.stop)
++
++    def submit(self, **overrides):
++        data = dict(VALID, **overrides)
++        data = {key: value for key, value in data.items() if value is not None}
++        page = self.client.get("/feedback")
++        token = re.search(rb'name="csrf_token" value="([^"]+)"', page.data)
++        self.assertIsNotNone(token)
++        response = self.client.post("/feedback", data=dict(data, csrf_token=token.group(1).decode()))
++        self.addCleanup(response.close)
++        self.addCleanup(response.request.input_stream.close)
++        return response
++
++    def test_signed_out_users_cannot_view_or_submit(self):
++        self.assertEqual(self.client.get("/feedback").status_code, 302)
++        self.assertEqual(self.client.post("/feedback", data=VALID).status_code, 401)
++
++    def test_signed_in_user_can_submit_and_is_saved(self):
++        self.seed_user()
++        page = self.client.get("/feedback")
++        self.assertEqual(page.status_code, 200)
++        self.assertIn(b"Send feedback", page.data)
++        response = self.submit()
++        self.assertEqual(response.status_code, 302)
++        row = self.conn.execute("SELECT * FROM feedback").fetchone()
++        self.assertEqual((row["user_id"], row["accuracy"], row["ease"], row["would_use"]), (1, 4, 5, "yes"))
++        self.assertEqual(row["issues"], "Upload was slow")
++
++    def test_post_requires_csrf_token(self):
++        self.seed_user()
++        self.assertEqual(self.client.post("/feedback", data=VALID).status_code, 403)
++        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0], 0)
++
++    def test_invalid_input_is_rejected(self):
++        self.seed_user()
++        for bad in (dict(accuracy="0"), dict(accuracy="6"), dict(ease="x"), dict(accuracy=None),
++                    dict(would_use="definitely"), dict(issues="x" * 2001)):
++            self.assertEqual(self.submit(**bad).status_code, 400, bad)
++        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0], 0)
++
++    def test_daily_limit_is_enforced_per_user(self):
++        self.seed_user()
++        for _ in range(10):
++            self.assertEqual(self.submit().status_code, 302)
++        self.assertEqual(self.submit().status_code, 400)
++        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM feedback").fetchone()[0], 10)
++
++    def test_text_is_escaped_on_the_admin_page(self):
++        self.seed_user()
++        self.conn.execute("UPDATE accounts SET is_admin=1 WHERE user_id=1")
++        self.conn.commit()
++        self.submit(issues="<script>alert(1)</script>")
++        page = self.client.get("/admin/feedback")
++        self.assertEqual(page.status_code, 200)
++        self.assertNotIn(b"<script>alert(1)</script>", page.data)
++        self.assertIn(b"&lt;script&gt;alert(1)&lt;/script&gt;", page.data)
++
++    def test_only_the_owner_can_read_feedback(self):
++        self.seed_user()
++        self.submit()
++        self.assertEqual(self.client.get("/admin/feedback").status_code, 403)
++        self.conn.execute("UPDATE accounts SET is_admin=1 WHERE user_id=1")
++        self.conn.commit()
++        page = self.client.get("/admin/feedback")
++        self.assertEqual(page.status_code, 200)
++        self.assertIn(b"Upload was slow", page.data)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_web_flows.py b/tests/test_web_flows.py
+index b09373c..0a88524 100644
+--- a/tests/test_web_flows.py
++++ b/tests/test_web_flows.py
+@@ -150,7 +150,7 @@ class WebFlowTests(unittest.TestCase):
+         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+         apply_migrations(self.conn)
+         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
+-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 24)
++        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 25)
+ 
+     def test_india_filter_includes_city_only_locations(self):
+         from backend import store
