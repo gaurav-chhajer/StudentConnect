@@ -94,8 +94,7 @@ class DailyScoreTests(unittest.TestCase):
         self.conn.commit()
         with self.client.session_transaction() as session:
             session['user_id'], session['session_version'] = 1, 0
-        with patch.object(monitor, 'datetime', wraps=datetime) as clock:
-            clock.now.return_value = BEFORE_MIDNIGHT
+        with patch('backend.app.utc_now', return_value=BEFORE_MIDNIGHT):
             with self.client.get('/admin/workflow-monitor') as response:
                 self.assertEqual(response.status_code, 200)
                 page = response.get_data(as_text=True)
