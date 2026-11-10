@@ -51,7 +51,43 @@ SOURCES = {
     'airbnb': ('Airbnb', 'greenhouse', 'https://boards-api.greenhouse.io'),
     'notion': ('Notion', 'ashby', 'https://api.ashbyhq.com'),
     'zoom': ('Zoom', 'blocked', 'https://careers.zoom.us'),
+    # Sources discovered through the PDF career pages. Blocked entries await
+    # verification of their feed identity and listing/detail behavior.
+    'supabase': ('Supabase', 'ashby', 'https://api.ashbyhq.com'),
+    'camunda': ('Camunda', 'ashby', 'https://api.ashbyhq.com'),
+    'livekit': ('LiveKit', 'ashby', 'https://api.ashbyhq.com'),
+    'cloudlinux': ('CloudLinux', 'blocked', 'https://cloudlinux.com/careers'),
+    'clutch': ('Clutch', 'blocked', 'https://clutch.io/careers'),
+    'fingerprint': ('Fingerprint', 'blocked', 'https://fingerprint.com/careers/'),
+    'clearer': ('Clearer', 'blocked', 'https://clearer.com'),
+    'instrumentl': ('Instrumentl', 'lever', 'https://api.lever.co'),
+    'xapo': ('Xapo Bank', 'blocked', 'https://xapobank.com/careers'),
+    'sourcegraph': ('Sourcegraph', 'greenhouse', 'https://boards-api.greenhouse.io'),
+    'passion': ('Passion.io', 'blocked', 'https://passion.io/careers'),
+    'duckduckgo': ('DuckDuckGo', 'blocked', 'https://duckduckgo.com/hiring'),
+    'safetywing': ('SafetyWing', 'blocked', 'https://safetywing.com'),
+    'alpaca': ('Alpaca', 'greenhouse', 'https://boards-api.greenhouse.io'),
+    'atticus': ('Atticus', 'ashby', 'https://api.ashbyhq.com'),
+    'counterpart': ('Counterpart', 'blocked', 'https://yourcounterpart.com/careers'),
+    'happyco': ('HappyCo', 'lever', 'https://api.lever.co'),
+    'metabase': ('Metabase', 'blocked', 'https://metabase.com/jobs'),
+    'paradox': ('Paradox', 'blocked', 'https://paradox.ai/careers'),
+    'superside': ('Superside', 'blocked', 'https://superside.com/careers'),
+    'coinmarketcap': ('CoinMarketCap', 'blocked', 'https://coinmarketcap.com/careers'),
+    'vrchat': ('VRChat', 'blocked', 'https://vrchat.com/careers'),
+    'raya': ('Raya', 'blocked', 'https://rayatheapp.com'),
+    'canonical': ('Canonical', 'greenhouse', 'https://boards-api.greenhouse.io'),
+    'circle': ('Circle', 'blocked', 'https://circle.com/careers'),
+    'uscreen': ('Uscreen', 'blocked', 'https://uscreen.tv/careers'),
+    'kindred': ('Kindred', 'ashby', 'https://api.ashbyhq.com'),
+    'wishpond': ('Wishpond', 'lever', 'https://api.lever.co'),
+    'kinsta': ('Kinsta', 'blocked', 'https://kinsta.com/careers'),
+    'assemblyai': ('AssemblyAI', 'greenhouse', 'https://boards-api.greenhouse.io'),
 }
+VERIFIED_WORLDWIDE_SOURCES = ('supabase', 'camunda', 'livekit', 'atticus', 'alpaca',
+                              'canonical', 'kindred', 'assemblyai', 'instrumentl',
+                              'sourcegraph', 'happyco', 'wishpond')
+BOARD_SLUGS = {'instrumentl': 'Instrumentl', 'sourcegraph': 'sourcegraph91'}
 WORKDAY = {'synechron': ('synechron', 'SynechronCareers'), 'hotstar': ('jiostar', 'JioStar'), 'bofa': ('ghr', 'lateral-us'),
            'postman': ('postman', 'careers'), 'pwc': ('pwc', 'Global_Experienced_Careers'),
            'salesforce': ('salesforce', 'External_Career_Site'),
@@ -373,9 +409,31 @@ def _listings(feed, rows=None):
     key, kind, origin = feed.key, SOURCES[feed.key][1], feed.origin
     rows = [] if rows is None else rows
     expected = None
+    slug = BOARD_SLUGS.get(key, key)
+    if kind == 'lever':
+        items = json.loads(feed.request('/v0/postings/' + slug, params={'mode': 'json'}))
+        if not isinstance(items, list) or len(items) > MAX_LISTINGS:
+            raise ValueError('Career board snapshot is invalid or oversized')
+        for item in items:
+            if not isinstance(item, dict) or not isinstance(item.get('categories'), dict):
+                raise ValueError('Career board listing is invalid')
+            sections = item.get('lists', [])
+            if not isinstance(sections, list) or any(not isinstance(section, dict) for section in sections):
+                raise ValueError('Career description sections are invalid')
+            parts = [item.get('description') or '']
+            parts += [section.get('content') or '' for section in sections]
+            parts.append(item.get('additional') or '')
+            if any(not isinstance(part, str) for part in parts) or not any(part.strip() for part in parts):
+                raise ValueError('Full career description is missing')
+            row = job(key, item['id'], item['text'], item['categories'].get('location'),
+                      item['hostedUrl'], description='\n'.join(parts),
+                      department=item['categories'].get('team'),
+                      employment=item['categories'].get('commitment'))
+            rows.append(row)
+        return rows
     if kind in ('greenhouse', 'ashby'):
-        path = ('/v1/boards/' + key + '/jobs?content=true' if kind == 'greenhouse'
-                else '/posting-api/job-board/' + key)
+        path = ('/v1/boards/' + slug + '/jobs?content=true' if kind == 'greenhouse'
+                else '/posting-api/job-board/' + slug)
         payload = feed.json(path)
         items = payload['jobs']
         if not isinstance(items, list) or len(items) > MAX_LISTINGS:

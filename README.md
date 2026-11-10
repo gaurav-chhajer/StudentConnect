@@ -1608,3 +1608,17 @@ Synechron careers uses the verified Workday tenant `synechron`, site `SynechronC
 Location searches and pre-scoring preferences share offline worldwide country/city matching through pinned `geonamescache==3.0.2`. The GeoNames cities500 dataset covers populated places with at least 500 residents plus its documented exceptions; it is not a complete list of every settlement. Country names, ISO codes and city aliases are normalized, including accents. Country inference from a city-only label requires an unambiguous country; explicit country context resolves duplicate names. Semicolon-separated offices keep independent context. Remote-only labels never imply a country. Unknown posting locations retain the existing permissive pre-scoring behavior, while explicit geographic results filters exclude unknowns. US state names and the existing Indian state aliases supplement the worldwide city dataset; worldwide administrative-region matching is not provided. The compact index is loaded once per process and retained in memory; the first geographic lookup has a cold-start cost. Local measurement was about five seconds and 388 MiB total process working memory for roughly 235,000 city records; verify hosted memory capacity before deployment. No job or resume data is sent to geocoding services. GeoNames data attribution: https://www.geonames.org/ (CC BY 4.0); geonamescache code is MIT licensed.
 
 Settings > Job preferences > Matching families & titles displays the effective role families and aliases. Choose Customize families to save one to seven families, with one to twenty titles each, through the existing CSRF-protected Settings form. Overrides are private user preferences; no migration is required. They remain selected across resume changes until edited or Use Groq suggestions is saved. Review manual selections after changing a resume. Saving matching preferences marks existing fit scores stale and queues matching through the existing settings flow. Equivalent title aliases must remain in one family, and existing company, seniority and location filters still apply.
+
+The worldwide PDF catalog contains 30 companies. Supabase, Camunda, LiveKit,
+Atticus, Alpaca, Canonical, Kindred, AssemblyAI, Instrumentl, HappyCo, Wishpond and
+Sourcegraph use verified Ashby, Greenhouse or Lever
+feeds with full descriptions through the existing snapshot, matching and hosted
+worker paths. Other PDF entries remain unavailable for automatic fetching until
+their feeds are verified. After deploying this source revision to the hosted app
+and worker, run `python -B -m scripts.seed_companies` in the hosted application
+environment. This command backs up SQLite, applies migration
+`024_worldwide_company_sources.sql`, seeds the catalog and activates these twelve
+previously disabled entries without changing their IDs or subscriptions. It does
+not fetch jobs, score resumes or send email. The next existing worker cycle can
+fetch selected enabled companies. Read-only live checks are available with
+`python -B -m scripts.check_career_sources supabase camunda livekit atticus alpaca canonical kindred assemblyai instrumentl happyco wishpond sourcegraph`.

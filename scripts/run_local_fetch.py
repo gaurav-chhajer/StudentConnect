@@ -12,7 +12,7 @@ import sqlite3
 import csv
 from pathlib import Path
 from backend import pipeline_skeleton as p
-from backend.career_sources import SOURCES, UNVERIFIED_SOURCES
+from backend.career_sources import SOURCES, UNVERIFIED_SOURCES, VERIFIED_WORLDWIDE_SOURCES
 
 CSV_FILES = [Path(__file__).resolve().parents[1] / "data" / "boards" / name
              for name in ("verified_boards_1.csv", "verified_boards_batch2.csv")]
@@ -48,6 +48,8 @@ def seed_companies(conn):
     # These feeds now pass live listing and full-description validation using
     # the existing additive observation policy. Enable their saved catalog rows.
     conn.execute("UPDATE companies SET active=1 WHERE career_source IN ('wipro','jpmorgan') AND active=0")
+    for key in VERIFIED_WORLDWIDE_SOURCES:
+        conn.execute('UPDATE companies SET active=1 WHERE career_source=? AND active=0', (key,))
     conn.commit()
     print(f"Seeded {inserted} new companies.\n")
 
