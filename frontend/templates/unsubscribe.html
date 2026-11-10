@@ -1,0 +1,9 @@
+{% from 'macros.html' import csrf %}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Email preferences · StudentConnect</title><link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}"></head>
+<body><main class="main" id="main"><section class="card auth-card">
+{% if state == 'confirm' %}<h1>Unsubscribe from email alerts?</h1><p class="sub">This turns off scheduled StudentConnect job match emails for this account. You can change the setting again after signing in.</p>
+<form method="post" action="{{ url_for('unsubscribe_page') }}" class="page-form">{{ csrf() }}<input type="hidden" name="token" value="{{ token }}"><button class="btn p" type="submit">Unsubscribe</button></form>
+{% elif state == 'done' %}<h1>Email alerts are off</h1><p class="sub">Scheduled job match emails have been turned off for this account.</p><a class="btn" href="{{ url_for('accounts.login', next=url_for('settings_page') ~ '#email') }}">Manage preferences</a>
+{% else %}<h1>This link can’t unsubscribe this account</h1><p class="sub">The link is invalid or the account is no longer available. Sign in to manage email alerts.</p><a class="btn p" href="{{ url_for('accounts.login', next=url_for('settings_page') ~ '#email') }}">Sign in</a>{% endif %}
+</section></main></body></html>

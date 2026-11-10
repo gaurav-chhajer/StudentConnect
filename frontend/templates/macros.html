@@ -32,7 +32,7 @@
 {% endif %}
 {% endmacro %}
 {% macro icon(name) %}
-{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3M4 13h16', 'local_matches':'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 3v3M12 18v3M3 12h3M18 12h3', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5', 'applications':'M9 11l2 2 4-4M6 4h12v17H6zM9 4V3h6v1', 'email':'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6zM10 19a2 2 0 0 0 4 0', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M6 15v4', 'workflow':'M3 12h4l3-8 4 16 3-8h4', 'feedback':'M4 5h16v11H9l-5 4zM8 9h8M8 12h5', 'invite':'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 8v6M22 11h-6'} %}
+{% set paths = {'dashboard':'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z', 'jobs':'M4 8h16v11H4zM9 8V5h6v3M4 13h16', 'companies':'M5 20V4h9v16M14 9h5v11M8 8h3M8 12h3M8 16h3', 'resume':'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5', 'applications':'M9 11l2 2 4-4M6 4h12v17H6zM9 4V3h6v1', 'email':'M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6zM10 19a2 2 0 0 0 4 0', 'analytics':'M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6', 'settings_page':'M4 7h10M18 7h2M4 17h2M10 17h10M14 5v4M6 15v4', 'workflow':'M3 12h4l3-8 4 16 3-8h4', 'feedback':'M4 5h16v11H9l-5 4zM8 9h8M8 12h5', 'invite':'M15 19v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM19 8v6M22 11h-6'} %}
 <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="{{ paths[name] }}"></path></svg>
 {% endmacro %}
 {% macro score_trend(items) %}

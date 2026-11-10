@@ -1,4 +1,4 @@
-/* Sidebar, Applications board, Local similarity, Resume and Settings refinements. Loaded after tiles.css. */
+/* Sidebar, Applications board, Resume and Settings refinements. Loaded after tiles.css. */
 
 /* ---------- Sidebar ---------- */
 @media (min-width:861px){
@@ -16,6 +16,19 @@
 .app .side .me{margin-top:0}
 @media (min-width:861px){.app .side>form{margin-top:auto}.app .side>form+.me{margin-top:0}}
 @media (max-width:860px){.app .nav a.on::before{display:none}}
+
+/* ---------- Public landing page ---------- */
+.landing-hero{max-width:900px;margin:clamp(12px,5vh,52px) auto 22px;padding:clamp(24px,5vw,56px);background:linear-gradient(135deg,#fff 25%,#edf0ff 100%)}
+.landing-hero .eyebrow{margin:0 0 10px;color:var(--acc);font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.landing-hero h1{max-width:700px;margin:0;font:700 clamp(34px,6vw,64px)/1.04 'Bricolage Grotesque',sans-serif;letter-spacing:-.04em}
+.landing-intro{max-width:650px;margin:18px 0;font-size:17px;line-height:1.6;color:var(--mute)}
+.landing-actions{margin:22px 0 12px}
+.landing-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;max-width:1100px;margin:0 auto}
+.landing-steps .card{padding:20px}
+.landing-steps h2{margin:14px 0 6px;font:600 20px/1.2 'Bricolage Grotesque',sans-serif}
+.landing-steps p{margin:0;line-height:1.55}
+.landing-note{max-width:1100px;margin:18px auto}
+@media(max-width:760px){.landing-steps{grid-template-columns:1fr}.landing-hero{margin-top:12px}}
 
 /* ---------- Applications ---------- */
 .pipeline{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin:0;padding:0;list-style:none}
@@ -38,7 +51,7 @@
 .ac-edit form{margin-top:8px}
 .col-empty{margin:0;padding:18px 10px;text-align:center;font-size:13px;color:var(--mute);border:1px dashed #C4CAE2;border-radius:12px}
 
-/* ---------- Tiles with no link (Local similarity without a posting URL) ---------- */
+/* ---------- Tiles without a posting URL ---------- */
 .job-tile.no-link{cursor:default}
 .job-tile.no-link:hover{transform:none;border-color:var(--line);box-shadow:0 1px 2px rgba(14,21,48,.04)}
 

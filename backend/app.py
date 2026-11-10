@@ -11,7 +11,7 @@ from pathlib import Path
 from flask import Flask, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, similarity, store, workflow_monitor
+from backend import accounts, automatic_matching, cloud_worker, email_unsubscribe, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, store, workflow_monitor
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,7 +31,7 @@ def create_app(database_path=None, upload_dir=None):
                         static_folder=str(ROOT / "frontend/static"))
     application.config.update(SECRET_KEY=signing_key, SESSION_COOKIE_SECURE=hosted,
                               MAX_CONTENT_LENGTH=resumes.MAX_UPLOAD_BYTES + 65536,
-                              SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict")
+                              SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
     database = Path(database_path) if database_path is not None else ROOT / "data/jobs.db"
     uploads = Path(upload_dir) if upload_dir is not None else ROOT / "data/uploads"
 
@@ -104,11 +104,12 @@ def create_app(database_path=None, upload_dir=None):
                 g.account = dict(account)
                 g.user = dict(connection().execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone())
         public = {"accounts.login", "accounts.register", "accounts.registration_code", "accounts.forgot", "accounts.reset",
-                  "dashboard", "feedback.submit",
+                  "dashboard", "feedback.submit", "unsubscribe_page",
                   "google_accounts.login", "google_accounts.callback", "google_accounts.complete_link", "static"}
         if request.url_rule is not None and request.endpoint not in public and g.user is None:
             if request.method == "GET":
-                return redirect(url_for("accounts.login"))
+                next_url = request.full_path[:-1] if request.full_path.endswith("?") else request.full_path
+                return redirect(url_for("accounts.login", next=next_url))
             return "Sign in before making changes.", 401
         if request.endpoint and request.endpoint != "static":
             g.script_nonce = secrets.token_urlsafe(32)
@@ -163,6 +164,23 @@ def create_app(database_path=None, upload_dir=None):
     application.register_error_handler(TypeError, database_error)
     application.register_error_handler(OSError, database_error)
 
+    @application.route("/unsubscribe", methods=["GET", "POST"])
+    def unsubscribe_page():
+        token = request.values.get("token", "")
+        parsed = email_unsubscribe.parse_token(token)
+        user_row = None
+        if parsed is not None:
+            user_row = connection().execute("SELECT id,email FROM users WHERE id=?", (parsed[0],)).fetchone()
+        valid = bool(user_row and email_unsubscribe.matches_account(token, user_row["id"], user_row["email"]))
+        if not valid:
+            return render_template("unsubscribe.html", state="invalid"), 400
+        if request.method == "GET":
+            return render_template("unsubscribe.html", state="confirm", token=token)
+        with connection() as conn:
+            conn.execute("""INSERT INTO user_settings(user_id,cadence) VALUES(?,'off')
+                ON CONFLICT(user_id) DO UPDATE SET cadence='off'""", (parsed[0],))
+        return render_template("unsubscribe.html", state="done")
+
     def populate(data):
         if not data["user"]:
             data["message"] = ("No active profile yet. Create your profile in Settings." if database.is_file()
@@ -181,7 +199,7 @@ def create_app(database_path=None, upload_dir=None):
     def dashboard():
         data = context()
         if not data["user"]:
-            return redirect(url_for("feedback.submit"))
+            return render("landing", data)
         try:
             args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days'))
             data.update(store.filters(args))
@@ -257,18 +275,8 @@ def create_app(database_path=None, upload_dir=None):
         return render("jobs", data)
 
     @application.get("/jobs/local")
-    def local_matches():
-        data = context()
-        try:
-            page = store.integer(request.args.get("page", "1"), 1, 1000000)
-        except ValueError as error:
-            data["message"] = str(error)
-            return render("empty", data, 400)
-        data["matches"], data["pages"] = similarity.matches(connection(), data["user"]["id"], page)
-        data["page"] = page
-        for item in data["matches"]:
-            item["url"] = store.safe_url(item["url"] or "")
-        return render("local_matches", data)
+    def retired_local_matches():
+        return redirect(url_for("jobs"))
 
     @application.post("/jobs/searches")
     def save_search():
@@ -550,6 +558,32 @@ def create_app(database_path=None, upload_dir=None):
         return render('admin_users', dict(context(), account_users=account_users, user_total=user_total,
                                           user_page=page, user_pages=page_total))
 
+    @application.post("/admin/users/<int:user_id>/delete")
+    def admin_delete_user(user_id):
+        if not g.account["is_admin"]:
+            return "Administrator access required.", 403
+        target = connection().execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+        if target is None:
+            flash("That account no longer exists.")
+            return redirect(url_for("admin_users_page"))
+        if user_id == g.user["id"]:
+            flash("You cannot delete your own account from the admin user list.")
+            return redirect(url_for("admin_users_page"))
+        if request.form.get("confirm_email", "").strip().casefold() != target["email"].casefold():
+            flash("Enter the account email exactly to confirm deletion.")
+            return redirect(url_for("admin_users_page"))
+        try:
+            email = accounts.delete_user_data(connection(), user_id, uploads)
+        except ValueError as error:
+            flash(str(error))
+            return redirect(url_for("admin_users_page"))
+        except ExceptionGroup as error:
+            application.logger.error("Admin deleted account but private file cleanup failed (%d failures)", len(error.exceptions))
+            flash("The account was deleted, but some private files could not be cleared. Check the application logs.")
+            return redirect(url_for("admin_users_page"))
+        flash(f"Deleted the account for {email} and its personal data.")
+        return redirect(url_for("admin_users_page"))
+
     @application.get("/analytics")
     def analytics():
         data = context()
@@ -575,7 +609,7 @@ def create_app(database_path=None, upload_dir=None):
                     cloud_schedule=bool(cloud_worker.worker_key()),
                     matching_status=matching_tasks.status(connection(), user['id']) if user else None)
 
-    accounts.register_routes(application, connection, context, lambda: utc_now())
+    accounts.register_routes(application, connection, context, lambda: utc_now(), uploads)
     feedback.register_routes(application, connection, context, lambda: utc_now())
     google_accounts.register_routes(application, connection, lambda: utc_now())
     cloud_worker.register_routes(application, connection, database)

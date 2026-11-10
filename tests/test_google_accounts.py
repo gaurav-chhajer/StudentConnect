@@ -66,7 +66,7 @@ class GoogleAccountTests(unittest.TestCase):
         self.assertIn(b"Google sign-in complete", response.data)
         self.assertIn(b'id="match-constellation"', response.data)
         self.assertIn(b'href="/"', response.data)
-        self.assertIn("SameSite=Strict", " ".join(response.headers.getlist("Set-Cookie")))
+        self.assertIn("SameSite=Lax", " ".join(response.headers.getlist("Set-Cookie")))
         exchange.assert_called_once_with(redirect_uri=params["redirect_uri"][0], code="synthetic-code", code_verifier=pending["code_verifier"])
         verify.assert_called_once_with({"id_token": "synthetic"}, nonce=params["nonce"][0], leeway=30)
         account = self.conn.execute("SELECT * FROM accounts").fetchone()

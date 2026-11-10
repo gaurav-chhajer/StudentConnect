@@ -5,6 +5,8 @@ import re
 import secrets
 import sqlite3
 from datetime import timedelta
+from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import Blueprint, flash, g, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -39,6 +41,97 @@ def token_digest(token):
     if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
         raise ValueError("The code is invalid, expired, or already used")
     return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+def safe_next_url(value):
+    """Accept only bounded same-site paths for post-login navigation."""
+    if (not isinstance(value, str) or not value or len(value) > 2048 or
+            not value.startswith("/") or value.startswith("//") or "\\" in value or
+            "%2f" in value.casefold() or "%5c" in value.casefold() or
+            any(ord(character) < 32 for character in value)):
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.scheme or parsed.netloc or not parsed.path.startswith("/") or parsed.path.startswith("//"):
+        return None
+    return value
+
+
+def delete_user_data(conn, user_id, upload_dir):
+    """Delete one account and its private records, retaining shared postings."""
+    account = conn.execute("""SELECT u.email,a.is_admin FROM users u
+        JOIN accounts a ON a.user_id=u.id WHERE u.id=?""", (user_id,)).fetchone()
+    if account is None:
+        raise ValueError("This account no longer exists.")
+    if account["is_admin"] and conn.execute("SELECT COUNT(*) FROM accounts WHERE is_admin=1").fetchone()[0] <= 1:
+        raise ValueError("The last administrator account cannot be deleted.")
+
+    files = [row[0] for row in conn.execute(
+        "SELECT file_name FROM resume_versions WHERE user_id=? AND file_name IS NOT NULL", (user_id,))]
+    email = account["email"]
+    with conn:
+        conn.execute("DELETE FROM recruiter_run_history WHERE run_id IN (SELECT id FROM application_runs WHERE user_id=?)", (user_id,))
+        conn.execute("DELETE FROM recruiter_jobs WHERE workflow_id IN (SELECT id FROM recruiter_workflows WHERE user_id=?)", (user_id,))
+        conn.execute("DELETE FROM recruiter_followups WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM worker_events WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM worker_pulses WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM application_runs WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM recruiter_workflows WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM applications WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM account_tokens WHERE user_id=? OR lower(email)=lower(?)", (user_id, email))
+        conn.execute("DELETE FROM google_login_states WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM google_link_challenges WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM google_accounts WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM feedback WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM scores WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM sent_log WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM local_similarity WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM company_subscriptions WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM user_settings WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM resume_versions WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM saved_searches WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM matching_tasks WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM match_reminders WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM resume_role_titles WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM tavily_cursors WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM tavily_searches WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM accounts WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM onboarding_reminders WHERE lower(email)=lower(?)", (email,))
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+    failures = []
+    try:
+        from backend.local_embeddings import CACHE_PATH
+        if CACHE_PATH.is_file():
+            cache = sqlite3.connect(CACHE_PATH, timeout=5)
+            try:
+                with cache:
+                    cache.execute("DELETE FROM results WHERE user_id=?", (user_id,))
+                    cache.execute("DELETE FROM embeddings WHERE owner=?", ("resume:" + str(user_id),))
+            finally:
+                cache.close()
+    except (OSError, sqlite3.Error) as error:
+        failures.append(error)
+
+    root = Path(upload_dir).resolve()
+    for file_name in files:
+        if (not isinstance(file_name, str) or not file_name or Path(file_name).name != file_name or
+                "/" in file_name or "\\" in file_name):
+            failures.append(ValueError("A stored resume filename is invalid."))
+            continue
+        path = (root / file_name).resolve()
+        if path.parent != root:
+            failures.append(ValueError("A stored resume path is outside the upload directory."))
+            continue
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            failures.append(error)
+    if failures:
+        raise ExceptionGroup("Account data was removed, but private file cleanup was incomplete.", failures)
+    return email
 
 
 def issue_invitation(conn, email, now, owner=False, self_service=False):
@@ -168,18 +261,20 @@ def reset_password(conn, form, now):
         conn.execute("UPDATE account_tokens SET consumed_at=? WHERE user_id=? AND purpose='reset' AND consumed_at IS NULL",(timestamp,token[0]))
 
 
-def register_routes(app, connection, context, now):
+def register_routes(app, connection, context, now, upload_dir):
     routes = Blueprint("accounts",__name__)
 
-    def page(mode, message=None, status=200, registration_step="request"):
-        return render_template("account.html",mode=mode,message=message,registration_step=registration_step),status
+    def page(mode, message=None, status=200, registration_step="request", next_url=None):
+        return render_template("account.html",mode=mode,message=message,registration_step=registration_step,
+                               next_url=next_url),status
 
     @routes.route("/login",methods=["GET","POST"])
     def login():
+        next_url = safe_next_url(request.values.get("next")) or url_for("dashboard")
         if request.method=="GET":
-            return page("login")
+            return page("login", next_url=next_url)
         if not request_allowed(connection(),"login",now()):
-            return page("login","Too many attempts. Wait five minutes and try again.",429)
+            return page("login","Too many attempts. Wait five minutes and try again.",429,next_url=next_url)
         try:
             email = email_address(request.form.get("email",""))
             password = request.form.get("password","")
@@ -187,18 +282,40 @@ def register_routes(app, connection, context, now):
         except ValueError:
             account = None
         if account is None:
-            return page("login","Unable to sign in. Check your credentials or wait before trying again.",400)
+            return page("login","Unable to sign in. Check your credentials or wait before trying again.",400,next_url=next_url)
         session.clear()
         session.permanent=True
         session["user_id"]=account["user_id"]
         session["session_version"]=account["session_version"]
-        return redirect(url_for("dashboard"))
+        return redirect(next_url)
 
     @routes.post("/logout")
     def logout():
         with connection() as conn:
             conn.execute("UPDATE accounts SET session_version=session_version+1 WHERE user_id=?",(g.user["id"],))
         session.clear()
+        return redirect(url_for("accounts.login"))
+
+    @routes.post("/account/delete")
+    def delete_own_account():
+        if g.account["is_admin"]:
+            flash("Administrator accounts cannot be deleted from this page.")
+            return redirect(url_for("settings_page"))
+        if request.form.get("confirm_delete", "") != "DELETE":
+            flash("Type DELETE exactly to confirm account removal.")
+            return redirect(url_for("settings_page"))
+        try:
+            delete_user_data(connection(), g.user["id"], upload_dir)
+        except ValueError as error:
+            flash(str(error))
+            return redirect(url_for("settings_page"))
+        except ExceptionGroup as error:
+            app.logger.error("Account data was removed but private file cleanup failed (%d failures)", len(error.exceptions))
+            session.clear()
+            flash("Your account was deleted, but some private files could not be cleared. Contact the site administrator.")
+            return redirect(url_for("accounts.login"))
+        session.clear()
+        flash("Your account and personal data have been deleted.")
         return redirect(url_for("accounts.login"))
 
     @routes.route("/register",methods=["GET","POST"])

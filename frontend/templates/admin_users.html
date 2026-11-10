@@ -1,17 +1,18 @@
-{% extends 'base.html' %}
+{% extends 'base.html' %}{% from 'macros.html' import csrf %}
 {% block title %}Users · StudentConnect Admin{% endblock %}
 {% block content %}
 <div class="top2"><div><h1>Users</h1><p class="sub">Registered accounts, current matches, and latest successful sign-in times in India Standard Time.</p></div></div>
 <section class="card admin-users-card" aria-labelledby="registered-users-title">
 <div class="hd"><h2 id="registered-users-title">Registered accounts</h2><span class="sub">{{ user_total }} total</span></div>
 <div class="scroll"><table class="admin-users-table">
-<thead><tr><th scope="col">User</th><th scope="col">Account</th><th scope="col" class="admin-users-number">Current matches</th><th scope="col">Latest sign-in (IST)</th></tr></thead>
+<thead><tr><th scope="col">User</th><th scope="col">Account</th><th scope="col" class="admin-users-number">Current matches</th><th scope="col">Latest sign-in (IST)</th><th scope="col">Account actions</th></tr></thead>
 <tbody>{% for account in account_users %}
 <tr><td><strong>{{ account.name or 'Name not set' }}</strong><br><span class="co">{{ account.email }}</span></td>
 <td>{% if account.active and account.email_verified %}Active{% else %}Disabled{% endif %}{% if account.is_admin %}<span class="co"> · Admin</span>{% endif %}</td>
 <td class="admin-users-number">{{ account.match_count }}</td>
-<td>{% if account.last_login_at %}<time datetime="{{ account.last_login_at }}">{{ account.last_login_display }}</time>{% else %}<span class="co">No sign-in recorded</span>{% endif %}</td></tr>
-{% else %}<tr><td colspan="4" class="co">No registered accounts.</td></tr>{% endfor %}</tbody>
+<td>{% if account.last_login_at %}<time datetime="{{ account.last_login_at }}">{{ account.last_login_display }}</time>{% else %}<span class="co">No sign-in recorded</span>{% endif %}</td>
+<td>{% if account.user_id == user.id %}<span class="co">Current account</span>{% else %}<details><summary>Delete account</summary><form method="post" action="{{ url_for('admin_delete_user', user_id=account.user_id) }}">{{ csrf() }}<label class="field"><span class="inputbox"><input name="confirm_email" type="email" maxlength="254" required placeholder=" "><span class="input-label">Type account email</span><i aria-hidden="true"></i></span></label><button class="btn" type="submit">Permanently delete</button></form></details>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="co">No registered accounts.</td></tr>{% endfor %}</tbody>
 </table></div>
 <p class="sub admin-users-note">Current matches count non-stale scores for active jobs at active companies, respecting each user’s company subscriptions. Sign-in history starts with this release; earlier sign-ins weren’t recorded.</p>
 {% if user_pages > 1 %}<nav class="admin-users-pagination" aria-label="User list pages"><span class="sub">Page {{ user_page }} of {{ user_pages }}</span><div class="actions">{% if user_page > 1 %}<a class="btn" href="{{ url_for('admin_users_page', page=user_page-1) }}">Previous</a>{% endif %}{% if user_page < user_pages %}<a class="btn" href="{{ url_for('admin_users_page', page=user_page+1) }}">Next</a>{% endif %}</div></nav>{% endif %}

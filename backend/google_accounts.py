@@ -125,6 +125,7 @@ def register_routes(app, connection, now):
 
     @routes.post("/auth/google")
     def login():
+        next_url = accounts.safe_next_url(request.form.get("next", ""))
         if not app.config["GOOGLE_LOGIN_ENABLED"]:
             return failure("Google sign-in is not configured yet.", 503)
         try:
@@ -147,6 +148,7 @@ def register_routes(app, connection, now):
                 conn.execute("INSERT INTO google_login_states(state_hash,browser_hash,nonce,code_verifier,user_id,session_version,expires_at) VALUES(?,?,?,?,?,?,?)",
                              (accounts.token_digest(state), accounts.token_digest(browser), authorization["nonce"], authorization["code_verifier"],
                               g.account["user_id"] if g.account else None, g.account["session_version"] if g.account else None, timestamp + STATE_SECONDS))
+            session["google_login_next"] = {"state": state, "url": next_url}
         except sqlite3.Error as error:
             app.logger.error("Google sign-in state unavailable (%s)", type(error).__name__)
             return failure("Google sign-in is temporarily unavailable. Please try again later.", 503)
@@ -194,11 +196,14 @@ def register_routes(app, connection, now):
             return failure(str(error))
         except sqlite3.IntegrityError:
             return failure("This profile is already linked. Use your existing sign-in method.")
+        pending_next = session.get("google_login_next")
+        destination = (accounts.safe_next_url(pending_next.get("url"))
+                       if isinstance(pending_next, dict) and pending_next.get("state") == request.args.get("state") else None)
         session.clear()
         session.permanent = True
         session["user_id"], session["session_version"] = account["user_id"], account["session_version"]
         response = app.make_response(render_template(
-            "google_complete.html", dashboard_url=url_for("dashboard")))
+            "google_complete.html", dashboard_url=destination or url_for("dashboard")))
         response.delete_cookie(COOKIE_NAME, path=CALLBACK_PATH, secure=app.config["SESSION_COOKIE_SECURE"], httponly=True, samesite="Lax")
         return response
 

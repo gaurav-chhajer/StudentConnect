@@ -74,7 +74,7 @@ class HostedApplicationTests(unittest.TestCase):
         cookie = response.headers["Set-Cookie"]
         self.assertIn("Secure", cookie)
         self.assertIn("HttpOnly", cookie)
-        self.assertIn("SameSite=Strict", cookie)
+        self.assertIn("SameSite=Lax", cookie)
         for host in ("https://evil.test", ORIGIN + ".evil.test", "http://localhost"):
             self.assertEqual(client.get("/login", base_url=host).status_code, 403)
         signed = first.session_interface.get_signing_serializer(first).dumps({"csrf": "synthetic"})

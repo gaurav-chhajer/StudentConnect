@@ -29,23 +29,25 @@ class FeedbackTests(unittest.TestCase):
         self.addCleanup(response.request.input_stream.close)
         return response
 
-    def test_signed_out_user_sees_only_the_form_and_can_submit_anonymously(self):
+    def test_signed_out_user_sees_feedback_form_and_account_links(self):
         page = self.client.get("/feedback")
         self.assertEqual(page.status_code, 200)
         self.assertIn(b"Send feedback", page.data)
+        self.assertIn(b"Sign in", page.data)
+        self.assertIn(b"Sign up", page.data)
         self.assertNotIn(b"Set up your profile", page.data)
         self.assertEqual(self.submit().status_code, 302)
         row = self.conn.execute("SELECT user_id,anonymous_key FROM feedback").fetchone()
         self.assertIsNone(row["user_id"])
         self.assertTrue(row["anonymous_key"])
 
-    def test_signed_out_homepage_opens_feedback_form(self):
+    def test_signed_out_homepage_explains_product_and_offers_account_access(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.headers["Location"], "/feedback")
-        page = self.client.get(response.headers["Location"])
-        self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Send feedback", page.data)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Find roles that fit your resume", response.data)
+        self.assertIn(b"Sign in", response.data)
+        self.assertIn(b"Sign up", response.data)
+        self.assertNotIn(b"Send feedback", response.data)
 
     def test_signed_in_user_can_submit_and_is_saved(self):
         self.seed_user()
