@@ -1,1 +1,1 @@
-"""StudentConnect backend."""
+"""Jobspresso backend."""

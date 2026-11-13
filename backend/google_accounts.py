@@ -110,8 +110,8 @@ def register_routes(app, connection, now):
                          (accounts.token_digest(browser), accounts.token_digest(code), subject, email, user["id"], timestamp + LINK_SECONDS))
         delivery_error = False
         try:
-            pipeline.deliver_account_email(email, "StudentConnect Google link code",
-                "Enter this one-time code on the StudentConnect page to connect Google to your existing profile. "
+            pipeline.deliver_account_email(email, "Jobspresso Google link code",
+                "Enter this one-time code on the Jobspresso page to connect Google to your existing profile. "
                 "It expires in 10 minutes. If you did not request this, ignore it.\n\n" + code)
         except (OSError, RuntimeError, ValueError) as error:
             app.logger.error("Google link code delivery unconfirmed (%s); inspect delivery before retrying", type(error).__name__)

@@ -1,7 +1,7 @@
-{% from 'macros.html' import icon %}
+{% from 'macros.html' import brand %}
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{% block title %}StudentConnect{% endblock %}</title>
+<html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}Jobspresso{% endblock %}</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
@@ -10,21 +10,27 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/preferences.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tiles.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages.css') }}">
-<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/constellation.js') }}"></script>{% block extra_head %}{% endblock %}</head>
-<body class="{% block body_class %}{% endblock %}"><a class="skip-link" href="#main">Skip to content</a><canvas class="match-constellation" id="match-constellation" aria-hidden="true"></canvas><div class="app"><aside class="side"><a class="logo" href="{{ url_for('dashboard') }}"><i aria-hidden="true"></i>StudentConnect</a>
-{% if user %}{% if active == 'workflow_monitor_page' %}<details class="wm-mobile-nav" open><summary>Menu</summary>{% endif %}<nav class="nav" aria-label="Main"><div class="cap">Menu</div>
-{% set groups = {'jobs':'Find jobs','applications':'Track progress','settings_page':'Account'} %}
-{% for endpoint,label in navigation %}{% if endpoint in groups %}<div class="cap">{{ groups[endpoint] }}</div>{% endif %}
-<a {% if active == endpoint %}class="on" aria-current="page" role="link" aria-disabled="true"{% else %}href="{{ url_for(endpoint) }}"{% endif %}>{{ icon(endpoint) }}{{ 'Upload resume' if endpoint == 'resume' and not has_resume else label }}</a>
-{% if endpoint == 'jobs' %}<a href="{{ url_for('settings_page') }}#companies">{{ icon('companies') }}{{ 'Select companies' if not has_companies else 'Target companies' }}</a>{% endif %}
-{% if endpoint == 'applications' %}<a href="{{ url_for('settings_page') }}#email">{{ icon('email') }}Email alerts</a>{% endif %}
-{% endfor %}<a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Give feedback</a>{% if is_account_admin %}<div class="cap">Admin</div><a href="{{ url_for('admin_users_page') }}" {% if active == 'admin_users_page' %}class="on" aria-current="page"{% endif %}>{{ icon('invite') }}Users</a><a href="{{ url_for('workflow_monitor_page') }}" {% if active == 'workflow_monitor_page' %}class="on" aria-current="page"{% endif %}>{{ icon('workflow') }}Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">{{ icon('invite') }}Invite testers</a><a href="{{ url_for('feedback.review') }}" {% if active == 'feedback.review' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Tester feedback</a>{% endif %}</nav>{% if active == 'workflow_monitor_page' %}</details>{% endif %}{% else %}<nav class="nav" aria-label="Main"><div class="cap">StudentConnect</div><a href="{{ url_for('accounts.login') }}" {% if active == 'accounts.login' %}class="on" aria-current="page"{% endif %}>{{ icon('invite') }}Sign in</a><a href="{{ url_for('accounts.register') }}" {% if active == 'accounts.register' %}class="on" aria-current="page"{% endif %}>{{ icon('settings_page') }}Sign up</a><a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}class="on" aria-current="page"{% endif %}>{{ icon('feedback') }}Give feedback</a></nav>{% endif %}
-{% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn" type="submit">Sign out</button></form>{% endif %}
-{% if user %}<div class="me"><div class="av">{{ (user.name or 'Student')[0]|upper }}</div><div><strong>{{ user.name or 'Student' }}</strong><div class="co">{{ settings.university if settings is defined else 'Account' }}</div></div></div>{% endif %}
-</aside><main class="main" id="main" tabindex="-1">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}">
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>{% block extra_head %}{% endblock %}</head>
+<body class="{% block body_class %}{% endblock %}"><a class="skip-link" href="#main">Skip to content</a><div class="app">
+<header class="jp-header"><div class="jp-topbar">{{ brand(url_for('dashboard')) }}
+{% if user %}<nav class="nav jp-nav" aria-label="Main navigation">
+<a href="{{ url_for('dashboard') }}" {% if active == 'dashboard' %}aria-current="page"{% endif %}>Home</a>
+<a href="{{ url_for('jobs') }}" {% if active == 'jobs' %}aria-current="page"{% endif %}>Jobs</a>
+<a href="{{ url_for('resume') }}" {% if active == 'resume' %}aria-current="page"{% endif %}>Resume</a>
+<a href="{{ url_for('applications') }}" {% if active == 'applications' %}aria-current="page"{% endif %}>Tracker</a>
+<a href="{{ url_for('settings_page') }}" {% if active == 'settings_page' %}aria-current="page"{% endif %}>Account</a>
+<details class="jp-more"><summary aria-label="More navigation"><span aria-hidden="true">···</span></summary><div class="jp-more-menu">
+<a href="{{ url_for('settings_page') }}#companies">Target companies</a><a href="{{ url_for('settings_page') }}#email">Email alerts</a><a href="{{ url_for('analytics') }}" {% if active == 'analytics' %}aria-current="page"{% endif %}>Analytics</a><a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}aria-current="page"{% endif %}>Give feedback</a>
+{% if is_account_admin %}<hr><a href="{{ url_for('admin_users_page') }}" {% if active == 'admin_users_page' %}aria-current="page"{% endif %}>Users</a><a href="{{ url_for('workflow_monitor_page') }}" {% if active == 'workflow_monitor_page' %}aria-current="page"{% endif %}>Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">Invite testers</a><a href="{{ url_for('feedback.review') }}" {% if active == 'feedback.review' %}aria-current="page"{% endif %}>Tester feedback</a>{% endif %}
+<hr><form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Sign out</button></form>
+</div></details></nav>
+{% else %}<nav class="nav jp-nav" aria-label="Main navigation"><a href="{{ url_for('dashboard') }}" {% if active == 'dashboard' %}aria-current="page"{% endif %}>Home</a><a href="{{ url_for('accounts.login') }}" {% if active == 'accounts.login' %}aria-current="page"{% endif %}>Sign in</a><a href="{{ url_for('accounts.register') }}" {% if active == 'accounts.register' %}aria-current="page"{% endif %}>Sign up</a><a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}aria-current="page"{% endif %}>Feedback</a></nav>{% endif %}
+<button class="icon-btn jp-theme-toggle" id="theme" type="button" aria-pressed="false" aria-label="Switch to dark mode"><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg></button>
+</div></header><main class="main jp-shell" id="main" tabindex="-1">
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message and active != 'feedback.submit' %}<p class="notice" role="status">{{ message }}</p>{% endif %}
-{% if setup_pending %}<section class="card" aria-labelledby="setup-title" id="setup-checklist">
+{% if setup_pending and active != 'dashboard' %}<section class="card jp-setup" aria-labelledby="setup-title" id="setup-checklist">
 <h2 id="setup-title">Finish setting up your matches</h2><p class="sub">Upload your resume, review your email, and select companies to receive relevant matches. You can keep browsing while you complete setup.</p>
 {% if not has_resume %}<p class="sub">Add a resume to start matching.</p>{% endif %}
 <ol>
@@ -41,5 +47,5 @@
 {% endif %}</p>{% endif %}
 {% if not user and active not in ('dashboard', 'settings_page', 'feedback.submit', 'feedback.review') %}<p><a class="btn p" href="{{ url_for('accounts.register') }}">Create your account</a></p>{% endif %}
 {% block content %}{% endblock %}
-{% if active not in ('feedback.submit', 'feedback.review') and (user or active != 'dashboard') %}<p class="sub">Fit scores estimate resume compatibility, not hiring probability.</p>{% endif %}
-</main></div></body></html>
+{% if active not in ('feedback.submit', 'feedback.review') and (user or active != 'dashboard') %}<p class="sub">Scores estimate how closely your resume text aligns with a job description. They are not interview odds or hiring decisions; check the evidence and the original posting.</p>{% endif %}
+</main></div><div class="page-loader" id="page-loader" role="status" aria-live="polite" aria-hidden="true"><span class="loader-cup" aria-hidden="true"></span><span>Brewing your workspace…</span></div></body></html>

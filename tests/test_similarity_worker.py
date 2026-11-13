@@ -100,6 +100,17 @@ class SimilarityEndpointTests(unittest.TestCase):
 
 
 class SimilaritySelectionTests(unittest.TestCase):
+    def test_deterministic_hosted_provider_uses_local_model_without_groq_key_pool(self):
+        client, scorer = MagicMock(), MagicMock()
+        with patch.object(local_embeddings, "LocalScorer", return_value=scorer), \
+                patch.object(runner, "_fetch_and_score", return_value=0) as evaluate, \
+                patch.object(runner, "GroqKeyPool") as groq, \
+                patch.object(runner.pipeline, "GROQ_API_KEY", ""):
+            self.assertEqual(runner.fetch_and_score(client, 1000, provider="deterministic"), 0)
+        evaluate.assert_called_once()
+        groq.assert_not_called()
+        scorer.close.assert_called_once()
+
     def test_default_watcher_computes_locally_and_sends_local_similarity_alerts(self):
         client = MagicMock()
         with patch.object(runner, "HostedClient", return_value=client), \

@@ -1,17 +1,17 @@
 {% extends 'base.html' %}
-{% block title %}StudentConnect · Find roles that fit{% endblock %}
+{% block title %}Jobspresso · Find roles that fit{% endblock %}
 {% block content %}
 <section class="landing-hero card" aria-labelledby="landing-title">
 <p class="eyebrow">A clearer student job search</p>
 <h1 id="landing-title">Find roles that fit your resume.</h1>
-<p class="landing-intro">StudentConnect brings job openings and your search preferences together, then explains how each role matches your resume so you can decide what to pursue.</p>
+<p class="landing-intro">Jobspresso compares your resume with job descriptions, shows the evidence it found and what it could not assess, and helps you decide what to clarify in your resume.</p>
 <div class="actions landing-actions"><a class="btn p" href="{{ url_for('accounts.register') }}">Create an account</a><a class="btn" href="{{ url_for('accounts.login') }}">Sign in</a></div>
 <p class="sub">Sign up with your email, verify it, and upload your resume to get started.</p>
 </section>
-<section class="landing-steps" aria-label="How StudentConnect works">
+<section class="landing-steps" aria-label="How Jobspresso works">
 <article class="card"><span class="tag">01 · Choose</span><h2>Set your search</h2><p class="sub">Choose any available company or select employers, then add role and location preferences.</p></article>
-<article class="card"><span class="tag">02 · Review</span><h2>Understand each match</h2><p class="sub">See a resume fit estimate, matching skills, and qualifications that may need your attention.</p></article>
+<article class="card"><span class="tag">02 · Review</span><h2>Understand each comparison</h2><p class="sub">See which resume text supports a requirement and which requirements the parser could not assess.</p></article>
 <article class="card"><span class="tag">03 · Track</span><h2>Keep moving</h2><p class="sub">Save roles, track application stages, and choose how often to receive eligible match emails.</p></article>
 </section>
-<p class="sub landing-note">Match scores are estimates to help organize your search. Check the employer’s original posting and confirm its requirements.</p>
+<p class="sub landing-note">The score is a rough resume-to-JD alignment estimate, not your probability of getting an interview. Check the evidence and the employer’s original posting.</p>
 {% endblock %}

@@ -1,4 +1,6 @@
 import io
+import sys
+from types import SimpleNamespace
 import unittest
 from contextlib import closing
 from unittest.mock import patch
@@ -59,6 +61,64 @@ class ResumeDocumentTests(unittest.TestCase):
         self.assertIn("Python SQL project", text)
         self.assertEqual(original, content)
         self.assertEqual(suffix, ".pdf")
+
+    def test_short_pdf_uses_tesseract_ocr_fallback(self):
+        class Page:
+            def get_textpage_ocr(self, **kwargs):
+                self.asserted_options = kwargs
+                return "ocr-text-page"
+
+            def get_text(self, mode, textpage=None):
+                if mode != "text" or textpage != "ocr-text-page":
+                    raise AssertionError("OCR TextPage must be used for extraction")
+                return "Resume OCR text with Python skills"
+
+        class Document:
+            is_encrypted = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                return iter([Page()])
+
+        with patch.dict(sys.modules, {"pymupdf": SimpleNamespace(open=lambda **_: Document())}):
+            text = resumes.extract_pdf(pdf_file(text=""))
+        self.assertIn("Python", text)
+
+    def test_regular_pdf_skips_ocr(self):
+        with patch.object(resumes, "_extract_scanned_pdf", side_effect=AssertionError("Unexpected OCR")):
+            self.assertIn("Python SQL project", resumes.extract_pdf(pdf_file()))
+
+    def test_short_pdf_reports_missing_tesseract(self):
+        class Page:
+            def get_textpage_ocr(self, **_):
+                raise RuntimeError("Tesseract executable missing")
+
+        class Document:
+            is_encrypted = False
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def __len__(self):
+                return 1
+
+            def __iter__(self):
+                return iter([Page()])
+
+        with patch.dict(sys.modules, {"pymupdf": SimpleNamespace(open=lambda **_: Document())}):
+            with self.assertRaisesRegex(ValueError, "Tesseract"):
+                resumes.extract_pdf(pdf_file(text=""))
 
     def test_docx_body_table_header_and_footer(self):
         text, _, suffix = self.upload(docx_file(), "resume.docx")

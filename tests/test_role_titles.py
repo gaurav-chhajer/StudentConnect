@@ -272,6 +272,17 @@ class TitleTests(unittest.TestCase):
         self.assertEqual(request['json']['model'], pipeline.GROQ_MODEL)
         post.return_value.close.assert_called_once()
 
+    def test_generate_redacts_resume_identifiers_before_external_request(self):
+        resume = 'Asha Kumar\nasha@example.test\n+91 98765 43210\nPython project'
+        with patch.object(role_titles.requests, 'post') as post:
+            post.return_value.iter_content.return_value = [json.dumps(dict(
+                choices=[dict(message=dict(content=json.dumps(profile())))])).encode()]
+            role_titles.generate(dict(name='Asha Kumar', resume_text=resume), api_key='synthetic-key')
+        prompt = post.call_args.kwargs['json']['messages'][1]['content']
+        for private_value in ('Asha Kumar', 'asha@example.test', '98765 43210'):
+            self.assertNotIn(private_value, prompt)
+        self.assertIn('Python project', prompt)
+
     def test_invalid_outputs_http_failures_and_timeouts_propagate_without_retry(self):
         for content in ('not JSON', '{}', json.dumps(dict(profile(), families=[]))):
             with self.subTest(content=content), patch.object(role_titles.requests, 'post') as post:
@@ -355,6 +366,7 @@ class ProfileEndpointTests(unittest.TestCase):
         self.assertNotIn('role_profile_required', self.call('work').json)
         required = self.require_profile()
         self.assertEqual(required['user']['resume_text'], 'Python API project')
+        self.assertIn('name', required['user'])
         self.assertEqual(self.call('work').json['items'], [])
 
     def test_title_gate_rejects_specialization_and_numeric_level_before_five_job_limit(self):

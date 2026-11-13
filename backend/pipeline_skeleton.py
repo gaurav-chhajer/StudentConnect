@@ -27,6 +27,7 @@ from html import escape, unescape
 from html.parser import HTMLParser
 from datetime import datetime, timezone
 from backend import matching_tasks
+from backend.pii_redaction import redact_resume
 from backend.evaluation import validate_evaluation, RUBRIC_VERSION
 from backend.hosting import site_origin
 from backend.email_unsubscribe import unsubscribe_url
@@ -523,6 +524,9 @@ def extract_job_description(job_row):
         raise ValueError("Cannot score job: invalid stored job JSON") from exc
     if not isinstance(raw, dict):
         raise ValueError("Cannot score job: expected a job JSON object")
+    if raw.get("career_source") == "google":
+        from backend.career_sources import validate_google_description
+        validate_google_description(raw.get("descriptionHtml"))
 
     sections = []
     seen = set()
@@ -676,8 +680,10 @@ def score_job_for_user(user_row, job_row, company_name, *, api_key=None, respons
     description = extract_job_description(job_row)
     jd_lines = {index: line for index, line in enumerate(description.splitlines(), start=1) if line.strip()}
     resume_lines = {index: line for index, line in enumerate(user_row["resume_text"].splitlines(), start=1) if line.strip()}
+    safe_resume_text = redact_resume(user_row["resume_text"], user_row.get("name"))
+    safe_resume_lines = {index: line for index, line in enumerate(safe_resume_text.splitlines(), start=1) if line.strip()}
     prompt = SCORING_DATA.format(
-        resume_text=json.dumps([{"resume_line_id":index,"text":line} for index,line in resume_lines.items()], ensure_ascii=False),
+        resume_text=json.dumps([{"resume_line_id":index,"text":line} for index,line in safe_resume_lines.items()], ensure_ascii=False),
         job_title=job_row["title"],
         company_name=company_name,
         department=job_row["department"] or "",
@@ -737,9 +743,76 @@ def score_job_for_user(user_row, job_row, company_name, *, api_key=None, respons
                 evidence_format="source-line-ids-v1")
 
 
+def score_job_deterministic(user_row, job_row, company_name, scorer):
+    """Score locally and adapt the result to the existing score-row contract."""
+    if not user_row["resume_text"].strip():
+        raise ValueError("Save a nonempty resume before scoring jobs")
+    from backend import deterministic_scoring, deterministic_store, local_embeddings, semantic_similarity
+    from backend.career_sources import prepare_job
+    from datetime import date
+
+    job = prepare_job(job_row)
+    description = extract_job_description(job)
+    resume_text = user_row["resume_text"]
+    resume_hash = deterministic_store.content_hash(resume_text)
+    jd_hash = deterministic_store.content_hash(description)
+    score_jd_hash = deterministic_store.content_hash(job["title"] + "\n" + description)
+    as_of = date.today()
+    version = deterministic_scoring.cache_version(
+        resume_text, as_of, local_embeddings.similarity.MODEL_REVISION)
+    conn = scorer.conn
+    deterministic_store.initialize(conn)
+    cached = deterministic_store.get_score(conn, resume_hash, score_jd_hash, version)
+    if (cached is not None and "weights" not in cached and
+            cached.get("scorer_version") == deterministic_scoring.SCORER_VERSION and
+            cached.get("weights_version") == deterministic_scoring.WEIGHTS_VERSION):
+        cached["weights"] = dict(deterministic_scoring.WEIGHTS)
+    if cached is None:
+        requirements = deterministic_store.get_jd_requirements(conn, jd_hash)
+        if requirements is None:
+            requirements = deterministic_scoring.extraction.extract_jd_requirements(description)
+            deterministic_store.put_jd_requirements(conn, jd_hash, requirements)
+        semantic = semantic_similarity.section_similarity(
+            resume_text, description, scorer, resume_owner=resume_hash, jd_owner=jd_hash)
+        resume_mentions = deterministic_scoring.extraction.extract_skill_mentions(resume_text)
+        jd_mentions = deterministic_scoring.extraction.extract_skill_mentions(description)
+        fuzzy_pairs = semantic_similarity.fuzzy_skill_matches(resume_mentions, jd_mentions, scorer)
+        fuzzy_pairs.extend(semantic_similarity.fuzzy_unknown_skill_matches(
+            resume_text, description, scorer, resume_owner="resume:" + resume_hash, jd_owner="jd:" + jd_hash))
+        fuzzy_pairs = deterministic_scoring.pending_fuzzy_matches(resume_text, description, fuzzy_pairs)
+        cached = deterministic_scoring.score(resume_text, description, semantic, job_title=job["title"],
+                                             as_of_date=as_of, fuzzy_skill_pairs=fuzzy_pairs)
+        cached["explanation"] = _deterministic_explanation(cached)
+        deterministic_store.note_unmatched(
+            conn, deterministic_scoring.extraction.unknown_skill_candidates(description))
+        deterministic_store.put_score(conn, resume_hash, score_jd_hash, version, cached)
+    matched_skills = sorted({item["skill"] for item in cached["matched"] if item.get("skill")})
+    missing = list(cached["missing_must_have"])
+    for requirement in cached["missing_must_have_requirements"]:
+        if requirement["jd"] not in missing:
+            missing.append(requirement["jd"])
+    return {
+        "fit_score": cached["score"],
+        "reasoning": cached["explanation"],
+        "matched_skills": matched_skills[:100],
+        "missing_requirements": [item[:200] for item in missing[:100]],
+        "scorer_version": cached["scorer_version"],
+        "weights_version": cached["weights_version"],
+        "deterministic_breakdown": cached,
+    }
+
+
+def _deterministic_explanation(result):
+    from backend.deterministic_scoring import template_explanation
+    return template_explanation(result)
+
+
 def store_score(conn, job_id, user_id, result):
     if not isinstance(result, dict):
         raise ValueError("Scoring response must be a JSON object")
+    if "deterministic_breakdown" in result:
+        from backend.deterministic_scoring import validate_adapted_result
+        validate_adapted_result(result)
     if type(result.get("fit_score")) is not int or not 0 <= result["fit_score"] <= 100:
         raise ValueError("Scoring response must contain an integer fit_score from 0 to 100")
     if not isinstance(result.get("reasoning"), str) or not result["reasoning"].strip():
@@ -754,16 +827,19 @@ def store_score(conn, job_id, user_id, result):
         evaluation = json.dumps(result)
     conn.execute(
         """
-        INSERT INTO scores (job_id, user_id, fit_score, reasoning, matched_skills, missing_requirements, scored_at, is_stale, evaluation_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+        INSERT INTO scores (job_id, user_id, fit_score, reasoning, matched_skills, missing_requirements, scored_at, is_stale, evaluation_json, deterministic_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
         ON CONFLICT(job_id, user_id) DO UPDATE SET
             fit_score=excluded.fit_score, reasoning=excluded.reasoning,
             matched_skills=excluded.matched_skills, missing_requirements=excluded.missing_requirements,
-            scored_at=excluded.scored_at, is_stale=0, evaluation_json=excluded.evaluation_json
+            scored_at=excluded.scored_at, is_stale=0, evaluation_json=excluded.evaluation_json,
+            deterministic_json=excluded.deterministic_json
         """,
         (job_id, user_id, result["fit_score"], result["reasoning"],
          json.dumps(result.get("matched_skills", [])), json.dumps(result.get("missing_requirements", [])),
-         datetime.now(timezone.utc).isoformat(), evaluation),
+         datetime.now(timezone.utc).isoformat(), evaluation,
+         json.dumps(result["deterministic_breakdown"], ensure_ascii=False, sort_keys=True)
+         if "deterministic_breakdown" in result else None),
     )
     conn.commit()
 
@@ -891,7 +967,7 @@ def _render_email_html(user_row, matches):
             </tr>
           </table>
           <a href="{review_url}" style="display:inline-block;margin-top:8px;font-size:14px;color:#222;">
-            Review match in StudentConnect
+            Review match in Jobspresso
           </a>
           &nbsp;·&nbsp;
           <a href="{application_url}" style="display:inline-block;margin-top:8px;font-size:14px;
@@ -940,12 +1016,12 @@ def _render_email_text(user_row, matches):
         job_id = m["job_id"]
         if type(job_id) is not int or job_id <= 0:
             raise ValueError("Digest match has an invalid job identifier")
-        lines.append(f"  Review in StudentConnect: {site_origin()}/jobs?job={job_id}")
+        lines.append(f"  Review in Jobspresso: {site_origin()}/jobs?job={job_id}")
         lines.append(f"  Original posting: {m['url']}")
         lines.append("")
     lines.append("AI resume-JD match estimate; not an employer ATS score or hiring probability.")
     lines.append("Unsubscribe from email alerts: " + unsubscribe_url(user_row))
-    lines.append("Manage other notification preferences in StudentConnect Settings.")
+    lines.append("Manage other notification preferences in Jobspresso Settings.")
     return "\n".join(lines)
 
 

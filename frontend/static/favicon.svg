@@ -1,8 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <title>StudentConnect</title>
-  <rect width="32" height="32" rx="8" fill="#2E4BE8"/>
-  <path d="M9 17v6c4 3 10 3 14 0v-6" fill="#E6EBFF"/>
-  <path d="m4 13 12-6 12 6-12 6Z" fill="#fff"/>
-  <path d="M27 14v9" fill="none" stroke="#FF7A59" stroke-width="2" stroke-linecap="round"/>
-  <circle cx="27" cy="25" r="2" fill="#FF7A59"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+<title>Jobspresso</title>
+<style>.a{stroke:#B65C12}.i{stroke:#321D17}@media(prefers-color-scheme:dark){.a{stroke:#FF982F}.i{stroke:#FFF8F0}}</style>
+<path class="a" d="M42 15c-3-4 3-5 0-10M50 15c-3-4 3-5 0-10" stroke-width="3" stroke-linecap="round"/>
+<path class="i" d="M28 22v16a12 12 0 0 1-12 12h-3M20 18h16" stroke-width="9" stroke-linecap="round"/>
+<path class="i" d="M40 26h14v9a12 12 0 0 1-12 12h-6M54 29h2a5 5 0 0 1 0 10h-2" stroke-width="4.5" stroke-linecap="round"/>
 </svg>

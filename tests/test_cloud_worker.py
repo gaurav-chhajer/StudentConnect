@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from backend import automatic_matching, cloud_worker, pipeline_skeleton as pipeline, role_titles
+from backend import automatic_matching, cloud_worker, local_embeddings, pipeline_skeleton as pipeline, role_titles
 from backend.app import create_app
 from scripts import run_cloud_worker as runner
 from scripts import watch_hosted_jobs as watcher
@@ -62,7 +62,7 @@ class CloudEndpointTests(unittest.TestCase):
                              {"done": True, "sent": False})
         mail.assert_called_once()
         self.assertEqual(mail.call_args.args[:2], (
-            "owner@example.test", "Finish setting up your StudentConnect account"))
+            "owner@example.test", "Finish setting up your Jobspresso account"))
         self.assertIn("Upload your resume from My Resume", mail.call_args.args[2])
         self.assertNotIn("Verify your email", mail.call_args.args[2])
         self.assertEqual(self.conn.execute(
@@ -168,6 +168,21 @@ class CloudEndpointTests(unittest.TestCase):
         self.conn.execute("UPDATE users SET resume_text='Changed resume'")
         self.conn.commit()
         self.assertEqual(self.call("score", self.score_data(item)).status_code, 409)
+
+    def test_deterministic_worker_score_is_validated_and_saved_separately(self):
+        item = self.item()
+        scorer = type("Scorer", (), {"conn": self.conn})()
+        with patch("backend.career_sources.prepare_job", side_effect=lambda value: dict(value)), \
+                patch("backend.semantic_similarity.section_similarity", return_value=0.72), \
+                patch("backend.semantic_similarity.fuzzy_skill_matches", return_value=[]):
+            result = pipeline.score_job_deterministic(item["user"], item["job"], item["company_name"], scorer)
+        response = self.call("score", dict(user_id=1, job_id=item["job"]["id"],
+                                            fingerprint=item["fingerprint"], result=result))
+        self.assertEqual(response.status_code, 200, response.json)
+        saved = self.conn.execute("SELECT evaluation_json,deterministic_json,fit_score FROM scores WHERE job_id=? AND user_id=1",
+                                  (item["job"]["id"],)).fetchone()
+        self.assertIsNone(saved["evaluation_json"])
+        self.assertEqual(json.loads(saved["deterministic_json"])["score"], saved["fit_score"])
 
     def test_successful_companies_filter_before_candidate_limit(self):
         original = self.conn.execute('SELECT * FROM jobs WHERE id=1').fetchone()
@@ -396,6 +411,33 @@ class CloudEndpointTests(unittest.TestCase):
             self.assertEqual(runner.send_emails(client, 420), 0)
             self.assertEqual(runner.send_emails(client, 420), 0)
         mail.assert_called_once()
+
+    def test_deterministic_provider_scores_hosted_jobs_without_groq(self):
+        client = MagicMock()
+        def hosted_call(route, data=None):
+            response = self.call(route, data)
+            self.assertEqual(response.status_code, 200, response.json)
+            return response.json
+        client.call.side_effect = hosted_call
+        class LocalScorer:
+            conn = self.conn
+            def close(inner):
+                inner.closed = True
+        def fetched(company):
+            row = self.conn.execute("SELECT * FROM jobs WHERE company_id=? ORDER BY id LIMIT 1",
+                                    (company["id"],)).fetchone()
+            return [dict(external_id=row["external_id"], title=row["title"], location=row["location"],
+                         url=row["url"], raw_json=json.loads(row["raw_json"]))]
+        with patch.object(local_embeddings, "LocalScorer", return_value=LocalScorer()), \
+                patch.object(pipeline, "GROQ_API_KEY", ""), \
+                patch.object(pipeline, "fetch_jobs_for_company", side_effect=fetched), \
+                patch("backend.career_sources.prepare_job", side_effect=lambda value, *args: dict(value)), \
+                patch("backend.semantic_similarity.section_similarity", return_value=0.72), \
+                patch("backend.semantic_similarity.fuzzy_skill_matches", return_value=[]), \
+                patch.object(runner.time, "monotonic", return_value=0):
+            self.assertEqual(runner.fetch_and_score(client, 2100, provider="deterministic"), 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM scores WHERE is_stale=0 AND deterministic_json IS NOT NULL").fetchone()[0], 2)
+        self.assertFalse(any("groq" in str(call.args[0]) for call in client.call.call_args_list))
 
     def test_failed_refresh_excluded_from_email(self):
         self.conn.execute("UPDATE scores SET is_stale=0")
@@ -949,7 +991,7 @@ class LocalHostedWatcherTests(unittest.TestCase):
                 patch.object(runner.time, 'monotonic', return_value=0), \
                 patch.object(runner, 'send_emails') as email:
             self.assertEqual(watcher.run_cycle(fetch_only=True), 0)
-        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=True, provider="groq")
+        matching.assert_called_once_with(client, runner.MATCHING_SECONDS, fetch_only=True, provider="deterministic")
         email.assert_not_called()
         client.close.assert_called_once()
 
@@ -957,7 +999,7 @@ class LocalHostedWatcherTests(unittest.TestCase):
         with patch.object(watcher, 'exclusive_cycle'), \
                 patch.object(watcher, 'run_cycle', return_value=0) as cycle:
             self.assertEqual(watcher.main(['--run', '--fetch-only', '--once']), 0)
-        cycle.assert_called_once_with("groq", fetch_only=True)
+        cycle.assert_called_once_with("deterministic", fetch_only=True)
 
     def test_failed_matching_never_sends_and_always_closes(self):
         for failure in (1, requests.Timeout('private')):

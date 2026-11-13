@@ -8,6 +8,44 @@ from backend import career_sources as sources
 
 
 class CareerSourceTests(unittest.TestCase):
+    def google_candidate(self):
+        url = 'https://www.google.com/about/careers/applications/jobs/results/90108035430523590-software-engineer/'
+        candidate = sources.job('google', '90108035430523590', 'Software Engineer', 'India', url)
+        candidate['raw_json'] = json.dumps(candidate['raw_json'])
+        return candidate
+
+    def test_google_captured_not_found_is_unavailable_not_identity_failure(self):
+        from pathlib import Path
+        page = (Path(__file__).parent / 'fixtures/google_job_not_found.html').read_text(encoding='utf-8')
+        with patch.object(sources.Feed, 'request', return_value=page):
+            with self.assertRaises(sources.GoogleJobUnavailable):
+                sources.prepare_job(self.google_candidate())
+        with patch.object(sources.Feed, 'request', return_value=page.replace('90108035430523590-software', '999-software')):
+            with self.assertRaisesRegex(ValueError, 'identity changed'):
+                sources.prepare_job(self.google_candidate())
+
+    def test_google_incomplete_cached_or_downloaded_description_is_not_scoreable(self):
+        from backend.pipeline_skeleton import extract_job_description
+        candidate = self.google_candidate()
+        raw = json.loads(candidate['raw_json'])
+        raw['descriptionHtml'] = '<p>Software Engineer teaser</p>'
+        candidate['raw_json'] = json.dumps(raw)
+        with self.assertRaises(sources.CareerDescriptionIncomplete):
+            sources.prepare_job(candidate)
+        with self.assertRaises(sources.CareerDescriptionIncomplete):
+            extract_job_description(candidate)
+        empty = '<h3>Minimum qualifications:</h3><h3>About the job</h3><h3>Responsibilities</h3>'
+        with self.assertRaises(sources.CareerDescriptionIncomplete):
+            sources.validate_google_description(empty)
+
+    def test_google_complete_selected_description_keeps_identity_and_sections(self):
+        candidate = self.google_candidate()
+        description = '<div class="DkhPwc"><h3>Minimum qualifications:</h3><ul><li>Python experience</li></ul><h3>About the job</h3><p>Build services</p><h3>Responsibilities</h3><p>Deliver services</p></div>'
+        page = '<title>Software Engineer — Google Careers</title><link rel="canonical" href="' + candidate['url'] + '">' + description
+        with patch.object(sources.Feed, 'request', return_value=page):
+            result = sources.prepare_job(candidate)
+        self.assertEqual(json.loads(result['raw_json'])['descriptionHtml'], description)
+
     def test_hsbc_uses_verified_feed_and_pagination(self):
         item = dict(id=123, name='Analyst', locations=['Pune, India'])
         pages = [dict(count=2, positions=[item]),

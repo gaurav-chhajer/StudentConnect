@@ -80,7 +80,7 @@ def deliver(user):
         raise ValueError("Hosted reminders require an HTTPS website")
     text = (
         "Hi there,\n\nNo new job alerts have been sent to you recently. "
-        "Visit StudentConnect to review your matches, refresh your resume, or consider "
+        "Visit Jobspresso to review your matches, refresh your resume, or consider "
         "broadening your company, role, location, or minimum fit-score preferences.\n\n"
         "Your preferences will only change when you update them.\n\n"
         f"Review my preferences: {origin}/settings\n\n"

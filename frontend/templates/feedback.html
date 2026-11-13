@@ -1,16 +1,16 @@
 {% extends 'base.html' %}{% from 'macros.html' import csrf %}
-{% block title %}Give feedback · StudentConnect{% endblock %}
+{% block title %}Give feedback · Jobspresso{% endblock %}
 {% block content %}
 <section class="card feedback-card" aria-labelledby="feedback-title">
 <div class="top2"><div><h1 id="feedback-title">Tell us how it went</h1>
-<p class="sub">Your feedback is shared with the StudentConnect owner to improve the app. No profile is needed.</p></div></div>
+<p class="sub">Your feedback is shared with the Jobspresso owner to improve the app. No profile is needed.</p></div></div>
 {% if message %}<p class="notice" role="alert">{{ message }}</p>{% endif %}
 <form method="post" class="page-form spaced" aria-describedby="feedback-intro">
 {{ csrf() }}
 <p class="sub" id="feedback-intro">A few quick questions help us make matching and applications easier.</p>
 <label class="field">How accurate were the match scores for your resume?
 <select name="accuracy" required><option value="" selected disabled>Choose 1 to 5</option><option value="1">1 · Not accurate</option><option value="2">2</option><option value="3">3 · Okay</option><option value="4">4</option><option value="5">5 · Very accurate</option></select></label>
-<label class="field">How easy was StudentConnect to use?
+<label class="field">How easy was Jobspresso to use?
 <select name="ease" required><option value="" selected disabled>Choose 1 to 5</option><option value="1">1 · Hard</option><option value="2">2</option><option value="3">3 · Okay</option><option value="4">4</option><option value="5">5 · Very easy</option></select></label>
 <label class="field">Did anything break, feel slow, or confuse you?
 <textarea name="issues" maxlength="2000" rows="4"></textarea></label>

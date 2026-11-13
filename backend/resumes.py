@@ -21,6 +21,8 @@ MAX_RESUME_CHARACTERS = 100000
 MAX_PDF_PAGES = 20
 MAX_EXPANDED_BYTES = 10 * 1024 * 1024
 MAX_DOCX_ENTRIES = 1000
+MIN_PDF_TEXT_CHARACTERS = 10
+OCR_DPI = 150
 
 
 def extract_pdf(content):
@@ -42,14 +44,41 @@ def extract_pdf(content):
                 if stream_bytes > MAX_EXPANDED_BYTES:
                     raise ValueError("PDF content is too large to safely extract")
             text = page.extract_text() or ""
-            if not text.strip():
-                raise ValueError("A PDF page has no readable text; scanned/image-only pages need OCR. Upload a text-based PDF or DOCX")
             total += len(text) + 1
             if total > MAX_RESUME_CHARACTERS:
                 raise ValueError("Extracted resume text exceeds 100,000 characters")
             pieces.append(text)
     except (PyPdfError, KeyError, TypeError, RecursionError) as exc:
         raise ValueError("Could not read this PDF; upload a valid, unencrypted text-based PDF") from exc
+    extracted = "\n".join(pieces)
+    if len(extracted.strip()) < MIN_PDF_TEXT_CHARACTERS:
+        return _extract_scanned_pdf(content)
+    return validate_text(extracted)
+
+
+def _extract_scanned_pdf(content):
+    try:
+        import pymupdf
+    except ImportError as exc:
+        raise ValueError("This PDF has too little readable text. Install the local OCR requirements and Tesseract to process scanned PDFs") from exc
+
+    pieces = []
+    total = 0
+    try:
+        with pymupdf.open(stream=content, filetype="pdf") as document:
+            if document.is_encrypted:
+                raise ValueError("Encrypted PDFs are not supported; upload an unencrypted copy")
+            if len(document) > MAX_PDF_PAGES:
+                raise ValueError("PDF resumes must contain at most 20 pages")
+            for page in document:
+                text_page = page.get_textpage_ocr(language="eng", dpi=OCR_DPI, full=True)
+                text = page.get_text("text", textpage=text_page)
+                total += len(text) + 1
+                if total > MAX_RESUME_CHARACTERS:
+                    raise ValueError("OCR text exceeds 100,000 characters")
+                pieces.append(text)
+    except (RuntimeError, OSError) as exc:
+        raise ValueError("Scanned PDF OCR failed; ensure Tesseract and its English language data are installed") from exc
     return validate_text("\n".join(pieces))
 
 

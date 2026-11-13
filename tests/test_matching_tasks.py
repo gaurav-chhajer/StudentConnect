@@ -90,7 +90,7 @@ class MatchingTaskTests(unittest.TestCase):
         self.prepare()
         self.post('/settings', self.settings_data(companies=['1'], roles='', locations=''))
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', side_effect=self.fetched) as fetch, \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result) as score:
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result) as score:
             self.assertEqual(runner.main(['--run', '--matching-only']), 0)
         self.assertEqual([call.args[0]['id'] for call in fetch.call_args_list], [1])
         self.assertEqual(score.call_count, 1)
@@ -101,7 +101,7 @@ class MatchingTaskTests(unittest.TestCase):
         self.prepare()
         self.enqueue()
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', side_effect=self.fetched), \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result):
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result):
             self.assertEqual(runner.main(['--run', '--matching-only', '--max-scores', '1']), 0)
             self.assertEqual(self.task()['status'], 'pending')
             self.assertEqual(runner.main(['--run', '--matching-only', '--max-scores', '1']), 0)
@@ -136,7 +136,7 @@ class MatchingTaskTests(unittest.TestCase):
             self.assertEqual(runner.main(['--run', '--matching-only']), 0)
         fetch.assert_not_called()
         self.assertEqual(matching_tasks.ready(self.conn), [])
-        self.assertIn(b'Add a resume to start matching', self.client.get('/').data)
+        self.assertIn(b'Upload resume', self.client.get('/').data)
 
     def test_task_status_is_specific_to_signed_in_user(self):
         self.prepare()
@@ -163,7 +163,7 @@ class MatchingTaskTests(unittest.TestCase):
         marker = self.database.parent / 'email_schedule.paused'
         marker.write_text('Synthetic pause', encoding='utf-8')
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', side_effect=self.fetched), \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result):
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result):
             self.assertEqual(runner.main(['--run', '--matching-only']), 0)
         self.assertTrue(marker.exists())
         self.mail.assert_not_called()

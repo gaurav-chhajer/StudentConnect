@@ -166,7 +166,7 @@ class EvaluationStorageTests(unittest.TestCase):
         self.assertEqual(saved["match_category"],"Strong Match")
         page=self.client.get("/jobs?job=1")
         self.addCleanup(page.close)
-        self.assertIn(b"Strong Match",page.data)
+        self.assertIn(b"Alignment estimate",page.data)
         self.assertIn(b"40/40",page.data)
         self.assertNotIn(b"<script>unsafe</script>",page.data)
         invalid=copy.deepcopy(result)

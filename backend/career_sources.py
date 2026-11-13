@@ -792,6 +792,32 @@ class CareerJobUnavailable(ValueError):
     """A denied Workday detail was independently absent from its public search."""
 
 
+class CareerDescriptionIncomplete(ValueError):
+    """The source has not supplied all required description sections."""
+
+
+class GoogleJobUnavailable(ValueError):
+    """An identity-checked Google page explicitly reports a missing posting.
+
+    Separate from the PwC-only retirement signal understood by the hosted API.
+    """
+
+
+def validate_google_description(description):
+    """Require substantive selected-job sections, including cached descriptions."""
+    if not isinstance(description, str) or len(description) > MAX_DESCRIPTION:
+        raise CareerDescriptionIncomplete('Google full description is incomplete')
+    headings = list(re.finditer(r'<h[1-6]\b[^>]*>\s*(Minimum qualifications:|About the job|Responsibilities)\s*</h[1-6]>', description, re.I))
+    if {match.group(1).casefold() for match in headings} != {'minimum qualifications:', 'about the job', 'responsibilities'}:
+        raise CareerDescriptionIncomplete('Google full description is incomplete')
+    for match in headings:
+        next_heading = re.search(r'<h[1-6]\b', description[match.end():], re.I)
+        end = match.end() + next_heading.start() if next_heading else len(description)
+        text = unescape(re.sub(r'<[^>]*>', ' ', description[match.end():end])).strip()
+        if not text:
+            raise CareerDescriptionIncomplete('Google full description is incomplete')
+
+
 def prepare_job(job_row, deadline=None):
     """Retrieve a full description only for a candidate actually being scored."""
     result = dict(job_row)
@@ -801,6 +827,8 @@ def prepare_job(job_row, deadline=None):
     key = raw.get('career_source')
     if key is not None and not isinstance(key, str):
         raise ValueError('Stored career source is invalid')
+    if key == 'google' and raw.get('descriptionHtml'):
+        validate_google_description(raw['descriptionHtml'])
     if key is None or raw.get('descriptionHtml'):
         return result
     feed = Feed(key, deadline if deadline is not None else time.monotonic() + 30)
@@ -812,13 +840,15 @@ def prepare_job(job_row, deadline=None):
             page_title = re.search(r'<title>(.*?)</title>', text, re.S)
             descriptions = GoogleResultCards(text, detail=True).fragments
             if (canonical != [result['url']] or page_title is None or
-                    not urlsplit(result['url']).path.rsplit('/', 1)[-1].startswith(result['external_id'] + '-') or
-                    len(descriptions) != 1):
+                    not urlsplit(result['url']).path.rstrip('/').rsplit('/', 1)[-1].startswith(result['external_id'] + '-')):
                 raise ValueError('Google career detail identity changed')
+            if not descriptions and re.search(r'<h2\b[^>]*>\s*Job not found\.\s*</h2>', text, re.I):
+                raise GoogleJobUnavailable('Google posting is no longer available')
+            if len(descriptions) != 1:
+                raise CareerDescriptionIncomplete('Google selected description is missing or ambiguous')
             title = unescape(page_title[1]).removesuffix(' — Google Careers')
             location, description = result.get('location'), descriptions[0]
-            if not all(section in description for section in ('Minimum qualifications:', 'About the job', 'Responsibilities')):
-                raise ValueError('Google full description is unavailable')
+            validate_google_description(description)
             employment = raw.get('employmentType')
         elif kind == 'apple':
             prefix = feed.origin + '/en-us/details/' + result['external_id'].removeprefix('PIPE-') + '/'

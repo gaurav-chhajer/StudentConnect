@@ -1,12 +1,12 @@
 {% extends 'base.html' %}
-{% block title %}Workflow monitor · StudentConnect{% endblock %}
+{% block title %}Workflow monitor · Jobspresso{% endblock %}
 {% block body_class %}monitor-page{% endblock %}
 {% block extra_head %}
 <link rel="stylesheet" href="{{ url_for('static',filename='css/workflow-monitor.css') }}">
 <script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static',filename='js/workflow-monitor.js') }}"></script>
 {% endblock %}
 {% block content %}
-<div class="wm-head"><div><p class="wm-scope">StudentConnect / Your admin workspace</p><h1>Workflow monitor</h1><p class="wm-muted">Every opening, every check, every confirmed application.</p></div><div class="wm-refresh"><button type="button" id="wm-refresh">Refresh now</button><button type="button" id="wm-auto" aria-pressed="true">Auto-refresh on</button><p id="wm-refresh-status" role="status">Checks for updates every 10 seconds.</p></div></div>
+<div class="wm-head"><div><p class="wm-scope">Jobspresso / Your admin workspace</p><h1>Workflow monitor</h1><p class="wm-muted">Every opening, every check, every confirmed application.</p></div><div class="wm-refresh"><button type="button" id="wm-refresh">Refresh now</button><button type="button" id="wm-auto" aria-pressed="true">Auto-refresh on</button><p id="wm-refresh-status" role="status">Checks for updates every 10 seconds.</p></div></div>
 <form class="wm-filters" method="get">
 <label>Workstream<select name="workflow" aria-label="Workstream"><option value="0">{{ 'Hosted discovery, matching & email' if hosted else 'Local discovery, matching & email' }}</option>{% for w in monitor.workflows %}<option value="{{ w.id }}" {% if monitor.workflow_id==w.id %}selected{% endif %}>Workflow {{ w.id }} · {{ w.state|replace('_',' ') }}</option>{% endfor %}</select></label>
 <label>Jobs<select name="stage" aria-label="Jobs">{% for value,label in [('all','All saved jobs'),('scored','Scored'),('prepared','Resume prepared'),('applied','Applied'),('review','Needs review')] %}<option value="{{ value }}" {% if monitor.stage==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>

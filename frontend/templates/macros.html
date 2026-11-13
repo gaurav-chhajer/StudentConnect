@@ -1,3 +1,4 @@
+{% macro brand(href) %}<a class="jp-brand" href="{{ href }}"><svg class="jp-brand-mark" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M42 15c-3-4 3-5 0-10M50 15c-3-4 3-5 0-10" stroke="var(--jp-accent)" stroke-width="3" stroke-linecap="round"/><path d="M28 22v16a12 12 0 0 1-12 12h-3M20 18h16" stroke="currentColor" stroke-width="9" stroke-linecap="round"/><path d="M40 26h14v9a12 12 0 0 1-12 12h-6M54 29h2a5 5 0 0 1 0 10h-2" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/></svg><span>Jobspresso</span></a>{% endmacro %}
 {% macro csrf() %}<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">{% endmacro %}
 {% macro page_banner(eyebrow,title,description,primary_url,primary_label,secondary_url,secondary_label,art) %}
 {% if setup_pending %}
@@ -57,12 +58,12 @@
 <form class="filters flt" method="get" action="{{ url_for(action) }}" role="search" aria-label="Filter job matches">
 <div class="flt-main">
 <label class="flt-search"><span class="inputbox has-hint"><input type="search" name="q" maxlength="200" value="{{ search }}" placeholder="Role, company, skill"><span class="input-label">Search</span><i aria-hidden="true"></i></span></label>
-<label class="flt-sort">Sort by<select name="sort"><option value="best" {% if sort == 'best' %}selected{% endif %}>Best match</option><option value="recent" {% if sort == 'recent' %}selected{% endif %}>Recently discovered</option></select></label>
+<label class="flt-sort">Sort by<select name="sort"><option value="best" {% if sort == 'best' %}selected{% endif %}>Highest alignment score</option><option value="recent" {% if sort == 'recent' %}selected{% endif %}>Recently discovered</option></select></label>
 <button class="btn p flt-go">Search</button></div>
 <details class="flt-more" {% if ns.n %}open{% endif %}><summary><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 6h16M7 12h10M10 18h4"></path></svg>More filters{% if ns.n %}<span class="flt-count" aria-label="{{ ns.n }} active">{{ ns.n }}</span>{% endif %}</summary>
 <div class="flt-grid">
 <label>Company<select name="company"><option value="0">All matched companies</option>{% for item in companies %}<option value="{{ item.id }}" {% if company == item.id %}selected{% endif %}>{{ item.name }}</option>{% endfor %}</select></label>
-<label>Minimum match<select name="min_score"><option value="0">Any score</option>{% if min_score and min_score|string not in ['0',''] and (min_score|int) not in presets %}<option value="{{ min_score }}" selected>{{ min_score }}% or higher</option>{% endif %}{% for value in presets %}<option value="{{ value }}" {% if min_score and (min_score|int) == value %}selected{% endif %}>{{ value }}% or higher</option>{% endfor %}</select></label>
+<label>Minimum alignment score<select name="min_score"><option value="0">Any score</option>{% if min_score and min_score|string not in ['0',''] and (min_score|int) not in presets %}<option value="{{ min_score }}" selected>{{ min_score }}% or higher</option>{% endif %}{% for value in presets %}<option value="{{ value }}" {% if min_score and (min_score|int) == value %}selected{% endif %}>{{ value }}% or higher</option>{% endfor %}</select></label>
 <label><span class="inputbox has-hint"><input name="location" maxlength="100" value="{{ location }}" placeholder="Any location"><span class="input-label">Location</span><i aria-hidden="true"></i></span></label>
 <label>Job type<select name="job_type"><option value="">All types</option>{% for value in ['internship','full-time','part-time'] %}<option value="{{ value }}" {% if job_type == value %}selected{% endif %}>{{ value|title }}</option>{% endfor %}</select></label>
 <label>Discovered<select name="days">{% for value,label in [(0,'Any time'),(1,'Last 24 hours'),(7,'Last 7 days'),(30,'Last 30 days')] %}<option value="{{ value }}" {% if days == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
@@ -72,11 +73,11 @@
 {% endmacro %}
 {% macro co_logo(name) %}{% set n = name or '?' %}<span class="logo-tile lt-{{ ('abcdefghijklmnopqrstuvwxyz0123456789'.find(n[0]|lower) + n|length) % 6 }}" aria-hidden="true">{{ n[0]|upper }}</span>{% endmacro %}
 {% macro short_date(iso) %}{% if iso and iso|length >= 10 %}{% set months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}{{ months[(iso[5:7]|int) - 1] }} {{ iso[8:10]|int }}{% else %}Date unknown{% endif %}{% endmacro %}
-{% macro fit_label(score) %}{{ 'Strong fit' if score >= 85 else 'Good fit' if score >= 60 else 'Partial fit' }}{% endmacro %}
-{% macro score_ring(score, big=false, small=false, what='Match score') %}
+{% macro fit_label(score) %}Alignment estimate{% endmacro %}
+{% macro score_ring(score, big=false, small=false, what='Resume-to-JD alignment estimate') %}
 {% set s = [[(score or 0)|int, 0]|max, 100]|min %}
 {% set tier = 'h' if s >= 85 else 'md' if s >= 60 else 'lo' %}
-<span class="ring-score {{ tier }}{{ ' big' if big else '' }}{{ ' sm' if small else '' }}" role="img" aria-label="{{ what }} {{ s }} percent, {{ fit_label(s)|lower }}">
+<span class="ring-score {{ tier }}{{ ' big' if big else '' }}{{ ' sm' if small else '' }}" role="img" aria-label="{{ what }} {{ s }} percent">
 <svg viewBox="0 0 36 36" aria-hidden="true" focusable="false"><circle class="rs-bg" cx="18" cy="18" r="15.9155" pathLength="100"></circle><circle class="rs-fg" cx="18" cy="18" r="15.9155" pathLength="100" stroke-dasharray="{{ s }} 100" transform="rotate(-90 18 18)"></circle></svg>
 <b aria-hidden="true">{{ s }}<small>%</small></b></span>
 {% endmacro %}
@@ -102,8 +103,8 @@
 <div class="jt-score">{{ score_ring(s) }}<span class="jt-fit" aria-hidden="true">{{ fit_label(s) }}</span></div>
 </div>
 {% if matched or missing %}<div class="jt-skills">
-{% if matched %}<div class="jt-row"><span class="jt-lbl">Matches</span><ul class="jt-chips">{% for skill in matched[:shown_ok] %}<li class="jt-chip ok">{{ skill }}</li>{% endfor %}{% if matched|length > shown_ok %}<li class="jt-more">+{{ matched|length - shown_ok }}</li>{% endif %}</ul></div>{% endif %}
-{% if missing %}<div class="jt-row"><span class="jt-lbl">Gaps</span><ul class="jt-chips">{% for skill in missing[:shown_gap] %}<li class="jt-chip gap">{{ skill }}</li>{% endfor %}{% if missing|length > shown_gap %}<li class="jt-more">+{{ missing|length - shown_gap }}</li>{% endif %}</ul></div>{% endif %}
+{% if matched %}<div class="jt-row"><span class="jt-lbl">Found in resume</span><ul class="jt-chips">{% for skill in matched[:shown_ok] %}<li class="jt-chip ok">{{ skill }}</li>{% endfor %}{% if matched|length > shown_ok %}<li class="jt-more">+{{ matched|length - shown_ok }}</li>{% endif %}</ul></div>{% endif %}
+{% if missing %}<div class="jt-row"><span class="jt-lbl">Not found</span><ul class="jt-chips">{% for skill in missing[:shown_gap] %}<li class="jt-chip gap">{{ skill }}</li>{% endfor %}{% if missing|length > shown_gap %}<li class="jt-more">+{{ missing|length - shown_gap }}</li>{% endif %}</ul></div>{% endif %}
 </div>{% endif %}
 <div class="jt-foot">
 {% if item.reasoning %}<details class="jt-why"><summary>Why this score?</summary><div class="jt-why-body"><p>{{ item.reasoning }}</p>

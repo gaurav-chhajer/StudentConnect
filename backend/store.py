@@ -16,7 +16,8 @@ MATCH_FROM = """FROM scores s JOIN jobs j ON j.id=s.job_id JOIN companies c ON c
     AND (NOT EXISTS (SELECT 1 FROM user_settings WHERE user_id=? AND subscriptions_configured=1)
          OR EXISTS (SELECT 1 FROM company_subscriptions WHERE user_id=? AND company_id=c.id))"""
 MATCH_COLUMNS = """j.id job_id,j.title,j.location,j.url,j.first_seen_at,j.raw_json,
-    c.id company_id,c.name company_name,s.fit_score,s.reasoning,s.matched_skills,s.missing_requirements,s.evaluation_json"""
+    c.id company_id,c.name company_name,s.fit_score,s.reasoning,s.matched_skills,s.missing_requirements,
+    s.evaluation_json,s.deterministic_json"""
 
 
 class MultipleProfiles(ValueError):
@@ -88,8 +89,40 @@ def match(row):
     item["matched_skills"] = skill_list(item["matched_skills"])
     item["missing_requirements"] = skill_list(item["missing_requirements"])
     item["evaluation"] = validate_evaluation(json.loads(item["evaluation_json"])) if item.get("evaluation_json") else None
+    item["deterministic"] = _deterministic_breakdown(item.get("deterministic_json"))
     item["url"] = safe_url(item["url"] or "")
     return item
+
+
+def _deterministic_breakdown(value):
+    if not value:
+        return None
+    result = json.loads(value)
+    if (isinstance(result, dict) and "weights" not in result and
+            result.get("scorer_version") == "deterministic-v2" and
+            result.get("weights_version") == "weights-v1"):
+        from backend.deterministic_scoring import WEIGHTS
+        result["weights"] = dict(WEIGHTS)
+    component_names = {"must_have", "nice_to_have", "semantic", "experience", "education_title"}
+    if (not isinstance(result, dict) or type(result.get("score")) is not int or
+            not 0 <= result["score"] <= 100 or not isinstance(result.get("components"), dict) or
+            set(result["components"]) != component_names or not isinstance(result.get("component_points"), dict) or
+            set(result["component_points"]) != component_names or not isinstance(result.get("weights"), dict) or
+            set(result["weights"]) != component_names or not isinstance(result.get("matched"), list) or
+            not isinstance(result.get("missing_must_have_requirements"), list)):
+        raise ValueError("Invalid saved deterministic score breakdown")
+    for name in component_names:
+        if (type(result["components"][name]) not in (int, float) or not 0 <= result["components"][name] <= 1 or
+                type(result["component_points"][name]) not in (int, float) or
+                type(result["weights"][name]) is not int or result["weights"][name] < 0):
+            raise ValueError("Invalid saved deterministic score component")
+    for item in result["matched"]:
+        if not isinstance(item, dict) or any(not isinstance(item.get(key), str) for key in ("jd", "resume", "type")):
+            raise ValueError("Invalid saved deterministic match evidence")
+    if not all(isinstance(item, dict) and isinstance(item.get("jd"), str)
+               for item in result["missing_must_have_requirements"]):
+        raise ValueError("Invalid saved deterministic requirement evidence")
+    return result
 
 
 def like_pattern(value):
@@ -137,6 +170,7 @@ def matches(conn, user_id, selected_filters, now):
 def summary(conn, user_id, now, weeks=8):
     params = (user_id,) * 3
     metrics = dict(conn.execute("SELECT COUNT(*) total,ROUND(AVG(s.fit_score),1) average,"
+        "COALESCE(MAX(s.fit_score),0) best_score,COALESCE(SUM(s.fit_score>=80),0) strong_matches,"
         "COALESCE(SUM(julianday(s.scored_at)>=julianday(?)),0) recent " + MATCH_FROM,
         ((now - timedelta(days=7)).isoformat(), *params)).fetchone())
     trend = conn.execute("SELECT strftime('%Y-W%W',s.scored_at) week,ROUND(AVG(s.fit_score),1) average,COUNT(*) count " + MATCH_FROM +

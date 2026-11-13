@@ -104,3 +104,17 @@ class SimilarityTests(unittest.TestCase):
                 patch.object(local_embeddings, "MODEL_DIR", Path(directory)):
             with self.assertRaisesRegex(RuntimeError, "prepare_similarity"):
                 local_embeddings.load_model()
+
+    def test_model_is_loaded_once_for_repeated_scorer_instances(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            model_dir = Path(directory)
+            (model_dir / "model.safetensors").write_bytes(b"local-placeholder")
+            loaded = object()
+            with patch.object(local_embeddings, "MODEL_DIR", model_dir), \
+                    patch.object(local_embeddings, "_MODEL", None), \
+                    patch("sentence_transformers.SentenceTransformer", return_value=loaded) as constructor:
+                self.assertIs(local_embeddings.load_model(), loaded)
+                self.assertIs(local_embeddings.load_model(), loaded)
+                constructor.assert_called_once()

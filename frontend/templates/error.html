@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>{{ code }} · Jobspresso</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}">
+</head>
+<body class="jp-error-page">
+<main class="jp-error" aria-labelledby="error-title">
+<a class="jp-error-brand" href="/">Jobspresso</a>
+<span class="jp-error-code">{{ code }}</span>
+<h1 id="error-title">{{ title }}</h1>
+<p>{{ message }}</p>
+<div class="jp-error-actions"><a class="jp-error-primary" href="{{ home_url }}">Back to Jobspresso</a><a href="{{ url_for('accounts.login') }}">Sign in</a></div>
+</main>
+</body>
+</html>

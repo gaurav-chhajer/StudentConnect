@@ -85,28 +85,38 @@ def score_cycle(conn, company_ids, max_scores, user_ids=None):
         WHERE u.active=1 AND a.email_verified=1 AND trim(u.resume_text)<>''
         ORDER BY COALESCE((SELECT MAX(scored_at) FROM scores WHERE user_id=u.id),''),u.id""").fetchall()
     names = {row["id"]: row["name"] for row in conn.execute("SELECT id,name FROM companies")}
+    candidates_by_user = [(user, [job for job in pipeline.filter_candidate_jobs(conn, user)
+                                  if job["company_id"] in company_ids][:MAX_SCORES_PER_ACCOUNT])
+                          for user in users if user_ids is None or user["id"] in user_ids]
+    if not any(candidates for _, candidates in candidates_by_user):
+        return 0
+    from backend.local_embeddings import LocalScorer
+    try:
+        scorer = LocalScorer()
+    except (ImportError, OSError, RuntimeError, sqlite3.Error) as error:
+        logger.error("Local scoring model unavailable (%s); candidates remain unscored", type(error).__name__)
+        return 1
+    try:
+        return _score_candidates(conn, candidates_by_user, names, max_scores, scorer)
+    finally:
+        scorer.close()
+
+
+def _score_candidates(conn, candidates_by_user, names, max_scores, scorer):
     attempted = 0
     failed = False
-    for user in users:
-        if user_ids is not None and user['id'] not in user_ids:
-            continue
-        candidates = pipeline.filter_candidate_jobs(conn, user)
+    for user, candidates in candidates_by_user:
         # A small share per account prevents one resume from using the full cycle.
-        for job in [job for job in candidates if job["company_id"] in company_ids][:MAX_SCORES_PER_ACCOUNT]:
+        for job in candidates:
             if attempted >= max_scores:
                 logger.info("Scoring budget reached; remaining candidates wait for the next cycle.")
                 return int(failed)
             attempted += 1
             try:
-                result = run_local_score.score_with_rate_limit_retries(user, job, names[job["company_id"]])
-            except requests.RequestException as error:
-                response = error.response
-                logger.error("Scoring service stopped (%s): user_id=%s job_id=%s http_status=%s; valid saved scores retained",
-                             type(error).__name__, user["id"], job["id"],
-                             response.status_code if response is not None else "unavailable")
-                return 1
-            except ValueError:
-                logger.error("Evaluation rejected: user_id=%s job_id=%s; no score saved", user["id"], job["id"])
+                result = pipeline.score_job_deterministic(user, job, names[job["company_id"]], scorer)
+            except (ValueError, RuntimeError, OSError) as error:
+                logger.error("Deterministic evaluation failed (%s): user_id=%s job_id=%s; no score saved",
+                             type(error).__name__, user["id"], job["id"])
                 failed = True
                 continue
             with conn:

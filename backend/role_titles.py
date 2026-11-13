@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import requests
 
 from backend import pipeline_skeleton as pipeline, similarity
+from backend.pii_redaction import redact_resume
 
 VERSION = "resume-families-v2"
 MIN_FAMILIES = 5
@@ -123,8 +124,9 @@ def generate(user, *, api_key=None, response_observer=None):
     key = pipeline.GROQ_API_KEY if api_key is None else api_key
     if not key.strip():
         raise RuntimeError("Configure Groq before suggesting titles")
+    redacted_resume = redact_resume(resume, user.get("name"))
     data = json.dumps([dict(resume_line_id=index, text=line)
-                       for index, line in enumerate(resume.splitlines(), 1) if line.strip()], ensure_ascii=False)
+                       for index, line in enumerate(redacted_resume.splitlines(), 1) if line.strip()], ensure_ascii=False)
     pipeline._check_scoring_budget(PROMPT + data)
     response = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",

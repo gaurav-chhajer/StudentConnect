@@ -72,6 +72,13 @@ def register_routes(app, connection, context, now):
         totals = conn.execute("""SELECT COUNT(*) count,ROUND(AVG(accuracy),2) accuracy,ROUND(AVG(ease),2) ease,
             COALESCE(SUM(would_use='yes'),0) yes,COALESCE(SUM(would_use='maybe'),0) maybe,
             COALESCE(SUM(would_use='no'),0) no FROM feedback""").fetchone()
-        return render_template("feedback_admin.html", **dict(context(), rows=rows, totals=totals))
+        score_rows = conn.execute("""SELECT sf.rating,sf.created_at,sf.score_signature,j.title,c.name company_name
+            FROM score_feedback sf JOIN jobs j ON j.id=sf.job_id
+            JOIN companies c ON c.id=j.company_id
+            ORDER BY sf.created_at DESC,sf.id DESC LIMIT 200""").fetchall()
+        score_totals = conn.execute("""SELECT COUNT(*) count,COALESCE(SUM(rating=1),0) helpful,
+            COALESCE(SUM(rating=-1),0) inaccurate FROM score_feedback""").fetchone()
+        return render_template("feedback_admin.html", **dict(context(), rows=rows, totals=totals,
+                                                                  score_rows=score_rows, score_totals=score_totals))
 
     app.register_blueprint(routes)

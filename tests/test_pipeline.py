@@ -27,6 +27,9 @@ class PipelineTests(unittest.TestCase):
         due = patch.object(runner.run_local_email, "schedule_due", return_value=True)
         due.start()
         self.addCleanup(due.stop)
+        embedding_scorer = patch("backend.local_embeddings.LocalScorer")
+        self.embedding_scorer = embedding_scorer.start()
+        self.addCleanup(embedding_scorer.stop)
 
     def prepare(self):
         test_web_flows.WebFlowTests.seed_user(self)
@@ -43,7 +46,7 @@ class PipelineTests(unittest.TestCase):
     def test_complete_cycle_and_repeat_deduplication(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result) as score:
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result) as score:
             self.assertEqual(runner.main(["--run"]), 0)
             self.assertEqual(score.call_count, 2)
             self.assertEqual(self.mail.call_count, 1)
@@ -58,7 +61,7 @@ class PipelineTests(unittest.TestCase):
         self.prepare()
         before = self.database.read_bytes()
         with patch.object(pipeline, "fetch_jobs_for_company") as fetch, \
-                patch.object(pipeline, "score_job_for_user") as score:
+                patch.object(pipeline, "score_job_deterministic") as score:
             self.assertEqual(runner.main([]), 0)
         fetch.assert_not_called()
         score.assert_not_called()
@@ -73,7 +76,7 @@ class PipelineTests(unittest.TestCase):
                 raise requests.ConnectionError("private payload")
             return self.fetched(company)
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=fetch), \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result) as score, \
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result) as score, \
                 self.assertLogs(runner.logger, level="ERROR") as logs:
             self.assertEqual(runner.main(["--run"]), 1)
         self.assertEqual(score.call_count, 1)
@@ -84,7 +87,7 @@ class PipelineTests(unittest.TestCase):
     def test_all_boards_failed_stops_before_scoring_and_email(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=requests.Timeout), \
-                patch.object(pipeline, "score_job_for_user") as score, self.assertLogs(runner.logger, level="ERROR"):
+                patch.object(pipeline, "score_job_deterministic") as score, self.assertLogs(runner.logger, level="ERROR"):
             self.assertEqual(runner.main(["--run"]), 1)
         score.assert_not_called()
         self.mail.assert_not_called()
@@ -92,7 +95,7 @@ class PipelineTests(unittest.TestCase):
     def test_successful_empty_board_closes_old_jobs(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", return_value=[]), \
-                patch.object(pipeline, "score_job_for_user") as score:
+                patch.object(pipeline, "score_job_deterministic") as score:
             self.assertEqual(runner.main(["--run"]), 0)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs WHERE is_active=1").fetchone()[0], 0)
         score.assert_not_called()
@@ -120,7 +123,7 @@ class PipelineTests(unittest.TestCase):
     def test_budget_defers_remaining_scores_until_next_cycle(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result) as score:
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result) as score:
             self.assertEqual(runner.main(["--run", "--max-scores", "1"]), 0)
             self.assertEqual(score.call_count, 1)
             self.assertEqual(runner.main(["--run", "--max-scores", "1"]), 0)
@@ -136,7 +139,7 @@ class PipelineTests(unittest.TestCase):
                 self.conn.execute(statement)
                 self.conn.commit()
                 with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                        patch.object(pipeline, "score_job_for_user") as score:
+                        patch.object(pipeline, "score_job_deterministic") as score:
                     self.assertEqual(runner.main(["--run"]), 0)
                 score.assert_not_called()
 
@@ -144,7 +147,7 @@ class PipelineTests(unittest.TestCase):
         self.prepare()
         self.mail.side_effect = RuntimeError("private provider detail")
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched) as fetch, \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result), \
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result), \
                 self.assertLogs(runner.logger, level="ERROR") as logs:
             self.assertEqual(runner.main(["--run"]), 1)
             fetch.reset_mock()
@@ -171,7 +174,7 @@ class PipelineTests(unittest.TestCase):
     def test_not_due_and_off_preferences_do_not_send(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result), \
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result), \
                 patch.object(runner.run_local_email, "schedule_due", return_value=False):
             self.assertEqual(runner.main(["--run"]), 0)
         self.mail.assert_not_called()
@@ -187,7 +190,7 @@ class PipelineTests(unittest.TestCase):
             self.conn.execute("UPDATE users SET resume_text='Updated resume'")
             self.conn.commit()
             return self.result()
-        with patch.object(pipeline, "score_job_for_user", side_effect=evaluate), \
+        with patch.object(pipeline, "score_job_deterministic", side_effect=evaluate), \
                 self.assertLogs(runner.logger, level="WARNING"):
             self.assertEqual(runner.score_cycle(self.conn, {1, 2}, 1), 0)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM scores WHERE is_stale=0").fetchone()[0], 0)
@@ -223,28 +226,36 @@ class PipelineTests(unittest.TestCase):
         self.conn.execute("INSERT INTO company_subscriptions(user_id,company_id,subscribed_at) VALUES(2,2,'2026-10-07T00:00:00+00:00')")
         self.conn.commit()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result) as score:
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result) as score:
             self.assertEqual(runner.main(["--run"]), 0)
         self.assertEqual([(call.args[0]["id"], call.args[1]["company_id"]) for call in score.call_args_list], [(2, 2), (1, 1)])
         self.assertEqual(self.mail.call_count, 2)
         self.assertEqual([(call.args[0]["id"], call.args[1][0]["job_id"]) for call in self.mail.call_args_list], [(1, 1), (2, 2)])
 
-    def test_groq_failure_preserves_and_sends_only_valid_completed_scores(self):
+    def test_local_model_failure_preserves_and_sends_only_valid_completed_scores(self):
         self.prepare()
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                patch.object(runner.run_local_score, "score_with_rate_limit_retries",
-                             side_effect=[self.result(), requests.Timeout("private payload")]), \
+                patch.object(pipeline, "score_job_deterministic",
+                             side_effect=[self.result(), RuntimeError("private model detail")]), \
                 self.assertLogs(runner.logger, level="ERROR") as logs:
             self.assertEqual(runner.main(["--run"]), 1)
         self.assertEqual([row["job_id"] for row in self.mail.call_args.args[1]], [1])
         self.assertEqual(self.conn.execute("SELECT is_stale FROM scores WHERE job_id=2").fetchone()[0], 1)
-        self.assertNotIn("private payload", " ".join(logs.output))
+        self.assertNotIn("private model detail", " ".join(logs.output))
+
+    def test_missing_local_model_fails_scoring_without_overwriting_scores(self):
+        self.prepare()
+        with patch("backend.local_embeddings.LocalScorer", side_effect=RuntimeError("private model path")), \
+                self.assertLogs(runner.logger, level="ERROR") as logs:
+            self.assertEqual(runner.score_cycle(self.conn, {1, 2}, 20), 1)
+        self.assertNotIn("private model path", " ".join(logs.output))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM scores WHERE is_stale=1").fetchone()[0], 2)
 
     def test_interrupted_delivery_keeps_pause_but_releases_cycle_lock(self):
         self.prepare()
         self.mail.side_effect = KeyboardInterrupt
         with patch.object(pipeline, "fetch_jobs_for_company", side_effect=self.fetched), \
-                patch.object(pipeline, "score_job_for_user", side_effect=self.result), \
+                patch.object(pipeline, "score_job_deterministic", side_effect=self.result), \
                 self.assertLogs(runner.logger, level="WARNING"):
             self.assertEqual(runner.main(["--run"]), 130)
         self.assertTrue((self.database.parent / "email_schedule.paused").exists())

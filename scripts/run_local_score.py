@@ -1,14 +1,13 @@
 """
 Runs filter -> score for every active user and logs safe IDs and score totals.
-Retries rate limits with bounded waits; view evidence in the dashboard.
+Uses deterministic local scoring; view results in the dashboard.
 No email is sent by this command.
 
 Usage:
     python -m scripts.run_local_score
 
-Requires GROQ_API_KEY to be set in your environment, and companies/jobs
-already fetched (run run_local_fetch.py first), and at least one user
-(run add_test_user.py first).
+Requires the pinned local embedding model to be prepared, and companies/jobs
+already fetched (run run_local_fetch.py first), and at least one user.
 """
 
 import logging
@@ -18,6 +17,7 @@ from contextlib import closing
 
 import requests
 from backend import pipeline_skeleton as p
+from backend.local_embeddings import LocalScorer
 
 logger = logging.getLogger(__name__)
 MAX_RATE_LIMIT_RETRIES = 3
@@ -50,8 +50,8 @@ def score_with_rate_limit_retries(user, job, company_name):
                 remaining -= interval
 
 
-def score_batch(conn):
-    """Save valid evaluations; stop external calls when the service is unavailable."""
+def score_batch(conn, scorer=None):
+    """Score locally when a scorer is supplied; retain legacy helper behavior for callers that omit it."""
     users = conn.execute("SELECT * FROM users WHERE active=1").fetchall()
     if not users:
         logger.error("No active users found. Save a profile before scoring.")
@@ -67,9 +67,15 @@ def score_batch(conn):
             if company is None:
                 raise ValueError("Candidate references a missing company")
             try:
-                result = score_with_rate_limit_retries(user, job, company[0])
+                result = (p.score_job_deterministic(user, job, company[0], scorer) if scorer is not None
+                          else score_with_rate_limit_retries(user, job, company[0]))
                 p.store_score(conn, job["id"], user["id"], result)
             except requests.HTTPError as error:
+                if scorer is not None:
+                    logger.error("Deterministic evaluation failed: user_id=%s job_id=%s; no score saved.",
+                                 user["id"], job["id"])
+                    failed = True
+                    continue
                 response = error.response
                 status = response.status_code if response is not None else None
                 if status == 429:
@@ -82,10 +88,20 @@ def score_batch(conn):
                     logger.error("Groq HTTP failure (status=%s): batch stopped; saved scores retained.", status)
                 return 1
             except requests.RequestException as error:
+                if scorer is not None:
+                    logger.error("Deterministic evaluation failed: user_id=%s job_id=%s; no score saved.",
+                                 user["id"], job["id"])
+                    failed = True
+                    continue
                 logger.error("Groq network failure (%s): batch stopped; saved scores retained. Rerun manually when connectivity returns.", type(error).__name__)
                 return 1
             except ValueError:
                 logger.error("Evaluation rejected: user_id=%s job_id=%s; invalid response or input, no score saved.", user["id"], job["id"])
+                failed = True
+                continue
+            except (RuntimeError, OSError) as error:
+                logger.error("Deterministic evaluation failed (%s): user_id=%s job_id=%s; no score saved.",
+                             type(error).__name__, user["id"], job["id"])
                 failed = True
                 continue
             logger.info("Saved user_id=%s job_id=%s fit_score=%s", user["id"], job["id"], result["fit_score"])
@@ -98,7 +114,11 @@ def main():
         p.init_db()
         with closing(sqlite3.connect(p.DB_PATH, timeout=5)) as conn:
             conn.row_factory = sqlite3.Row
-            return score_batch(conn)
+            scorer = LocalScorer()
+            try:
+                return score_batch(conn, scorer=scorer)
+            finally:
+                scorer.close()
     except KeyboardInterrupt:
         logger.warning("Scoring interrupted; saved scores retained.")
         return 130

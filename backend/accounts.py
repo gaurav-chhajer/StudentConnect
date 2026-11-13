@@ -85,6 +85,7 @@ def delete_user_data(conn, user_id, upload_dir):
         conn.execute("DELETE FROM google_link_challenges WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM google_accounts WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM feedback WHERE user_id=?", (user_id,))
+        conn.execute("DELETE FROM score_feedback WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM scores WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM sent_log WHERE user_id=?", (user_id,))
         conn.execute("DELETE FROM local_similarity WHERE user_id=?", (user_id,))
@@ -158,12 +159,12 @@ def issue_invitation(conn, email, now, owner=False, self_service=False):
                      (token_digest(token),email,user_id,int(owner),timestamp+lifetime,timestamp))
     try:
         if self_service:
-            pipeline.deliver_account_email(email, "StudentConnect sign-up code",
+            pipeline.deliver_account_email(email, "Jobspresso sign-up code",
                 "Open " + registration_url + " and enter this code to verify your email. "
                 "It expires in 30 minutes and can be used once.\n\n" + token)
         else:
-            pipeline.deliver_account_email(email,"StudentConnect invitation",
-                "You were invited to StudentConnect. Open " + registration_url + " and enter this code with this email address. "
+            pipeline.deliver_account_email(email,"Jobspresso invitation",
+                "You were invited to Jobspresso. Open " + registration_url + " and enter this code with this email address. "
                 "The invitation expires in 48 hours and can be used once.\n\n" + token)
     except (OSError, RuntimeError, ValueError) as error:
         raise RuntimeError("Registration code delivery unconfirmed; check mail before requesting another") from error
@@ -242,7 +243,7 @@ def issue_recovery(conn, email, now):
         conn.execute("UPDATE account_tokens SET consumed_at=? WHERE user_id=? AND purpose='reset' AND consumed_at IS NULL",(timestamp,account["user_id"]))
         conn.execute("INSERT INTO account_tokens(token_hash,purpose,email,user_id,expires_at,created_at) VALUES(?,'reset',?,?,?,?)",(token_digest(token),email,account["user_id"],timestamp+RESET_LIFETIME_SECONDS,timestamp))
         conn.execute("UPDATE accounts SET recovery_requested_at=? WHERE user_id=?",(timestamp,account["user_id"]))
-    pipeline.deliver_account_email(email,"StudentConnect password recovery",
+    pipeline.deliver_account_email(email,"Jobspresso password recovery",
         "Open " + recovery_url + " and enter this code. It expires in 30 minutes and works once. "
         "If you did not request this, ignore this email.\n\n"+token)
 

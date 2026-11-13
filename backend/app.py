@@ -1,4 +1,4 @@
-"""Authenticated StudentConnect application with automatic background matching."""
+"""Authenticated Jobspresso application with automatic background matching."""
 
 import hmac
 import json
@@ -8,10 +8,10 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Flask, flash, g, redirect, render_template, request, session, url_for
+from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, email_unsubscribe, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, store, workflow_monitor
+from backend import accounts, automatic_matching, cloud_worker, email_unsubscribe, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, scoring_feedback, store, workflow_monitor
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,7 +89,7 @@ def create_app(database_path=None, upload_dir=None):
     def protect_local_actions():
         allowed = (origin.removeprefix("https://"),) if hosted else ("localhost", "127.0.0.1")
         if request.host.split(":")[0].lower() not in allowed:
-            return "This hostname is not configured for StudentConnect.", 403
+            return "This hostname is not configured for Jobspresso.", 403
         g.user, g.account = None, None
         if request.blueprint == "worker":
             if not cloud_worker.authenticate():
@@ -114,10 +114,85 @@ def create_app(database_path=None, upload_dir=None):
         if request.endpoint and request.endpoint != "static":
             g.script_nonce = secrets.token_urlsafe(32)
         if request.method == "POST" and request.url_rule is not None:
-            token = request.form.get("csrf_token", "")
+            token = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
             expected = session.get("csrf", "")
             if not token or not expected or not hmac.compare_digest(token, expected):
                 return "The form expired. Reload the page and try again.", 403
+
+    @application.route("/score", methods=["POST"])
+    def deterministic_score_api():
+        if not request.is_json:
+            return jsonify(error="Send a JSON request."), 415
+        payload = request.get_json(silent=False)
+        if (not isinstance(payload, dict) or set(payload) - {"job_description", "job_title", "llm_explanation"} or
+                not isinstance(payload.get("job_description"), str) or
+                not payload["job_description"].strip() or len(payload["job_description"]) > 200000 or
+                "\x00" in payload["job_description"] or
+                type(payload.get("llm_explanation", False)) is not bool):
+            return jsonify(error="Provide a nonempty job_description within the request limit."), 400
+        title = payload.get("job_title", "")
+        if not isinstance(title, str) or len(title) > 1000:
+            return jsonify(error="job_title must be bounded text."), 400
+        if not g.user or not g.user.get("resume_text", "").strip():
+            return jsonify(error="Save a resume before scoring."), 400
+
+        from backend import deterministic_scoring, deterministic_store, local_embeddings, semantic_similarity
+        from datetime import date
+        resume_text = g.user["resume_text"]
+        jd_text = payload["job_description"]
+        resume_hash = deterministic_store.content_hash(resume_text)
+        jd_hash = deterministic_store.content_hash(jd_text)
+        score_jd_hash = deterministic_store.content_hash(title + "\n" + jd_text)
+        as_of = date.today()
+        version = deterministic_scoring.cache_version(
+            resume_text, as_of, local_embeddings.similarity.MODEL_REVISION)
+        cache_conn = sqlite3.connect(local_embeddings.CACHE_PATH, timeout=5)
+        try:
+            deterministic_store.initialize(cache_conn)
+            cached = deterministic_store.get_score(cache_conn, resume_hash, score_jd_hash, version)
+            if cached is None:
+                requirements = deterministic_store.get_jd_requirements(cache_conn, jd_hash)
+                if requirements is None:
+                    requirements = deterministic_scoring.extraction.extract_jd_requirements(jd_text)
+                    deterministic_store.put_jd_requirements(cache_conn, jd_hash, requirements)
+                try:
+                    scorer = local_embeddings.LocalScorer(cache_path=local_embeddings.CACHE_PATH)
+                except (RuntimeError, ImportError) as error:
+                    application.logger.error("Deterministic scorer unavailable (%s)", type(error).__name__)
+                    return jsonify(error="The local scoring model is not prepared."), 503
+                try:
+                    semantic = semantic_similarity.section_similarity(
+                        resume_text, jd_text, scorer, resume_owner=resume_hash, jd_owner=jd_hash)
+                    resume_mentions = deterministic_scoring.extraction.extract_skill_mentions(resume_text)
+                    jd_mentions = deterministic_scoring.extraction.extract_skill_mentions(jd_text)
+                    fuzzy_pairs = semantic_similarity.fuzzy_skill_matches(
+                        resume_mentions, jd_mentions, scorer)
+                    fuzzy_pairs.extend(semantic_similarity.fuzzy_unknown_skill_matches(
+                        resume_text, jd_text, scorer, resume_owner="resume:" + resume_hash,
+                        jd_owner="jd:" + jd_hash))
+                finally:
+                    scorer.close()
+                cached = deterministic_scoring.score(
+                    resume_text, jd_text, semantic, job_title=title, as_of_date=as_of,
+                    fuzzy_skill_pairs=fuzzy_pairs)
+                cached["explanation"] = deterministic_scoring.template_explanation(cached)
+                deterministic_store.note_unmatched(
+                    cache_conn, deterministic_scoring.extraction.unknown_skill_candidates(jd_text))
+                deterministic_store.put_score(cache_conn, resume_hash, score_jd_hash, version, cached)
+            if payload.get("llm_explanation", False):
+                from backend.llm_gateway import default_gateway
+                explanation = deterministic_store.get_explanation(
+                    cache_conn, resume_hash, score_jd_hash, version)
+                if explanation is None:
+                    explanation = default_gateway().explain(cache_conn, cached, user_id=g.user["id"])
+                    if explanation["explanation_source"] == "llm":
+                        deterministic_store.put_explanation(
+                            cache_conn, resume_hash, score_jd_hash, version, explanation)
+                cached["llm_explanation"] = explanation
+            result = cached
+            return jsonify(result)
+        finally:
+            cache_conn.close()
 
     @application.after_request
     def protect_response(response):
@@ -144,7 +219,21 @@ def create_app(database_path=None, upload_dir=None):
 
     @application.errorhandler(413)
     def too_large(error):
-        return "The upload is too large. Resume files must be at most 2 MB.", 413
+        return render_template("error.html", code="413", title="That file is too large",
+            message="Resume files must be at most 2 MB. Choose a smaller file and try again.",
+            home_url=url_for("dashboard")), 413
+
+    @application.errorhandler(404)
+    def not_found(error):
+        return render_template("error.html", code="404", title="We couldn’t find that page",
+            message="The link may have changed. Head back to your Jobspresso workspace and continue from there.",
+            home_url=url_for("dashboard")), 404
+
+    @application.errorhandler(500)
+    def internal_error(error):
+        return render_template("error.html", code="500", title="Something went wrong",
+            message="Your saved profile and matches are still here. Return to Jobspresso and try again.",
+            home_url=url_for("dashboard")), 500
 
     @application.errorhandler(store.MultipleProfiles)
     def multiple_profiles(error):
@@ -267,6 +356,17 @@ def create_app(database_path=None, upload_dir=None):
             elif data["matches"]:
                 data["selected"] = data["matches"][0]
             if data["selected"]:
+                score_row = conn.execute("""SELECT s.id,s.fit_score,s.reasoning,s.matched_skills,s.missing_requirements,
+                        s.evaluation_json,s.deterministic_json,s.scored_at
+                    FROM scores s WHERE s.user_id=? AND s.job_id=? AND s.is_stale=0""",
+                    (user_id, data["selected"]["job_id"])).fetchone()
+                if score_row:
+                    signature = scoring_feedback.score_signature(score_row)
+                    data["selected"]["score_signature"] = signature
+                    vote = conn.execute("""SELECT rating FROM score_feedback
+                        WHERE user_id=? AND job_id=? AND score_signature=?""",
+                        (user_id, data["selected"]["job_id"], signature)).fetchone()
+                    data["selected"]["score_feedback_rating"] = vote["rating"] if vote else None
                 try:
                     data["selected"]["description"] = extract_job_description(data["selected"])
                 except ValueError:
@@ -611,6 +711,7 @@ def create_app(database_path=None, upload_dir=None):
 
     accounts.register_routes(application, connection, context, lambda: utc_now(), uploads)
     feedback.register_routes(application, connection, context, lambda: utc_now())
+    scoring_feedback.register_routes(application, connection, lambda: utc_now())
     google_accounts.register_routes(application, connection, lambda: utc_now())
     cloud_worker.register_routes(application, connection, database)
     return application

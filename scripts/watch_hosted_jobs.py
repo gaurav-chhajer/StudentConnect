@@ -206,7 +206,7 @@ def run_queued():
         return int(any(statuses))
 
 
-def run_cycle(provider="groq", fetch_only=False):
+def run_cycle(provider="deterministic", fetch_only=False):
     """Hosted storage is authoritative; private local embeddings stay in data/."""
     client = worker.HostedClient()
     try:
@@ -228,8 +228,8 @@ def run_cycle(provider="groq", fetch_only=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", action="store_true", help="Enable live fetching with the selected mode")
-    parser.add_argument("--provider", choices=("similarity", "groq"), default="groq",
-                        help="Groq role-family scoring and immediate match alerts by default; similarity is an explicit legacy mode")
+    parser.add_argument("--provider", choices=("deterministic", "similarity", "groq"), default="deterministic",
+                        help="deterministic fit scoring by default; similarity is a separate relevance-only mode")
     parser.add_argument("--fetch-only", action="store_true", help="Fetch jobs without comparison or email delivery")
     parser.add_argument("--once", action="store_true", help="Exit after one cycle")
     args = parser.parse_args(argv)

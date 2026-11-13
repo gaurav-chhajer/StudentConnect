@@ -188,7 +188,12 @@ class HybridEndpointTests(unittest.TestCase):
                     patch.object(runner.time, 'monotonic', return_value=100), \
                     patch.object(runner, 'fetch_and_score', return_value=0) as run:
                 self.assertEqual(runner.main([mode]), 0)
-                run.assert_called_once_with(client.return_value, 100 + seconds, fetch_only=mode == 'fetch')
+                run.assert_called_once_with(
+                    client.return_value,
+                    100 + seconds,
+                    fetch_only=mode == 'fetch',
+                    provider='deterministic',
+                )
                 client.return_value.close.assert_called_once()
 
     def test_missing_slot_is_skipped_and_each_run_restarts_at_key_one(self):

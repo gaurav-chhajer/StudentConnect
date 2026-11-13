@@ -26,6 +26,14 @@ class ScoreRunnerTests(unittest.TestCase):
             self.assertEqual(runner.score_batch(self.conn), 0)
             self.assertEqual(score.call_count, 2)
 
+    def test_score_batch_uses_injected_deterministic_scorer(self):
+        self.prepare()
+        scorer = object()
+        with patch.object(runner.p, "score_job_deterministic", return_value=self.result()) as score:
+            self.assertEqual(runner.score_batch(self.conn, scorer=scorer), 0)
+        self.assertEqual(score.call_count, 2)
+        self.assertTrue(all(call.args[3] is scorer for call in score.call_args_list))
+
     def test_rate_limit_stops_and_preserves_success(self):
         self.prepare()
         response = requests.Response()
@@ -102,16 +110,14 @@ class ScoreRunnerTests(unittest.TestCase):
 
     def test_interruption_during_wait_closes_database(self):
         self.prepare()
-        response = requests.Response()
-        response.status_code = 429
-        response.headers["Retry-After"] = "13"
         with patch.object(runner.p, "init_db"), \
                 patch.object(runner.sqlite3, "connect", return_value=self.conn), \
-                patch.object(runner.p, "score_job_for_user", side_effect=requests.HTTPError(response=response)) as score, \
-                patch.object(runner.time, "sleep", side_effect=KeyboardInterrupt), \
+                patch.object(runner, "LocalScorer") as local_scorer, \
+                patch.object(runner.p, "score_job_deterministic", side_effect=KeyboardInterrupt) as score, \
                 self.assertLogs(runner.logger, level="WARNING"):
             self.assertEqual(runner.main(), 130)
         score.assert_called_once()
+        local_scorer.return_value.close.assert_called_once()
         with self.assertRaises(runner.sqlite3.ProgrammingError):
             self.conn.execute("SELECT 1")
 
@@ -143,7 +149,9 @@ class ScoreRunnerTests(unittest.TestCase):
 
     def test_interruption_closes_database(self):
         with patch.object(runner.p, "init_db"), patch.object(runner.sqlite3, "connect") as connect, \
+                patch.object(runner, "LocalScorer") as local_scorer, \
                 patch.object(runner, "score_batch", side_effect=KeyboardInterrupt), \
                 self.assertLogs(runner.logger, level="WARNING"):
             self.assertEqual(runner.main(), 130)
         connect.return_value.close.assert_called_once()
+        local_scorer.return_value.close.assert_called_once()

@@ -1,19 +1,19 @@
 {% from 'macros.html' import csrf %}
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Connect Google - StudentConnect</title>
+<title>Connect Google - Jobspresso</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/wow.css') }}">
-<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/constellation.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}">
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>
 </head>
 <body>
-<canvas class="match-constellation" id="match-constellation" aria-hidden="true"></canvas>
 <div class="app auth-app"><main class="auth-complete"><section class="card auth-card">
 <span class="tag">One-time check</span>
 <h1>Connect Google to your profile</h1>
@@ -27,5 +27,6 @@
 <p class="sub">The code expires in 10 minutes. If you did not receive it, start a new sign-in after it expires.</p>
 <nav class="actions auth-links"><a href="{{ url_for('accounts.login') }}">Back to Sign in</a></nav>
 </section></main></div>
+<div class="page-loader" id="page-loader" role="status" aria-live="polite" aria-hidden="true"><span class="loader-cup" aria-hidden="true"></span><span>Brewing your workspace…</span></div>
 </body>
 </html>

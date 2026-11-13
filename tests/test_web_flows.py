@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from backend.app import create_app
 from backend.migrate import apply_migrations
+from backend import pipeline_skeleton
 from backend.store import location_suggestions
 from backend.pipeline_skeleton import SCHEMA, _render_email_html, _render_email_text, filter_candidate_jobs, get_unsent_top_matches, store_score, upsert_jobs
 
@@ -69,21 +70,103 @@ class WebFlowTests(unittest.TestCase):
         values.update(overrides)
         return values
 
-    def test_pages_link_to_public_studentconnect_favicon(self):
+    def test_pages_link_to_public_jobspresso_favicon(self):
         page = self.client.get('/login')
         self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
         self.assertIn(b'rel="icon" type="image/svg+xml" href="/static/favicon.svg"', page.data)
+        self.assertIn(b'href="/static/css/jobspresso.css"', page.data)
+        self.assertIn(b'id="page-loader"', page.data)
         response = self.client.get('/static/favicon.svg')
         self.addCleanup(response.close)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, 'image/svg+xml')
-        self.assertIn(b'<title>StudentConnect</title>', response.data)
+        self.assertIn(b'<title>Jobspresso</title>', response.data)
         self.seed_user()
         page = self.client.get('/')
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'href="/static/favicon.svg"', page.data)
         self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
         self.assertIn("default-src 'none'", page.headers['Content-Security-Policy'].split('; '))
+
+    def test_unknown_route_uses_branded_error_page_and_keeps_status(self):
+        response = self.client.get('/not-a-real-page')
+        self.assertEqual(response.status_code, 404)
+        self.assertIn(b'class="jp-error-page"', response.data)
+        self.assertIn(b'href="/static/css/jobspresso.css"', response.data)
+        self.assertIn(b'Back to Jobspresso', response.data)
+
+    def test_server_error_uses_branded_error_page_and_keeps_status(self):
+        self.seed_user()
+        self.app.config['PROPAGATE_EXCEPTIONS'] = False
+        self.app.add_url_rule('/test-error-500', 'test_error_500', lambda: 1 / 0)
+        response = self.client.get('/test-error-500')
+        self.assertEqual(response.status_code, 500)
+        self.assertIn(b'class="jp-error-page"', response.data)
+        self.assertIn(b'Something went wrong', response.data)
+
+    def test_deterministic_score_endpoint_requires_auth_csrf_and_caches_local_result(self):
+        from unittest.mock import patch
+        import tempfile
+        from pathlib import Path
+
+        self.seed_user()
+        page = self.client.get('/settings')
+        token = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            cache_path = Path(directory) / "cache.sqlite"
+            with patch("backend.local_embeddings.CACHE_PATH", cache_path), \
+                    patch("backend.local_embeddings.LocalScorer") as scorer, \
+                    patch("backend.semantic_similarity.section_similarity", return_value=0.72) as semantic, \
+                    patch("backend.semantic_similarity.fuzzy_skill_matches", return_value=[]) as fuzzy:
+                scorer.return_value.close.return_value = None
+                response = self.client.post('/score', json={"job_description": "Python required"},
+                                            headers={"X-CSRF-Token": token})
+                self.assertEqual(response.status_code, 200)
+                result = response.get_json()
+                self.assertEqual(result["score"], 56)
+                self.assertIn("components", result)
+                self.assertIn("explanation", result)
+                llm_result = {"explanation": "Partial alignment with cited evidence.",
+                               "gap_summary": "No additional gaps.", "explanation_source": "llm"}
+                with patch("backend.llm_gateway.default_gateway") as gateway:
+                    gateway.return_value.explain.return_value = llm_result
+                    repeated = self.client.post('/score', json={"job_description": "Python required",
+                                                                "llm_explanation": True},
+                                                headers={"X-CSRF-Token": token})
+                    repeated_again = self.client.post('/score', json={"job_description": "Python required",
+                                                                       "llm_explanation": True},
+                                                      headers={"X-CSRF-Token": token})
+                    gateway.return_value.explain.assert_called_once()
+                self.assertEqual(repeated.get_json()["score"], result["score"])
+                self.assertEqual(repeated.get_json()["llm_explanation"], llm_result)
+                self.assertEqual(repeated_again.get_json()["llm_explanation"], llm_result)
+                semantic.assert_called_once()
+                fuzzy.assert_called_once()
+
+    def test_deterministic_score_endpoint_validates_json_and_csrf(self):
+        self.seed_user()
+        self.assertEqual(self.client.post('/score', json={"job_description": "Python"}).status_code, 403)
+        page = self.client.get('/settings')
+        token = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
+        response = self.client.post('/score', json={"unexpected": "field"},
+                                    headers={"X-CSRF-Token": token})
+        self.assertEqual(response.status_code, 400)
+
+    def test_deterministic_score_endpoint_reports_missing_local_model_safely(self):
+        from unittest.mock import patch
+        import tempfile
+        from pathlib import Path
+
+        self.seed_user()
+        page = self.client.get('/settings')
+        token = re.search(rb'name="csrf_token" value="([^"]+)"', page.data).group(1).decode()
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:
+            with patch("backend.local_embeddings.CACHE_PATH", Path(directory) / "cache.sqlite"), \
+                    patch("backend.local_embeddings.LocalScorer", side_effect=RuntimeError("private model path")):
+                response = self.client.post('/score', json={"job_description": "Python required"},
+                                            headers={"X-CSRF-Token": token})
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(b"private model path", response.data)
 
     def test_animated_fields_preserve_labels_values_and_validation(self):
         public = {'/login': {'email', 'password'}, '/register': {'email'},
@@ -93,11 +176,12 @@ class WebFlowTests(unittest.TestCase):
             with self.subTest(path=path):
                 page = self.client.get(path)
                 self.assertEqual(page.status_code, 200)
-                fields = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">([^<]+)</span>', page.data)
-                names = {re.search(rb'name="([^\"]+)"', control).group(1).decode() for control, _ in fields}
+                fields = [control for control in re.findall(rb'<input\b[^>]*>', page.data)
+                          if (match := re.search(rb'name="([^\"]+)"', control)) and match.group(1).decode() in expected]
+                names = {re.search(rb'name="([^\"]+)"', control).group(1).decode() for control in fields}
                 self.assertEqual(names, expected)
-                self.assertTrue(all(b'required' in control for control, _ in fields))
-                self.assertTrue(all(b'placeholder=" "' in control for control, _ in fields))
+                self.assertTrue(all(b'required' in control for control in fields))
+                self.assertTrue(all(b'placeholder=' in control for control in fields))
                 self.assertIn(b'type="email" maxlength="254" autocomplete="email"', page.data)
                 self.assertIn(b'name="csrf_token"', page.data)
 
@@ -115,7 +199,7 @@ class WebFlowTests(unittest.TestCase):
                 controls = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">[^<]+</span>', page.data)
                 if path == '/jobs':
                     controls += re.findall(rb'<select\b[^>]*name="min_score"[^>]*>', page.data)
-                    self.assertIn(b'<label>Minimum match<select name="min_score">', page.data)
+                    self.assertIn(b'<label>Minimum alignment score<select name="min_score">', page.data)
                     for score in (0, 50, 60, 70, 80, 90):
                         self.assertRegex(page.data, ('<option value="' + str(score) + '"').encode())
                 if path == '/settings':
@@ -138,19 +222,33 @@ class WebFlowTests(unittest.TestCase):
         response=self.client.get('/?location=India&min_score=0')
         self.assertEqual(response.status_code,200)
         self.assertIn(b'id="matched-jobs"',response.data)
-        self.assertIn(b'class="job-tile tier-h"',response.data)
         self.assertIn(b'Software Engineer 1',response.data)
-        tiles = re.findall(rb'<article class="job-tile.*?</article>', response.data, re.S)
-        self.assertEqual(len(tiles), 1)
-        self.assertNotIn(b'Software Engineer 2', tiles[0])
-        self.assertIn(b'class="jt-link" href="/jobs?job=1#job-detail"', tiles[0])
+        self.assertNotIn(b'Software Engineer 2',response.data)
+        self.assertIn(b'href="/jobs?job=1"',response.data)
 
     def test_migration_is_idempotent_and_preserves_existing_records(self):
         self.seed_user()
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 30)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 32)
+
+    def test_deterministic_breakdown_is_saved_and_shown_with_evidence(self):
+        self.seed_user()
+        scorer = type("Scorer", (), {"conn": self.conn})()
+        job = self.conn.execute("SELECT * FROM jobs WHERE id=1").fetchone()
+        user = dict(self.conn.execute("SELECT * FROM users WHERE id=1").fetchone())
+        with patch("backend.career_sources.prepare_job", side_effect=lambda value: dict(value)), \
+                patch("backend.semantic_similarity.section_similarity", return_value=0.72), \
+                patch("backend.semantic_similarity.fuzzy_skill_matches", return_value=[]):
+            result = pipeline_skeleton.score_job_deterministic(user, dict(job), "Alpha", scorer)
+        pipeline_skeleton.store_score(self.conn, 1, 1, result)
+        response = self.client.get("/jobs?job=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Alignment estimate", response.data)
+        self.assertIn(b"Evidence found", response.data)
+        self.assertIn(b"not interview odds", response.data)
+        self.assertIn(b"Python", response.data)
 
     def test_india_filter_includes_city_only_locations(self):
         from backend import store
@@ -203,7 +301,7 @@ class WebFlowTests(unittest.TestCase):
                 response = self.client.get(route)
                 if route == "/":
                     self.assertEqual(response.status_code, 200)
-                    self.assertIn(b"StudentConnect", response.data)
+                    self.assertIn(b"Jobspresso", response.data)
                 else:
                     self.assertEqual(response.status_code, 302)
                     self.assertEqual(response.headers["Location"], "/login?next=" + route)
@@ -211,13 +309,14 @@ class WebFlowTests(unittest.TestCase):
         for route in routes:
             response=self.client.get(route)
             self.assertEqual(response.status_code,200)
-            navigation = re.search(rb'<nav class="nav".*?</nav>', response.data, re.S).group(0)
+            navigation = re.search(rb'<nav class="nav[^"]*".*?</nav>', response.data, re.S).group(0)
             selected = re.findall(rb'<a\b[^>]*aria-current="page"[^>]*>', navigation)
             self.assertEqual(len(selected), 1)
-            self.assertNotIn(b'href=', selected[0])
-            self.assertNotIn(b'tabindex="0"', selected[0])
-            self.assertIn(b'aria-disabled="true"', selected[0])
-            self.assertIn(b'class="on"', selected[0])
+            self.assertIn(b'href=', selected[0])
+            self.assertNotIn(b'aria-disabled="true"', selected[0])
+            self.assertIn(b'class="nav jp-nav"', navigation)
+            self.assertIn(b'class="jp-header"', response.data)
+            self.assertIn(b'id="theme"', response.data)
             for target in routes:
                 if target != route:
                     self.assertIn(('href="'+target+'"').encode(),navigation)
@@ -232,7 +331,10 @@ class WebFlowTests(unittest.TestCase):
                 self.assertIn(b'href="/static/css/theme.css"', response.data)
                 self.assertIn(b'href="/static/css/wow.css"', response.data)
                 if route == '/':
-                    self.assertIn(b'class="hero-banner"', response.data)
+                    self.assertIn(b'class="jp-home-hero"', response.data)
+                    self.assertIn(b'class="jp-stat-grid"', response.data)
+                    self.assertIn(b'class="jp-home-panels"', response.data)
+                    self.assertNotIn(b'<aside class="side"', response.data)
                 else:
                     self.assertNotIn(b'class="hero-banner"', response.data)
                     primary = {'/jobs': b'id="match-list"', '/resume': b'id="resume-editor"',
@@ -243,9 +345,10 @@ class WebFlowTests(unittest.TestCase):
                 self.assertIn(b'aria-current="page"', response.data)
                 self.assertIn(b'aria-hidden="true"', response.data)
                 self.assertNotIn(b"fonts.googleapis.com", response.data)
-                self.assertIn(b'id="match-constellation" aria-hidden="true"', response.data)
-                self.assertLess(response.data.index(b'<canvas'), response.data.index(b'<div class="app"'))
-                script = re.search(rb'<script defer nonce="([^"]+)" src="/static/js/constellation.js"></script>', response.data)
+                self.assertIn(b'href="/static/css/jobspresso.css"', response.data)
+                self.assertIn(b'id="page-loader"', response.data)
+                self.assertNotIn(b'id="match-constellation"', response.data)
+                script = re.search(rb'<script defer nonce="([^"]+)" src="/static/js/jobspresso.js"></script>', response.data)
                 self.assertIsNotNone(script)
                 policy = response.headers["Content-Security-Policy"]
                 self.assertIn("script-src 'nonce-" + script.group(1).decode() + "'", policy)
@@ -287,28 +390,36 @@ class WebFlowTests(unittest.TestCase):
         asset = self.client.get('/static/js/job-selection.js')
         self.assertEqual(asset.status_code, 200)
 
-    def test_constellation_is_decorative_and_nonce_protected_on_account_pages(self):
+    def test_account_pages_use_jobspresso_theme_and_nonce_protected_loader(self):
         nonces = []
         for path in ('/login', '/register', '/forgot-password', '/reset-password'):
             with self.subTest(path=path):
                 page = self.client.get(path)
                 self.assertEqual(page.status_code, 200)
-                self.assertIn(b'id="match-constellation" aria-hidden="true"', page.data)
-                self.assertLess(page.data.index(b'<canvas'), page.data.index(b'<div class="app auth-app"'))
-                nonce = re.search(rb'nonce="([^"]+)" src="/static/js/constellation.js"', page.data).group(1).decode()
+                self.assertIn(b'href="/static/css/jobspresso.css"', page.data)
+                self.assertIn(b'id="page-loader"', page.data)
+                self.assertIn(b'class="jp-topbar"', page.data)
+                self.assertIn(b'class="jp-auth-layout"', page.data)
+                self.assertIn(b'class="jp-auth-panel"', page.data)
+                if b'name="password"' in page.data:
+                    self.assertIn(b'data-password-toggle', page.data)
+                self.assertNotIn(b'<aside class="side', page.data)
+                self.assertNotIn(b'id="match-constellation"', page.data)
+                self.assertNotIn(b'localStorage.getItem("jp-user")', page.data)
+                nonce = re.search(rb'nonce="([^"]+)" src="/static/js/jobspresso.js"', page.data).group(1).decode()
                 nonces.append(nonce)
                 self.assertIn("script-src 'nonce-" + nonce + "'", page.headers['Content-Security-Policy'])
                 self.assertNotIn(b'id="energy"', page.data)
                 self.assertNotIn(b'id="pulse"', page.data)
         self.assertEqual(len(set(nonces)), len(nonces))
-        script = self.client.get('/static/js/constellation.js')
+        script = self.client.get('/static/js/jobspresso.js')
         self.addCleanup(script.close)
         self.assertEqual(script.status_code, 200)
         self.assertNotIn("script-src", script.headers['Content-Security-Policy'])
 
     def test_banner_counts_use_saved_data_and_do_not_include_mockup_claims(self):
         self.seed_user()
-        self.assertIn(b"2 current matches for your resume", self.client.get("/").data)
+        self.assertIn(b"2 current resume-to-JD comparisons", self.client.get("/").data)
         empty = self.client.get('/applications').data
         for stage in ('saved', 'applied', 'interview', 'offer', 'rejected'):
             self.assertIn(('href="#stage-' + stage + '"><b>0</b>').encode(), empty)
@@ -335,7 +446,7 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
                 if route == '/':
-                    self.assertIn(b'class="hero-banner"', page.data)
+                    self.assertIn(b'class="jp-home-hero"', page.data)
                 else:
                     self.assertNotIn(b'class="hero-banner"', page.data)
                 self.assertNotIn(b'class="spark"', page.data)
@@ -343,7 +454,7 @@ class WebFlowTests(unittest.TestCase):
                     self.assertIn(b'No current matches for these filters.', page.data)
                 if route == '/applications':
                     self.assertEqual(page.data.count(b'class="col-empty"'), 5)
-        self.assertIn(b"0 current matches for your resume", self.client.get("/").data)
+        self.assertIn(b"0 current resume-to-JD comparisons", self.client.get("/").data)
 
     def test_setup_banner_remains_available_until_profile_is_complete(self):
         self.seed_user()
@@ -353,7 +464,10 @@ class WebFlowTests(unittest.TestCase):
             with self.subTest(route=route):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
-                self.assertIn(b'class="hero-banner"', page.data)
+                if route == '/':
+                    self.assertIn(b'class="jp-home-hero"', page.data)
+                else:
+                    self.assertIn(b'class="hero-banner"', page.data)
                 self.assertIn(b'Set up your job matches', page.data)
                 self.assertIn(b'href="/resume#resume-editor">Upload resume', page.data)
 
@@ -363,7 +477,7 @@ class WebFlowTests(unittest.TestCase):
         self.conn.execute("UPDATE jobs SET title='<script>role</script>' WHERE id=1")
         self.conn.commit()
         self.assertEqual(self.post("/applications", dict(job_id="1", status="saved")).status_code, 302)
-        for route in ("/", "/jobs", "/applications"):
+        for route in ("/jobs", "/applications"):
             with self.subTest(route=route):
                 page = self.client.get(route).data
                 self.assertRegex(page, rb'<span class="logo-tile lt-[0-5]" aria-hidden="true">&lt;</span>')
@@ -372,24 +486,21 @@ class WebFlowTests(unittest.TestCase):
                 self.assertNotIn(b"<script>company", page)
                 self.assertNotIn(b"<script>role", page)
 
-    def test_sparklines_use_saved_weekly_values_and_handle_flat_or_single_series(self):
+    def test_dashboard_moves_score_trends_to_analytics(self):
         self.seed_user()
         self.conn.execute("UPDATE scores SET scored_at='2026-09-28T00:00:00+00:00',fit_score=50 WHERE job_id=1")
         self.conn.execute("UPDATE scores SET scored_at='2026-10-05T00:00:00+00:00',fit_score=50 WHERE job_id=2")
         self.conn.commit()
         with patch("backend.app.utc_now", return_value=datetime(2026,10,7,tzinfo=timezone.utc)):
-            for route in ("/", "/analytics"):
-                page = self.client.get(route)
-                self.assertEqual(page.status_code, 200)
-                sparks = re.findall(rb'<svg class="spark".*?</svg>', page.data, re.DOTALL)
-                self.assertTrue(sparks)
-                for spark in sparks:
-                    element = ET.fromstring(spark.decode())
-                    self.assertEqual(element.find("path").attrib["d"].strip(), "M0.0 28.0 L100.0 28.0")
+            dashboard = self.client.get("/")
+            analytics = self.client.get("/analytics")
+            self.assertEqual(dashboard.status_code, 200)
+            self.assertEqual(analytics.status_code, 200)
+            self.assertNotIn(b'class="weekly-chart"', dashboard.data)
+            self.assertIn(b'class="weekly-chart"', analytics.data)
             self.conn.execute("UPDATE scores SET scored_at='2026-10-05T00:00:00+00:00'")
             self.conn.commit()
-            for route in ("/", "/analytics"):
-                self.assertNotIn(b'class="spark"', self.client.get(route).data)
+            self.assertIn(b'class="weekly-chart"', self.client.get("/analytics").data)
 
     def test_location_picker_has_one_input_and_preserves_escaped_selections(self):
         self.seed_user()
@@ -446,7 +557,7 @@ class WebFlowTests(unittest.TestCase):
         for admin in (0, 1, 0):
             self.conn.execute('UPDATE accounts SET is_admin=? WHERE user_id=1', (admin,))
             self.conn.commit()
-            for path in ('/', '/settings'):
+            for path in ('/settings',):
                 with self.subTest(admin=admin, path=path):
                     page = self.client.get(path)
                     self.assertEqual(page.status_code, 200)
@@ -475,7 +586,7 @@ class WebFlowTests(unittest.TestCase):
         self.conn.execute("UPDATE companies SET career_source='google' WHERE id=2")
         self.conn.commit()
         self.post('/settings', self.settings_data(companies=['1', '2']))
-        for path in ('/', '/settings'):
+        for path in ('/settings',):
             with self.subTest(path=path):
                 page = self.client.get(path)
                 self.assertEqual(page.status_code, 200)
@@ -521,13 +632,14 @@ class WebFlowTests(unittest.TestCase):
         self.conn.execute("UPDATE scores SET scored_at='2026-10-08T00:00:00+00:00',fit_score=100 WHERE job_id=2")
         self.conn.commit()
         with patch("backend.app.utc_now", return_value=datetime(2026, 10, 9, tzinfo=timezone.utc)):
-            page = self.client.get("/")
-            chart = re.search(rb'(<svg class="trend-chart".*?</svg>)', page.data, re.S)
+            page = self.client.get("/analytics")
+            chart = re.search(rb'<div class="weekly-chart".*?</div></div>', page.data, re.S)
             self.assertIsNotNone(chart)
-            root = ET.fromstring(chart.group(1))
-            points = root.find("polyline").attrib["points"].split()
-            self.assertEqual([tuple(map(float, point.split(","))) for point in points], [(40.0, 200.0), (580.0, 20.0)])
-            self.assertEqual([entry.find("title").text for entry in root.findall("circle")], ["2026-W39: 0.0%", "2026-W40: 100.0%"])
+            self.assertIn(b'2026-W39', chart.group(0))
+            self.assertIn(b'2026-W40', chart.group(0))
+            self.assertEqual(page.data.count(b'class="week-column"'), 2)
+            self.assertIn(b'0.0% average', page.data)
+            self.assertIn(b'100.0% average', page.data)
             analytics = self.client.get("/analytics?weeks=4")
             self.assertEqual(analytics.status_code, 200)
             self.assertEqual(analytics.data.count(b'class="week-column"'), 2)
@@ -538,7 +650,6 @@ class WebFlowTests(unittest.TestCase):
             # A single week must render without division by zero.
             self.conn.execute("UPDATE scores SET scored_at='2026-10-01T00:00:00+00:00'")
             self.conn.commit()
-            self.assertEqual(self.client.get("/").status_code, 200)
             self.assertEqual(self.client.get("/analytics").status_code, 200)
 
     def test_chart_empty_states_do_not_invent_metrics(self):
@@ -551,7 +662,7 @@ class WebFlowTests(unittest.TestCase):
         self.assertEqual(analytics.status_code, 200)
         self.assertNotIn(b'class="trend-chart"', dashboard.data)
         self.assertNotIn(b'class="weekly-chart"', analytics.data)
-        self.assertIn(b"No recent scores to chart yet", dashboard.data)
+        self.assertIn(b"No current comparisons yet", dashboard.data)
         self.assertIn(b"No current scores in this period", analytics.data)
         self.assertIn(b"Open tracking is not connected", analytics.data)
         self.assertNotIn(b"nan", analytics.data.lower())
@@ -574,8 +685,6 @@ class WebFlowTests(unittest.TestCase):
                 self.assertIn(b'Verified email saved', page.data)
                 self.assertIn(b'You can keep browsing', page.data)
                 self.assertNotIn(b'>Update resume</a>', page.data)
-                self.assertNotIn(b'>Improve my resume</a>', page.data)
-                self.assertNotIn(b'>Review matches</a>', page.data)
         self.assertEqual(before, self.database.read_bytes())
         page = self.client.get('/settings')
         self.assertIn(b'id="profile"', page.data)
@@ -591,7 +700,7 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
                 self.assertNotIn(b'id="setup-checklist"', page.data)
-        self.assertIn(b'>Review matches</a>', self.client.get('/').data)
+        self.assertIn(b'>Browse comparisons</a>', self.client.get('/').data)
 
     def test_setup_resume_missing_and_legacy_company_selection(self):
         self.seed_user()
@@ -863,6 +972,7 @@ class WebFlowTests(unittest.TestCase):
         self.seed_user()
         response = self.post("/resume", dict(resume_file=(io.BytesIO(b"x" * (3 * 1024 * 1024)), "large.txt"), consent="on"))
         self.assertEqual(response.status_code, 413)
+        self.assertIn(b'class="jp-error-page"', response.data)
 
 
 if __name__ == "__main__":

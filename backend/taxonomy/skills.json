@@ -1,0 +1,285 @@
+{
+  "taxonomy_version": "skills-v3-esco-1.2.0",
+  "source": "Curated Jobspresso taxonomy with selected exact English alternate labels adapted from ESCO v1.2.0",
+  "skills": {
+    "Python": [
+      "python"
+    ],
+    "Java": [
+      "java"
+    ],
+    "JavaScript": [
+      "javascript",
+      "client-side javascript",
+      "server-side javascript"
+    ],
+    "TypeScript": [
+      "typescript"
+    ],
+    "C++": [
+      "c++"
+    ],
+    "C#": [
+      "c#",
+      "c sharp"
+    ],
+    ".NET": [
+      ".net",
+      "dotnet"
+    ],
+    "SQL": [
+      "sql",
+      "sequel"
+    ],
+    "PostgreSQL": [
+      "postgresql",
+      "postgres"
+    ],
+    "MySQL": [
+      "mysql"
+    ],
+    "MongoDB": [
+      "mongodb"
+    ],
+    "Redis": [
+      "redis"
+    ],
+    "HTML": [
+      "html"
+    ],
+    "CSS": [
+      "css",
+      "cascading style sheets"
+    ],
+    "React": [
+      "react",
+      "reactjs",
+      "react.js"
+    ],
+    "Angular": [
+      "angular"
+    ],
+    "Vue": [
+      "vue",
+      "vue.js"
+    ],
+    "Node.js": [
+      "node.js",
+      "nodejs"
+    ],
+    "Flask": [
+      "flask"
+    ],
+    "Django": [
+      "django"
+    ],
+    "FastAPI": [
+      "fastapi"
+    ],
+    "Spring": [
+      "spring",
+      "spring boot",
+      "springboot"
+    ],
+    "Git": [
+      "git"
+    ],
+    "Linux": [
+      "linux"
+    ],
+    "Docker": [
+      "docker"
+    ],
+    "Kubernetes": [
+      "kubernetes",
+      "k8s"
+    ],
+    "AWS": [
+      "aws",
+      "amazon web services"
+    ],
+    "Azure": [
+      "azure"
+    ],
+    "Google Cloud": [
+      "google cloud",
+      "gcp"
+    ],
+    "Excel": [
+      "excel"
+    ],
+    "Power BI": [
+      "power bi",
+      "powerbi"
+    ],
+    "Tableau": [
+      "tableau"
+    ],
+    "Pandas": [
+      "pandas"
+    ],
+    "NumPy": [
+      "numpy"
+    ],
+    "PyTorch": [
+      "pytorch"
+    ],
+    "TensorFlow": [
+      "tensorflow"
+    ],
+    "Machine learning": [
+      "machine learning"
+    ],
+    "Data analysis": [
+      "data analysis",
+      "data analytics"
+    ],
+    "Statistics": [
+      "statistics"
+    ],
+    "REST": [
+      "rest",
+      "restful"
+    ],
+    "Go": [
+      "golang"
+    ],
+    "Rust": [
+      "rust"
+    ],
+    "Swift": [
+      "swift"
+    ],
+    "Kotlin": [
+      "kotlin"
+    ],
+    "Accounting": [
+      "accounting"
+    ],
+    "Financial modelling": [
+      "financial modelling",
+      "financial modeling"
+    ],
+    "Sales": [
+      "sales"
+    ],
+    "Marketing": [
+      "marketing"
+    ],
+    "Figma": [
+      "figma"
+    ],
+    "Scikit-learn": [
+      "scikit-learn",
+      "scikit learn",
+      "sklearn"
+    ],
+    "Hugging Face Transformers": [
+      "huggingface transformers",
+      "hugging face transformers"
+    ],
+    "CI/CD": [
+      "ci/cd",
+      "continuous integration",
+      "continuous delivery",
+      "continuous deployment"
+    ],
+    "Large language models": [
+      "llm",
+      "llms",
+      "large language model",
+      "large language models"
+    ],
+    "Generative AI": [
+      "generative ai",
+      "genai",
+      "gen ai"
+    ],
+    "Neural networks": [
+      "neural network",
+      "neural networks"
+    ],
+    "Scala": [
+      "scala"
+    ],
+    "Android": [
+      "android"
+    ],
+    "Jetpack Compose": [
+      "jetpack compose",
+      "compose ui",
+      "jetpack compose ui"
+    ],
+    "Kotlin Coroutines": [
+      "kotlin coroutines",
+      "coroutines"
+    ],
+    "Hilt": [
+      "hilt",
+      "dagger hilt"
+    ],
+    "Retrofit": [
+      "retrofit"
+    ],
+    "Room": [
+      "room",
+      "room database",
+      "android room",
+      "room persistence library"
+    ],
+    "Firebase": [
+      "firebase"
+    ],
+    "Kafka": [
+      "kafka",
+      "apache kafka"
+    ],
+    "GraphQL": [
+      "graphql",
+      "graph ql"
+    ],
+    "Terraform": [
+      "terraform",
+      "hashicorp terraform"
+    ]
+  },
+  "implies": {
+    "Neural networks": [
+      "Machine learning"
+    ],
+    "Scikit-learn": [
+      "Machine learning"
+    ],
+    "PyTorch": [
+      "Machine learning"
+    ],
+    "TensorFlow": [
+      "Machine learning"
+    ],
+    "Django": [
+      "Python"
+    ],
+    "Flask": [
+      "Python"
+    ],
+    "Pandas": [
+      "Python"
+    ],
+    "Spring": [
+      "Java"
+    ],
+    "React": [
+      "JavaScript"
+    ],
+    "Jetpack Compose": [
+      "Kotlin",
+      "Android"
+    ]
+  },
+  "blocked_pairs": [
+    [
+      "Java",
+      "JavaScript"
+    ]
+  ]
+}

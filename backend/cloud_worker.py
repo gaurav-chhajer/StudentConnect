@@ -330,8 +330,10 @@ def register_routes(application, connection, database):
                 'SELECT 1 FROM user_settings WHERE user_id=? AND subscriptions_configured=1', (user['id'],)).fetchone()):
             return {"items": [], "next": user["id"]}
         if profile is None:
+            required_user = dict(user)
+            required_user["name"] = conn.execute("SELECT name FROM users WHERE id=?", (user["id"],)).fetchone()[0]
             return {"items": [], "next": user["id"], "role_profile_required": {
-                "user": dict(user), "fingerprint": fingerprint(dict(user)),
+                "user": required_user, "fingerprint": fingerprint(dict(user)),
                 "version": role_titles.VERSION, "model": pipeline.GROQ_MODEL}}
         for job in role_titles.select(candidates, profile)[:MAX_WORK_ITEMS]:
             company = conn.execute("SELECT name FROM companies WHERE id=?", (job["company_id"],)).fetchone()
@@ -448,7 +450,11 @@ def register_routes(application, connection, database):
             if existing and not existing[0]:
                 return {"saved": False, "already_scored": True}
             result = data.get("result")
-            validate_evaluation(result, user["resume_text"], pipeline.extract_job_description(job))
+            if isinstance(result, dict) and "deterministic_breakdown" in result:
+                from backend.deterministic_scoring import validate_adapted_result
+                result = validate_adapted_result(result)
+            else:
+                validate_evaluation(result, user["resume_text"], pipeline.extract_job_description(job))
             task = conn.execute("SELECT revision FROM matching_tasks WHERE user_id=?", (user_id,)).fetchone()
             pipeline.store_score(conn, job_id, user_id, result)
             if task and not pipeline.filter_candidate_jobs(conn, filtering_user):
@@ -604,7 +610,7 @@ def register_routes(application, connection, database):
                     text = email_text(dict(user), matches, store.settings(conn, user["id"])["include_gaps"])
                     if len(text) > 10000:
                         raise ValueError("Similarity digest exceeds email text limit")
-                    pipeline.deliver_account_email(user["email"], "StudentConnect: new local similarity matches", text)
+                    pipeline.deliver_account_email(user["email"], "Jobspresso: new local similarity matches", text)
                     pipeline.mark_sent(conn, user["id"], [match["job_id"] for match in matches])
                 else:
                     pipeline.deliver_email(user, matches)
@@ -660,9 +666,9 @@ def register_routes(application, connection, database):
                     marker.write("Onboarding email attempt requires review unless completed.\n")
                 steps = []
                 if not candidate["email_verified"]:
-                    steps.append("- Verify your email using the sign-up code. If it expired, request a new code on the StudentConnect sign-up page.")
+                    steps.append("- Verify your email using the sign-up code. If it expired, request a new code on the Jobspresso sign-up page.")
                 if candidate["resume_missing"]:
-                    steps.append("- Upload your resume from My Resume in StudentConnect.")
+                    steps.append("- Upload your resume from My Resume in Jobspresso.")
                 name = candidate["name"].strip() or "there"
                 message = (f"Hi {name},\n\n"
                     "You’re almost ready to receive job matches. Please complete the remaining step(s):\n\n"
@@ -670,9 +676,9 @@ def register_routes(application, connection, database):
                     "Once your email is verified and your resume is saved, matching can start. "
                     "You’ll be matched against any available company by default; you can choose specific companies later in Settings.\n\n"
                     "If you’ve already completed these steps, you can ignore this message.\n\n"
-                    "—StudentConnect")
+                    "—Jobspresso")
                 pipeline.deliver_account_email(candidate["email"],
-                    "Finish setting up your StudentConnect account", message)
+                    "Finish setting up your Jobspresso account", message)
                 conn.execute("UPDATE onboarding_reminders SET sent_at=? WHERE email=?",
                              (int(time.time()), candidate["email"]))
                 conn.commit()

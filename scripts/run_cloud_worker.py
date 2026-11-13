@@ -50,6 +50,8 @@ class HostedOperationError(RuntimeError):
 
 class GroqKeyPool:
     """Run-local key selection and credential-free, revisioned status reporting."""
+    requires_groq = True
+
     def __init__(self, client, deadline, *, quota=None):
         self.client, self.deadline = client, deadline
         self.quota = quota if quota is not None else groq_limits.QuotaState()
@@ -168,6 +170,34 @@ class GroqKeyPool:
         raise groq_limits.CooldownPending(0)
 
 
+class DeterministicScoringPool:
+    """Local deterministic fit scores, with Groq reserved for missing title profiles."""
+    requires_groq = False
+
+    def __init__(self, client, deadline, scorer=None):
+        from backend.local_embeddings import LocalScorer
+        self.client, self.deadline = client, deadline
+        self.scorer = scorer if scorer is not None else LocalScorer()
+        self.owns_scorer = scorer is None
+        self.title_pool = None
+
+    def score(self, user, job, company_name):
+        return pipeline.score_job_deterministic(user, job, company_name, self.scorer)
+
+    def suggest_titles(self, user):
+        if self.title_pool is None:
+            self.title_pool = GroqKeyPool(self.client, self.deadline)
+        return self.title_pool.suggest_titles(user)
+
+    def close(self, result):
+        try:
+            if self.title_pool is not None and not self.title_pool.reporting_failed:
+                self.title_pool.publish("complete" if result == 0 else "deferred")
+        finally:
+            if self.owns_scorer:
+                self.scorer.close()
+
+
 class HostedClient:
     def __init__(self):
         self.origin = hosting.site_origin()
@@ -215,8 +245,8 @@ def cursor(value, previous):
 
 
 def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
-    if provider not in ("groq", "similarity"):
-        raise ValueError("Choose groq or similarity as the scoring provider")
+    if provider not in ("groq", "similarity", "deterministic"):
+        raise ValueError("Choose groq, similarity, or deterministic as the scoring provider")
     if fetch_only:
         return _fetch_and_score(client, deadline, fetch_only=True, pool=None)
     if provider == "similarity":
@@ -226,6 +256,14 @@ def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
         try:
             status = _fetch_and_score(client, deadline, fetch_only=True, pool=None, allow_partial=True)
             return status if status else score_pending(client, deadline, scorer)
+        finally:
+            scorer.close()
+    if provider == "deterministic":
+        from backend.local_embeddings import LocalScorer
+        scorer = LocalScorer()
+        try:
+            status = _fetch_and_score(client, deadline, fetch_only=True, pool=None, allow_partial=True)
+            return status if status else score_pending_deterministic(client, deadline, scorer)
         finally:
             scorer.close()
     pool = GroqKeyPool(client, deadline)
@@ -240,7 +278,7 @@ def fetch_and_score(client, deadline, fetch_only=False, *, provider="groq"):
 
 
 def _fetch_and_score(client, deadline, fetch_only, pool, stop=None, *, allow_partial=False):
-    if not fetch_only and not pipeline.GROQ_API_KEY.strip():
+    if not fetch_only and getattr(pool, "requires_groq", True) and not pipeline.GROQ_API_KEY.strip():
         raise ValueError("Configure Groq before matching")
     companies = client.call("companies").get("companies")
     if not isinstance(companies, list) or len(companies) > MAX_COMPANIES:
@@ -373,6 +411,17 @@ def score_pending(client, deadline, stop, *, quota=None):
     finally:
         if not pool.reporting_failed and not stop.is_set():
             pool.publish("complete" if result == 0 else "deferred")
+
+
+def score_pending_deterministic(client, deadline, scorer, stop=None):
+    """Process hosted fit-score work with the local model and no Groq score request."""
+    pool = DeterministicScoringPool(client, deadline, scorer=scorer)
+    result = 1
+    try:
+        result = _score_pending(client, deadline, pool, stop=stop)
+        return result
+    finally:
+        pool.close(result)
 
 
 def _score_pending(client, deadline, pool, successful=None, failed=False, stop=None):
@@ -577,6 +626,8 @@ def send_onboarding_reminders(client, deadline):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("matching", "fetch", "email"))
+    parser.add_argument("--provider", choices=("groq", "deterministic"), default="deterministic",
+                        help="matching score provider; deterministic uses the prepared local model")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     client = None
@@ -586,7 +637,7 @@ def main(argv=None):
         client = HostedClient()
         if args.mode == "email":
             return send_emails(client, deadline)
-        return fetch_and_score(client, deadline, fetch_only=args.mode == "fetch")
+        return fetch_and_score(client, deadline, fetch_only=args.mode == "fetch", provider=args.provider)
     except (requests.RequestException, ValueError, RuntimeError, KeyError, TypeError) as error:
         logger.error("Cloud worker stopped (%s); inspect hosted logs before retrying uncertain sends", type(error).__name__)
         return 1

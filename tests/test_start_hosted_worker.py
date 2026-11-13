@@ -96,7 +96,7 @@ class StartupWorkerTests(unittest.TestCase):
                                      side_effect=lambda args: order.append(('worker', args)) or status):
                     self.assertEqual(start_hosted_worker.main(), status)
                 self.assertEqual(order, [('environment', root / '.env'),
-                                         ('worker', ['--run', '--provider', 'groq'])])
+                                         ('worker', ['--run', '--provider', 'deterministic'])])
                 self.assertIn('result_code=' + str(status), (root / 'data' / 'hosted_worker.log').read_text())
                 self.assertEqual(logging.getLogger().handlers, handlers_before)
                 self.assertEqual(logging.getLogger().level, level_before)
@@ -116,9 +116,18 @@ class StartupWorkerTests(unittest.TestCase):
                 self.assertEqual(os.environ['GROQ_API_KEY_6'],'synthetic-sixth')
                 self.assertEqual(os.environ['GROQ_API_KEY_7'],'')
 
-    def test_default_live_command_uses_independent_groq_queue(self):
-        with patch.object(watch_hosted_jobs,'run_queued',return_value=0) as queued, patch.object(watch_hosted_jobs,'run_cycle') as sequential:
-            self.assertEqual(watch_hosted_jobs.main(['--run']),0)
+    def test_default_live_command_uses_deterministic_scoring(self):
+        with patch.object(watch_hosted_jobs,'run_queued') as queued, \
+                patch.object(watch_hosted_jobs,'exclusive_cycle'), \
+                patch.object(watch_hosted_jobs,'run_cycle',return_value=0) as sequential:
+            self.assertEqual(watch_hosted_jobs.main(['--run','--once']),0)
+        queued.assert_not_called()
+        sequential.assert_called_once_with('deterministic',fetch_only=False)
+
+    def test_explicit_groq_provider_keeps_independent_queue(self):
+        with patch.object(watch_hosted_jobs,'run_queued',return_value=0) as queued, \
+                patch.object(watch_hosted_jobs,'run_cycle') as sequential:
+            self.assertEqual(watch_hosted_jobs.main(['--run','--provider','groq']),0)
         queued.assert_called_once()
         sequential.assert_not_called()
 

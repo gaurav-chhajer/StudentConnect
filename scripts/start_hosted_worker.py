@@ -33,8 +33,8 @@ def main():
                 os.environ[name]=private_values[name] or ''
         from scripts import watch_hosted_jobs
 
-        logger.info("Sign-in worker starting: hosted database, five-minute fetching, resume role-family filtering, Groq scoring and immediate match-only email.")
-        status = watch_hosted_jobs.main(["--run", "--provider", "groq"])
+        logger.info("Sign-in worker starting: hosted database, five-minute fetching, local deterministic scoring and immediate match-only email.")
+        status = watch_hosted_jobs.main(["--run", "--provider", "deterministic"])
         logger.info("Sign-in worker stopped; result_code=%s", status)
         return status
     except Exception as error:

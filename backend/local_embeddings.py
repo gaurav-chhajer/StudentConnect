@@ -3,6 +3,7 @@
 import json
 import math
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,9 @@ MAX_DOCUMENT_CHARACTERS = 251000
 CHUNK_TOKENS = 224
 CHUNK_OVERLAP = 32
 DIMENSIONS = 384
+_MODEL = None
+_MODEL_LOAD_LOCK = threading.Lock()
+_MODEL_ENCODE_LOCK = threading.Lock()
 
 
 def normalize(vector):
@@ -29,11 +33,16 @@ def normalize(vector):
 
 
 def load_model():
+    global _MODEL
     if not (MODEL_DIR / "model.safetensors").is_file():
         raise RuntimeError("Prepare the pinned local model with scripts.prepare_similarity --download first")
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(str(MODEL_DIR), device="cpu", local_files_only=True,
-                               trust_remote_code=False, model_kwargs={"use_safetensors": True})
+    if _MODEL is None:
+        with _MODEL_LOAD_LOCK:
+            if _MODEL is None:
+                from sentence_transformers import SentenceTransformer
+                _MODEL = SentenceTransformer(str(MODEL_DIR), device="cpu", local_files_only=True,
+                                             trust_remote_code=False, model_kwargs={"use_safetensors": True})
+    return _MODEL
 
 
 def chunks(text, tokenizer, maximum):
@@ -91,8 +100,9 @@ class LocalScorer:
         summed, count, batch = [0.0] * DIMENSIONS, 0, []
 
         def encode_batch(sections):
-            vectors = self.model.encode(sections, batch_size=16, normalize_embeddings=True,
-                                        convert_to_numpy=True, show_progress_bar=False)
+            with _MODEL_ENCODE_LOCK:
+                vectors = self.model.encode(sections, batch_size=16, normalize_embeddings=True,
+                                            convert_to_numpy=True, show_progress_bar=False)
             if len(vectors) != len(sections):
                 raise ValueError("Embedding model returned an invalid batch")
             for vector in vectors:

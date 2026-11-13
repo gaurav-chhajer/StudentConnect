@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Tester feedback · StudentConnect{% endblock %}
+{% block title %}Tester feedback · Jobspresso{% endblock %}
 {% block content %}<div class="top2"><div><h1>Tester feedback</h1>
 {% if totals.count %}<p class="sub">{{ totals.count }} response{{ '' if totals.count == 1 else 's' }} · Average accuracy {{ totals.accuracy }}/5 · Average ease {{ totals.ease }}/5 · Would use: {{ totals.yes }} yes, {{ totals.maybe }} maybe, {{ totals.no }} no</p>
 {% else %}<p class="sub">No feedback yet.</p>{% endif %}</div></div>
@@ -9,4 +9,7 @@
 {% if row.issues %}<p><strong>Problems:</strong> {{ row.issues }}</p>{% endif %}
 {% if row.feature_request %}<p><strong>Feature request:</strong> {{ row.feature_request }}</p>{% endif %}</article>
 {% else %}<section class="card"><p class="sub">There are no feedback responses to show yet.</p></section>{% endfor %}
-</section><p class="sub">Shows the latest 200 responses.</p>{% endblock %}
+</section><p class="sub">Shows the latest 200 responses.</p>
+<section class="jd-sec" aria-labelledby="score-feedback-title"><h2 id="score-feedback-title">Score quality ratings</h2>
+{% if score_totals.count %}<p class="sub">{{ score_totals.count }} rating{{ '' if score_totals.count == 1 else 's' }} · {{ score_totals.helpful }} helpful · {{ score_totals.inaccurate }} not accurate</p>{% else %}<p class="sub">No score ratings yet.</p>{% endif %}
+<div class="feedback-admin-list" aria-label="Recent score ratings">{% for row in score_rows %}<article class="card"><p><strong>{{ 'Helpful' if row.rating == 1 else 'Not accurate' }}</strong> · {{ row.title }} at {{ row.company_name }}</p><p class="sub">Score revision {{ row.score_signature[:12] }} · <time>{{ row.created_at }}</time></p></article>{% else %}<p class="sub">There are no score ratings to show yet.</p>{% endfor %}</div><p class="sub">Shows the latest 200 score ratings. Each rating is tied to the saved score version.</p></section>{% endblock %}

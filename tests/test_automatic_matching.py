@@ -30,7 +30,7 @@ class AutomaticMatchingTests(unittest.TestCase):
         with patch.object(runner.pipeline, 'DB_PATH', '/unused/database.db'), \
                 patch.object(runner, 'exclusive_cycle', wraps=runner.exclusive_cycle) as lock, \
                 patch.object(runner.pipeline, 'fetch_jobs_for_company', side_effect=self.fetched), \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result):
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result):
             self.assertEqual(runner.main(['--run', '--matching-only'], database_path=self.database), 0)
         lock.assert_called_once_with(self.database.parent / 'pipeline.lock')
         self.assertEqual(matching_tasks.status(self.conn, 1)['status'], 'complete')
@@ -62,7 +62,7 @@ class AutomaticMatchingTests(unittest.TestCase):
         self.assertGreater(handlers[0].maxBytes, 0)
         self.assertGreater(handlers[0].backupCount, 0)
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', side_effect=self.fetched), \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result):
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result):
             self.assertEqual(service.cycle(), 0)
         log = (self.database.parent / 'matching.log').read_text()
         self.assertIn('cycle started', log)
@@ -89,7 +89,7 @@ class AutomaticMatchingTests(unittest.TestCase):
         service = automatic_matching.MatchingService(self.database)
         with patch.object(runner.pipeline, 'DB_PATH', '/unused/database.db'), \
                 patch.object(runner.pipeline, 'fetch_jobs_for_company', side_effect=self.fetched) as fetch, \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result):
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result):
             self.assertEqual(service.cycle(), 0)
             self.assertEqual(matching_tasks.status(self.conn, 1)['status'], 'complete')
             self.assertEqual(service.cycle(), 0)
@@ -103,7 +103,7 @@ class AutomaticMatchingTests(unittest.TestCase):
         jobs = [dict(external_id=str(i), title='Software Engineer', location='Remote',
                      raw_json={'content': 'Python job'}) for i in range(8)]
         with patch.object(runner.pipeline, 'fetch_jobs_for_company', return_value=jobs), \
-                patch.object(runner.pipeline, 'score_job_for_user', side_effect=self.result) as score:
+                patch.object(runner.pipeline, 'score_job_deterministic', side_effect=self.result) as score:
             self.assertEqual(service.cycle(), 0)
             self.assertEqual(matching_tasks.status(self.conn, 1)['status'], 'pending')
             self.assertEqual(service.cycle(), 0)

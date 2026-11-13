@@ -46,18 +46,29 @@ class DashboardTests(unittest.TestCase):
     def test_empty_profile(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"StudentConnect", response.data)
+        self.assertIn(b"Jobspresso", response.data)
 
     def test_saved_matches_are_rendered_safely_without_writes(self):
         self.seed()
         before = self.database.read_bytes()
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
-        for text in (b"Engineer 1", b"Engineer 2", b"85%", b"Python", b"SQL", b"70.0%"):
+        for text in (b"Engineer 1", b"Engineer 2", b"85%"):
             self.assertIn(text, response.data)
+        jobs_page = self.client.get("/jobs")
+        self.assertIn(b"Python", jobs_page.data)
+        self.assertIn(b"SQL", jobs_page.data)
         for text in (b"Engineer 3", b"Private resume", b"one@example.test", b"javascript:alert", b"<script>alert"):
             self.assertNotIn(text, response.data)
         self.assertIn(b"&lt;script&gt;", response.data)
+        self.assertIn(b'class="jp-header"', response.data)
+        self.assertIn(b'class="jp-home-hero"', response.data)
+        self.assertIn(b'class="jp-stat-grid"', response.data)
+        self.assertIn(b'class="jp-home-panels"', response.data)
+        self.assertIn(b"Scores at 80+", response.data)
+        self.assertIn(b"Top alignment score", response.data)
+        self.assertIn(b"85%", response.data)
+        self.assertNotIn(b'<aside class="side"', response.data)
         self.assertEqual(before, self.database.read_bytes())
         self.assertEqual(response.headers["Cache-Control"], "no-store")
 
@@ -93,7 +104,7 @@ class DashboardTests(unittest.TestCase):
     def test_missing_database_and_missing_schema(self):
         response = create_app(Path(self.directory.name) / "absent.db").test_client().get("/")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"StudentConnect", response.data)
+        self.assertIn(b"Jobspresso", response.data)
         self.conn.execute("DROP TABLE scores")
         self.seed_user_only()
         with self.assertLogs(self.application.logger, level="ERROR"):
@@ -124,8 +135,8 @@ class DashboardTests(unittest.TestCase):
             self.conn.execute("""INSERT INTO scores(job_id,user_id,fit_score,reasoning,scored_at)
                 VALUES(?,1,50,'Match','2026-10-02')""", (number,))
         self.conn.commit()
-        first = self.client.get("/")
-        second = self.client.get("/?page=2")
+        first = self.client.get("/jobs")
+        second = self.client.get("/jobs?page=2")
         self.assertIn(b"Page 1 of 2", first.data)
         self.assertNotIn(b"Unique role 26", first.data)
         self.assertIn(b"Unique role 26", second.data)

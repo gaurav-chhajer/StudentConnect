@@ -1,333 +1,13 @@
-# StudentConnect
+# Jobspresso
 
-StudentConnect collects company job openings, compares them with a saved resume
-using Groq, and prepares match-score email digests. The local Flask application
-connects six screens: Dashboard, Job matches, My resume, Applications,
-Analytics, and Settings.
+Jobspresso tracks company openings, evaluates resume fit with deterministic scoring, and lets users review evidence, manage applications, and receive eligible match digests. The authenticated Flask app keeps scoring independent from optional LLM explanations.
 
-The live pages adapt the latest references in `frontend/designs/animated/` with a
-shared navy sidebar, blue/coral theme, glass cards, illustrated page banners,
-company initial tiles, and reduced-motion support. Dashboard and Analytics
-sparklines use saved weekly scores and counts; unsupported mockup metrics remain
-identified as unavailable. All pages also use the canvas background adapted from
-`frontend/designs/backgrounds/updated/StudentConnect – Match Constellation Background.html`.
-The earlier export is preserved directly in `frontend/designs/backgrounds/`.
-Its linked nodes, cursor scanner, glows and click ripples are decorative; labels
-show randomly generated 55–97% matches from the original design, unrelated to
-saved job-match scores. Labels avoid visible text, controls, and cards, trying
-above and then below each node. Nodes dim behind these areas. Custom containers
-can use `data-bg-avoid`; `data-bg-ignore` excludes an element and its text from
-avoidance. Bounds refresh on scrolling, resizing, and periodically during motion.
-The animation uses
-at most 90 nodes and 12 ripples, pauses in hidden tabs, and becomes a static scene
-with reduced motion enabled. It uses local JavaScript with per-response CSP
-nonces, without enabling inline scripts or loading external services.
-Other live effects use server-rendered SVG and CSS;
-the reference React/Three.js runtimes are not loaded by the application. Fonts
-use local system fallbacks so the interface does not request external font services.
-
-## Project layout
-
-```text
-backend/             Flask routes, SQLite queries, resume storage, matching pipeline
-backend/migrations/  Versioned additive SQL migrations
-frontend/templates/  Jinja pages and shared navigation
-frontend/static/css/ Shared styles and account-page effects
-frontend/static/js/  Location picker and account-page effects
-frontend/designs/original/ Preserved earlier exports and unmodified runtimes
-frontend/designs/updated/  Preserved newer six *-html design references
-frontend/designs/animated/ Latest six *-html exports, including original CSS/JS/vendor files
-frontend/designs/root-exports/ Former root-level *-html references, preserved unchanged
-frontend/designs/backgrounds/ Original standalone background references
-scripts/             Explicit fetch, score, test-profile, and board-discovery commands
-tests/               Offline unittest suites
-tests/artifacts/     Preserved historical test reports (not current verification)
-data/boards/         Company-board CSV files
-data/jobs.db         Local SQLite database (ignored by Git)
-data/backups/        Database backups (ignored by Git)
-data/uploads/        Private original resume files (ignored by Git)
-wsgi.py              Hosted application entry point
-requirements.txt     Pinned Python dependencies
-.env.example         Configuration placeholders; never real credentials
-```
-
-The old root-level scripts have moved. Run the module commands below from the
-repository root. Paths to the database and CSVs are anchored to the project,
-not the shell's working directory. Do not serve the repository as a static site.
-Design exports are reference files, not live templates. Edit `frontend/templates/`
-and `frontend/static/` for application changes. All design collections retain
-their original contents; former root-level exports are retained unchanged under
-`frontend/designs/root-exports/`.
-Existing backend, script, test and private-data paths
-are unchanged; module commands still run from the repository root.
-
-## Install and run locally
-
-Use Python 3.12 and the project-local environment:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -B -m backend.migrate
-.\.venv\Scripts\python.exe -B -m backend.app
-```
-
-Open `http://127.0.0.1:5000`. Sign-in is required for all six screens. Each account
-sees only its own profile, resume, matches, searches, applications and analytics.
-Without hosted configuration, the app rejects non-local Host headers.
-
-Forms require CSRF tokens and the app limits upload sizes. Session signing keys
-are generated in memory on startup, so a restart invalidates open forms; reload
-the page before submitting. These local session settings are not a production
-deployment configuration. Accounts expire after eight hours without cookie
-refresh. Sign-out and password reset revoke all existing sessions for that account.
-
-### Email and Google signup
-
-Google signup lets anyone with a Google account join without an invitation code.
-Existing password login and invitation links remain available. Google signup
-never grants administrator access. Set up the owner account below before opening
-public signup; owner bootstrap requires that no accounts exist yet.
-
-1. In Google Cloud, create an OAuth client of type **Web application**. Configure
-   the consent screen for external users and publish its audience for public use;
-   a client in testing mode only admits its configured test users.
-2. Register the exact redirect URI:
-   `https://gauravchhajer.pythonanywhere.com/auth/google/callback` for this hosted
-   site, or `http://127.0.0.1:5000/auth/google/callback` for local development.
-   Use that exact local origin when testing, rather than switching to localhost.
-3. Store `STUDENTCONNECT_GOOGLE_CLIENT_ID` and
-   `STUDENTCONNECT_GOOGLE_CLIENT_SECRET` privately on the server. Set both or
-   neither; partial configuration fails startup. Never paste the secret into chat
-   or commit it. Hosted WSGI loads `.env`; local module commands use process
-   variables, as with the existing configuration.
-4. Install `requirements.txt`, back up the existing SQLite database, then run
-   `.\.venv\Scripts\python.exe -B -m backend.migrate` (Windows) or
-   `.venv/bin/python -B -m backend.migrate` (hosting). The additive
-   `011_google_accounts.sql` adds identity and temporary callback-state tables;
-   `016_google_link_challenges.sql` adds short-lived email-code challenges for
-   connecting an existing profile. Reload after configuration and migration.
-
-Choose **Continue with Google** on Sign in or Sign up. Google verifies the email;
-new accounts start with an empty resume and are matched against any available
-company. Company selection is available later in Settings. Password sign-up still
-requires the emailed one-time code before an account is created.
-If that verified email already has a profile, Google sign-in sends a separate
-one-time code to the email before connecting the Google identity. The code is
-browser-bound, expires after 10 minutes and is consumed once. You can also sign
-in with a password, open `/login`, and connect Google with the same email. Both
-methods then open the same profile, resume and applications. A linked Google
-identity cannot be reassigned to another profile. Google-only users can use
-password recovery to set a password if mail delivery is configured. Different
-email addresses remain separate profiles.
-
-The flow validates the signed ID token, issuer, audience, expiry and nonce through
-Authlib, and requires a verified email. Callback state expires after five minutes,
-is consumed once, uses PKCE, and is bound to a separate HttpOnly callback cookie.
-That temporary cookie uses SameSite=Lax for Google's redirect; authenticated
-sessions retain SameSite=Strict. Google tokens are not saved. Existing login
-limits and CSRF checks still apply. With Google credentials absent, verified-email
-signup and password access continue and the Google button is hidden.
-
-Test signup, returning login, cancelled consent and existing-account linking on
-the actual hosted site before announcing public access. Outbound Google discovery,
-token and signing-key requests must be allowed by the host. No Google credentials
-or live sign-in are needed for the offline suite.
-
-Reference: [Google web-server OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server)
-and [Authlib Flask OpenID Connect](https://docs.authlib.org/en/stable/oauth2/client/web/flask.html).
-
-### Owner setup and invited accounts
-
-Back up the database before applying `003_accounts.sql` through the migration
-command above. This adds account/token tables and case-insensitive email uniqueness;
-it does not change existing resumes, scores or profiles. A case-insensitive email
-collision blocks migration and must be resolved deliberately. Do not edit applied
-migrations or delete the old database. Existing profiles cannot sign in until linked.
-
-Configure the existing Gmail environment variables, then explicitly request the
-first owner invitation:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m scripts.invite_owner
-```
-
-Enter the email already saved in your existing profile to retain its data and
-confirm `SEND` to send a real invitation. Open `/register`, choose **Enter your code**,
-then enter the emailed 43-character code, your email/name, and a new 12–128-character password. Ownership
-is verified by access to that email. Registration links the existing user ID
-without replacing profile data. The first owner can use **Invite testers** to
-send invitations; testers cannot invite others. Anyone can also request a public
-email sign-up code on `/register`; the code entry form appears after requesting it.
-The code expires after 30 minutes and creates a
-non-admin account only after the email, name and password are submitted together.
-Existing invitations retain their 48-hour lifetime and owner permissions. Public
-Google signup is available when Google credentials are configured.
-
-Invitations expire after 48 hours. Recovery is available from **Forgot password**;
-enter its code on **Enter recovery code** within 30 minutes. Codes work once, are
-stored only as SHA-256 hashes, and never appear in URLs or application logs.
-Passwords use Werkzeug PBKDF2-SHA256 with 600,000 iterations and random salts.
-Verified account emails cannot be changed in Settings. New users initially follow
-no companies; they must choose companies and upload their own resume.
-
-Five failed logins lock an account for 15 minutes. The local beta also limits all
-login/registration attempts to 50 and recovery/reset/sign-up-code requests to 20 per five-minute
-window across accounts. Recovery mail has a five-minute per-account cooldown.
-Recovery responses deliberately do not reveal whether an email has an account;
-delivery errors are logged without private message contents. Uncertain invitation
-delivery retains the pending code; inspect Gmail before attempting another send.
-No invitation or recovery emails are automatically retried. An owner invitation
-cannot be issued while another unexpired owner invitation or an owner account
-exists. Public non-admin signups do not block owner setup; use an email that does
-not already have an account for the first owner invitation.
-
-## Connected flows
-
-1. After accepting an invitation and signing in, open **Settings** to edit your
-   profile, choose company boards, and save
-   role/location/type preferences. No companies selected means no new matching
-   or email candidates. Existing profiles continue matching all companies until
-   company choices are explicitly saved.
-   Until a resume and active company choices are present, every main page shows
-   a setup checklist linking to **Upload resume**, **Review email**, and
-   **Select companies**. Browsing remains available. Registration already saves
-   the verified email; Settings displays it read-only. Completed steps are marked,
-   and setup prompts disappear automatically when the required data is saved.
-   Page banners prioritize setup actions while setup is incomplete.
-   The minimum annual stipend field accepts 0 through 1,00,00,000 INR (1 crore
-   per year); leave it blank for no minimum. Saved values are retained without
-   monthly-to-annual conversion. Compensation matching remains approximate:
-   posting amounts are not automatically normalized by payment period.
-   A single location input suggests city, state, and other location terms from active
-   company postings as you type (for example `ben` suggests Bengaluru with its
-   posting context). Selected locations appear below the input with remove buttons;
-   the input clears for your next city or state. Add typed locations with Enter or
-   Add, up to 20 preferences. Remove all selections for any location. Free-text entries and
-   old comma-separated submissions remain supported. Suggestions cover up to 500
-   common terms and update after fetching jobs; browser dropdown behavior varies.
-   Bangalore/Bengaluru aliases are still matched literally, so select both when
-   targeting all postings for that city. No external location service is used.
-   The picker uses a local script authorized by a per-response CSP nonce on
-   Settings only. Inline handlers and scripts without that nonce remain blocked.
-   With JavaScript disabled, saved selections remain and the input accepts
-   additional comma-separated locations when you save.
-2. Open **My resume** to edit text or upload a `.pdf`, `.docx`, or UTF-8 `.txt`
-   file (at most 2 MB; extracted text at most 100,000 characters). PDF extraction
-   uses pypdf; DOCX extraction uses python-docx. PDFs are limited to 20 pages;
-   scanned/image-only pages and encrypted files are rejected. DOCX paragraphs,
-   nested tables, headers, and footers are included; text boxes, images, and
-   tracked changes may be omitted. Review the saved extracted text before
-   scoring and correct complex-layout reading order or missing text in the editor.
-   Expanded DOCX contents and PDF page streams are limited to 10 MB; DOCX
-   archives are limited to 1,000 entries and nested tables to 10 levels.
-   Old `.doc` files are not supported. Consent is required. Original
-   uploads are stored privately with generated filenames. Versions are retained.
-3. Fetch postings and run scoring explicitly, or schedule the unified pipeline below:
-
-```powershell
-.\.venv\Scripts\python.exe -m scripts.run_local_fetch
-.\.venv\Scripts\python.exe -m scripts.run_local_score
-```
-
-These commands make real external requests and update SQLite. Scoring sends the
-resume and JD to Groq and requires `GROQ_API_KEY`. They are never invoked by
-opening a dashboard page. Changing a resume, job preferences, or stored posting
-marks affected scores stale; old rows remain and the scoring command refreshes
-them. Dashboards and email selection exclude stale scores.
-
-4. Use **Job matches** to filter, save named searches, inspect the complete JD,
-   save jobs, or track them as applied. Apply links open the company's website;
-   status tracking does not submit an application. Update an existing stage on
-   **Applications**. You can also add applications for outside roles manually.
-5. **Analytics** uses saved scores and manually tracked application stages.
-   Response rate treats interview, offer, and rejection as recorded responses;
-   this is not automated employer tracking. Weekly charts cover current scores,
-   not a complete immutable history of scoring runs.
-
-Dashboard, Job matches, Workflow monitor, and Analytics remember applied filters
-separately in the signed-in browser session when navigating away and back. Explicit
-URL filters replace that page's saved selection; submit default values to reset it.
-Pagination and activity cursors are not retained. Signing out clears the selections.
-
-Email preferences, including frequency, local send time/timezone, score threshold,
-and inclusion of gaps, are stored. Candidate selection honors company choices,
-thresholds, and Off; rendering honors the gap preference. The dashboard is only a candidate preview and does not mark
-jobs sent. A manual email command connects saved matches to Gmail SMTP:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m scripts.run_local_email
-.\.venv\Scripts\python.exe -B -m scripts.run_local_email --send
-```
-
-The first command previews eligible counts without sending or logging personal
-content. `--send` sends a separate HTML/plain-text digest to each verified active
-account's saved email. Each run selects at most five active, current, unsent matches per user from
-chosen companies with scores of at least 60 and at or above the saved threshold;
-Off disables sending. Existing jobs
-can appear in the first digest. Groq evaluations include categories, component
-scores, eligibility blockers, and unknowns. Gap display follows the saved setting.
-No scores are generated by this command; run scoring separately first.
-
-Set `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` in the system/process environment.
-For this setup, the sender account is `improvingjobsearch@gmail.com`. Enable Google
-2-Step Verification and generate a 16-character App Password for that account;
-use it instead of the normal account password. Spaces between groups are accepted.
-Store the password locally through Windows **Edit environment variables for your
-account**, never in source code, chat, shell history, or Git. Open a new terminal
-after setting persistent variables. `.env.example` documents placeholders only;
-the application does not load that file. No credentials are required for preview.
-Delivery uses `smtp.gmail.com:465`, certificate-verified TLS, and a 15-second
-timeout per network operation, with the sender address also used for login.
-Successful SMTP acceptance marks the included jobs in `sent_log`; this does not
-prove inbox delivery. Failures return exit code 1 without marking jobs sent.
-The command serializes each user's local send with a SQLite write lock. Earlier
-successful users remain recorded if a later user's send fails; the batch stops
-on that failure. Profiles not yet linked to verified accounts receive no digests.
-SMTP has no provider
-idempotency key: uncertain timeouts or a crash after acceptance can cause duplicate
-mail on a later manual send. Review Gmail Sent and local records before retrying.
-There are no automatic email retries. Resend credentials are no longer used.
-
-Manual sending honors Off but does not wait for a scheduled time.
-See [Google App Password instructions](https://support.google.com/mail/answer/185833).
-Use this account for low-volume testing; Gmail sending limits still apply.
-
-### Automatic email delivery on Windows
-
-Starting the Flask app or deploying it to PythonAnywhere does not schedule
-fetching, scoring, or digests. `scripts.run_local_fetch` seeds the company list
-from the verified board CSVs and fetches active boards only when explicitly run;
-`scripts.run_local_score` is also a separate manual command. The optional Windows
-task below sends existing saved matches only and does not update jobs or scores.
-No PythonAnywhere scheduled task is installed by this repository.
-
-Preview whether a digest is due without sending:
-
-```powershell
-.\.venv\Scripts\python.exe -B -m scripts.run_local_email --scheduled
-```
-
-Scheduled mode supports Settings' `Asia/Kolkata` and `UTC` zones. Daily delivery
-is due after the saved local time if no email was accepted on that local date.
-Weekly delivery starts at the next eligible time, then waits seven local dates
-after the last accepted digest. Manual sends also reset this cadence. When no
-matches qualify, no email or send record is created. Missed times can catch up
-later that day; old daily slots are not replayed.
-
-The installer prepares a least-privilege task for the current Windows user,
-checking every 15 minutes while logged in. It does not overwrite an existing
-task. Preview installation without registering it:
-
-```powershell
-.\scripts\install_email_schedule.ps1 -WhatIf
-```
-
+The live UI is rendered from `frontend/templates/` with assets in `frontend/static/`; the Jobspresso dashboard, account pages, and product screens use the warm espresso palette. `frontend/jobspresso/` is a separate visual prototype, while the top-level files under `frontend/` are an earlier retained export. Their demo handlers and data do not power the authenticated app. See `frontend/README.md` for the source-of-truth map.
 To activate real automatic emails, run the same command without `-WhatIf` and
 confirm its prompt. Store `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` in persistent
 Windows User/Machine environment variables first, then sign out/in so scheduled
 processes inherit changes. No credentials are stored in the task definition.
-Inspect or disable **StudentConnect Email Digests** in Windows Task Scheduler.
+Inspect or disable **Jobspresso Email Digests** in Windows Task Scheduler.
 The computer must be awake and you must be logged in; this is not an always-on
 hosted service. This task sends saved scores only: fetching/scoring must still
 be run separately.
@@ -371,43 +51,110 @@ placeholders; the application does not automatically load `.env` files. Keep
 credentials, resume files, and populated databases out of Git. The hosted WSGI
 entry point explicitly loads a private `.env`; local module commands do not.
 
-The default Groq model is `qwen/qwen3.8-27b` (the previous Llama model was unavailable).
-Explicit `GROQ_MODEL` environment overrides remain respected. Changing `GROQ_MODEL` requires
-setting `GROQ_CONTEXT_TOKENS` to the selected model's documented context size.
-Scoring extracts cleaned, complete descriptions from Greenhouse, Lever, and
-Ashby. Missing or oversized descriptions are rejected without truncation. The
-budget check uses a conservative UTF-8 byte estimate, not an exact tokenizer.
+Install the local requirements and prepare the pinned CPU embedding model once:
 
-Groq generates five component scores (skills 40, relevant experience 25, role
-alignment 15, education 10, other constraints 10), the total, and match category.
-Education and other constraints each receive 7 when the JD states no requirement.
-Confirmed mandatory eligibility contradictions cap the final score at 40;
-missing information is not a blocker. Categories are Strong (80+), Good (65+),
-Partial (45+), Weak (25+), and Not a Match (below 25).
-Python rejects invalid totals, categories, ranges, and unsupported evidence
-quotes; it does not substitute its own assessment.
-New Groq requests include the complete resume and cleaned JD as numbered JSON lines.
-For each match or blocker, Groq returns integer `jd_line_id` and `resume_line_id`
-references; Python retrieves both exact original lines before validation and saving.
-Missing or invalid references and model-written evidence quotes are rejected.
-Previously saved evaluations
-remain readable; no database migration is needed. New results record their
-`evidence_format` as `source-line-ids-v1`.
-The scoring command retries HTTP 429 up to three times per job, waiting at least
-the integer `Retry-After` seconds, with an exponential minimum of 1, 2, then 4
-seconds. Missing/invalid headers, waits above 120 seconds, or exhausted retries
-stop the batch. Network errors and other HTTP errors stop without retries.
-Ctrl+C interrupts waiting safely. Rerun after the limit
-clears; already saved current scores are skipped. Invalid evaluations are reported
-and left unsaved while the batch continues. Interrupting exits cleanly.
-Unreadable or insufficient documents produce no saved score. Responses have a 4,000-token output budget.
-The Job matches screen shows the breakdown, evidence, blockers, and unknowns.
-This is an AI match estimate, not an employer ATS score or hiring probability.
-Model and rubric version are stored with new evaluations; legacy scores remain
-available without a breakdown. The additive `002_score_evaluation.sql` migration
-preserves existing data. Back up and run the migration before starting the app.
-No live scoring or email delivery happens when opening the dashboard; the scoring
-command sends your saved resume and full JD to Groq and can incur API charges.
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-local.txt
+.\.venv\Scripts\python.exe -B -m scripts.prepare_similarity --download
+```
+
+Resume/JD extraction, taxonomy matching, section embeddings, experience, education,
+and seniority scoring run locally. The versioned score cache includes resume/JD
+hashes, scorer and weights versions, embedding revision, and scoring date. Results
+include component scores, source-line matches, missing must-haves, and hard-cap
+flags. `POST /score` returns the same structured result for a signed-in user and
+requires the session CSRF token in `X-CSRF-Token`.
+
+The optional `llm_explanation: true` request never sends resume text or changes the
+numeric score. It uses the configured Groq, Gemini, Cerebras, then Ollama chain;
+providers are skipped until model names and explicit RPM/daily request/token budgets
+are configured in `.env`; each user can request at most three uncached explanations
+per UTC day. Output is schema-checked, retried once when invalid,
+logged without prompt text, cached on success, and falls back to a local template.
+Scores are cached separately from explanations. Run
+`python -B -m scripts.run_deterministic_eval` to compare local shadow results with
+the private legacy-score reference; that comparison is diagnostic and does not
+reward scores for being larger. For reviewed calibration, pass `--human-labels`
+with JSONL rows containing `job_id` and `human_score` (0-100); the report includes
+Spearman correlation, mean absolute and signed error, and disagreement at the
+60-point cutoff. To create an unscored review template without overwriting an
+existing file, pass `--prepare-labels path.jsonl` and fill in each `human_score`
+after reviewing the resume against that job. Thirty or more reviewed pairs are
+needed for the harness to mark human evaluation ready; empty templates are not
+ground truth. Compare a feature ablation against the same reviewed labels with
+repeatable `--ablation NAME=PATH` options; each variant reports the same error,
+rank, and 60-point cutoff metrics. Review recurring unknown JD terms weekly with
+`python -B -m scripts.review_unmatched_skills`; approve aliases by editing the
+versioned taxonomy at `backend/taxonomy/skills.json` and rerun the evaluator.
+The current `skills-v3-esco-1.2.0` taxonomy preserves the curated project skills
+and directional implications, with a small reviewed set of exact English aliases
+from ESCO. Broader ESCO terms were not enabled as automatic matches because that
+would add ambiguous and overly general requirements without human validation.
+This service uses the ESCO classification of the European Commission. The
+Jobspresso taxonomy is an adapted version of selected ESCO labels.
+
+The complete English ESCO skill catalog is also kept in
+`backend/taxonomy/esco-review-catalog.json` for review only. It never participates
+in automatic scoring. Rebuild it from the verified local RDF archive with
+`python -B -m scripts.build_esco_review_catalog`. The catalog preserves concept
+URIs and exact alternate labels and is distributed under CC BY 4.0 with European
+Commission attribution. ESCO skill pillar data is licensed CC BY-SA 4.0; changes
+to ESCO-derived content remain subject to that license. Run
+`python -B -m scripts.run_weekly_alias_review` to
+write a dated report under ignored `data/taxonomy-review/`; exact ESCO label hits
+are suggestions, not approved aliases. On Windows,
+`scripts/install_alias_review_schedule.ps1 -WhatIf` previews a separate Sunday
+task; running the script registers that task for the current Windows user.
+Users can rate a saved score as helpful or not accurate on its job detail page;
+the owner reviews aggregate and recent score ratings at `/admin/feedback`.
+
+### Public human-ranking benchmark
+
+The optional local-only benchmark can evaluate ordering against the first 30
+anonymized resumes and five vacancies in the GPL-3.0
+[vacancy-resume-matching-dataset](https://github.com/NataliaVanetik/vacancy-resume-matching-dataset).
+The archive belongs in ignored `data/benchmarks/`; do not commit its resumes or
+vacancy text. Two independent annotators rank the five vacancies for each of 30
+resumes (rank 1 is best). Run it after preparing the local embedding model:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.evaluate_vanetik_rankings
+```
+
+It reports mean Spearman rank correlation against each annotator and their
+inter-annotator agreement. This is a ranking-only check: it cannot calibrate a
+0-100 score or the 60-point email cutoff. The annotators show limited agreement,
+so treat the results as a diagnostic, not a quality gate. The separate
+`dev6565/resume-ats-score-v1-en` dataset is algorithmically scored and its
+downloaded CSV uses the documented ` SEP ` delimiter. Run the complete 6,374-pair
+stress evaluation locally with:
+
+```powershell
+.\.venv\Scripts\python.exe -B -m scripts.evaluate_ats_reference
+```
+
+It reports rank correlation, score error, and disagreement at 60 against the
+dataset's own score. Those values are algorithmically derived from semantic
+similarity, not human fit judgments, so their threshold flips do not calibrate
+the 60-point email cutoff. The dataset card also describes its scores as
+algorithmic and states Apache-2.0 licensing. See the
+[dataset card](https://huggingface.co/datasets/dev6565/resume-ats-score-v1-en).
+Dataset citation: Vanetik and Kogan, "Job Vacancy Ranking with Sentence
+Embeddings, Keywords, and Named Entities," *Information* 14(8), 468 (2023),
+[doi:10.3390/info14080468](https://doi.org/10.3390/info14080468).
+
+Deterministic model caches live in the ignored `data/local_similarity_cache.db`.
+The dashboard stores the deterministic component breakdown in the additive
+`031_deterministic_breakdown.sql` score column. Back up the database, then run
+`python -B -m backend.migrate`; existing Groq evaluation rows are retained and
+continue to be readable. This is a fit estimate, not an employer ATS score or
+hiring probability.
+
+To replace stale scores for active jobs, first preview with
+`python -B -m scripts.backfill_deterministic_scores`. It refuses the entire batch
+if any new score is below its saved score. Add `--apply` only after the preview
+passes; the command creates and integrity-checks a unique backup before updating
+scores atomically.
 
 `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` are needed for authenticated Gmail
 delivery. Storing email preferences alone does not schedule delivery.
@@ -416,7 +163,8 @@ delivery. Storing email preferences alone does not schedule delivery.
 
 `scripts.run_pipeline` is one complete cycle for a scheduler on the **same machine
 and database as the website**. It does not start a background thread in Flask.
-Initialize/migrate the database and configure Groq and Gmail before enabling it.
+Initialize/migrate the database, prepare the local scoring model, and configure
+Gmail before enabling it.
 
 Preview existing due matches without fetching, scoring, writing data, or sending:
 
@@ -435,8 +183,7 @@ active accounts with a nonempty saved resume. Company subscriptions and existing
 role/location/type filters apply. Current scores are skipped. Accounts least
 recently scored run first, with up to five evaluations per account and twenty
 total per cycle; `--max-scores 1` through `--max-scores 100` changes the total
-budget. Existing bounded Groq 429 retries apply per evaluation, so this budget
-is not a strict HTTP-request or token limit. Pending work continues next cycle.
+budget. Scoring itself makes no provider requests. Pending work continues next cycle.
 Inputs are rechecked under a write transaction before saving a score.
 
 ### Matching triggered by user changes
@@ -470,10 +217,10 @@ current scores are reused, including when following a company again. Empty
 company selections finish without scoring. Failed board refreshes retain old jobs
 and mark matching failed rather than claiming that all openings were checked.
 
-The matching-only worker needs Groq credentials but not Gmail; it can run while
+The local matching-only worker needs the local model but not Gmail; it can run while
 email delivery is paused, leaving the email pause marker untouched. The normal
 `--run` cycle also consumes these tasks, fetches new postings and sends due digests.
-User requests only save tasks; they do not launch an unowned thread or make Groq
+User requests only save tasks; they do not launch an unowned thread or make LLM
 calls in a Flask request. Refresh a page after a worker run to see updated status.
 Use a supported scheduler for periodic matching-only cycles and full cycles;
 the worker exits after each batch, so it need not run continuously. Without a
@@ -484,8 +231,8 @@ companies and unsent-job rules, with up to five matches per digest. A successful
 empty board closes its old jobs. Malformed response shapes are rejected rather
 than treated as empty boards. Failed boards retain old data and are excluded
 from scoring and email for that cycle; successful boards continue. All-board
-failures skip scoring/email. Groq failures retain completed scores; valid current
-scores may still be emailed. Partial failures return exit code 1 for monitoring.
+failures skip scoring/email. Local model failures retain completed scores; valid
+current scores may still be emailed. Partial failures return exit code 1 for monitoring.
 
 `data/pipeline.lock` prevents simultaneous unified cycles and automatically releases
 its OS lock on exit/crash. The file remains. Run only one pipeline scheduler and
@@ -587,21 +334,25 @@ does not support the new reservation endpoints. No live Tavily calls are part of
 offline tests; no new dependency or scoring provider is introduced.
 
 `scripts.watch_hosted_jobs` runs on your PC against the PythonAnywhere database.
-It defaults to **local similarity**, with no Groq calls or LLM fallback. The
-model runs on your PC; jobs, resume/settings inputs, similarity results, sent
-history and email delivery use the hosted database/API. Use `--fetch-only` for
-fetching without comparison or email. Groq remains an explicit
-`--provider groq` option. This change does not deploy or restart the hosted site.
+It defaults to **deterministic fit scoring** with the pinned local embedding
+model. Full score breakdowns are saved in the hosted score table and displayed
+on the dashboard. It needs `requirements-local.txt` and the prepared model on the
+PC. If a resume has no saved role-family profile, the worker uses Groq only for
+that uncertain title-family extraction; the score itself stays local. Use
+`--provider groq` for the prior scoring path or `--provider similarity` for the
+separate relevance-only ranking mode. `--fetch-only` fetches without scoring or
+email. This change does not deploy or restart the hosted site.
 
 Publish the reviewed source through your normal deployment process. The
 migration-aware deploy script backs up the hosted SQLite database and applies
-`012_local_similarity.sql` before reloading; existing Groq scores and evidence
-are retained. If the hosted checkout still has the older deploy script, follow
-the one-time bootstrap instructions in the deployment section below. The
-authenticated `similarity/work`, `similarity`, and `email/similarity` endpoints
-are required; an older server returns 404 and the worker stops. Install only `requirements.txt`
-on the host: the embedding model runs on your PC, not in PythonAnywhere's web
-process.
+pending migrations, including `031_deterministic_breakdown.sql`, before reloading;
+existing Groq scores and evidence are retained. If the hosted checkout still has the older deploy script, follow
+the one-time bootstrap instructions in the deployment section below. The hosted
+`score` endpoint accepts validated deterministic results; the legacy
+`similarity/work`, `similarity`, and `email/similarity` endpoints remain available
+for relevance-only rankings. An older server without migration 031 cannot save
+deterministic breakdowns. Install only `requirements.txt` on the host: the
+embedding model runs on your PC, not in PythonAnywhere's web process.
 
 Configure the existing `STUDENTCONNECT_BASE_URL` and `STUDENTCONNECT_WORKER_KEY`
 (matching the private hosted value) in your private local `.env` or process
@@ -668,8 +419,8 @@ then 60 seconds without holding the write lock; shutdown interrupts these waits.
 Authentication, TLS, rate-limit, invalid-response, and other endpoint failures
 are not retried. No Groq request or hosted POST is replayed by this recovery.
 If email delivery fails or its response is uncertain, this process pauses further
-email checks and logs the need to reconcile provider/sent history, while Groq
-scoring continues. The process still reports a failed status when it eventually
+email checks and logs the need to reconcile provider/sent history, while
+deterministic scoring continues. The process still reports a failed status when it eventually
 exits. Reconcile email state before restarting delivery; a process restart does
 not clear the existing hosted email pause marker. Scoring exceptions, failed
 batches, and client initialization or cleanup errors trigger a new scoring
@@ -678,19 +429,23 @@ than replaying the failed request. Recovery preserves the email pause state;
 shutdown interrupts the delay. Persistent configuration or provider errors still
 need correction, and recovery requires the worker process to remain running.
 
-Groq generates and saves the best 5?7 resume-supported role families with equivalent
-title aliases. Only eligible jobs passing this title gate receive full JD/resume
-Groq evaluation. Families are reused until resume/model/profile changes. The
-local embedding model is not used by the unified worker. A batch processes up to
-five candidates per account; remaining eligible work persists for later batches.
+When no saved role-family profile exists, Groq generates and saves 5–7
+resume-supported role families with equivalent title aliases. The default worker
+uses deterministic local scoring after this title gate; the prior full JD/resume
+Groq scoring remains an explicit provider choice. Profiles are reused until
+resume/model/profile changes. The local embedding model is required by the default
+worker. A batch processes up to five candidates per account; remaining eligible
+work persists for later batches.
 After a successful scoring batch, qualifying unsent matches are emailed immediately
 using each account's saved minimum fit score. Off preferences, subscriptions,
 stale-result checks, sent-history deduplication and uncertain-email pause protection
 remain enforced. No resume rewriting, applications, or no-match reminders run.
 
 Jobs, profiles, scores and email history stay in the hosted database. The PC must
-remain awake and online. Configure GROQ_API_KEY and optional GROQ_API_KEY_2 through _7 in
-private .env; credentials are never displayed. The sign-in installer uses the same
+remain awake and online. Configure GROQ_API_KEY only when a missing role-family
+profile needs generation; saved/custom profiles and deterministic scores need no
+Groq key. Optional Groq key slots remain available for the explicit legacy provider.
+Credentials are never displayed. The sign-in installer uses the same
 launcher and refuses to overwrite an existing task:
 
 ```powershell
@@ -710,7 +465,7 @@ only. Deployments still use the existing deployment workflow. The local unified
 worker is the sole live automation scheduler; the website retains authentication,
 CSRF protection for browser requests, and separate authenticated worker endpoints.
 
-The hosted Groq worker first generates **5-7 distinct best-suited role families**
+When needed, the worker generates **5-7 distinct best-suited role families**
 from each resume, ranked by suitability and supported by actual resume-line
 references. Each family contains equivalent job-title aliases, so Software
 Engineer, Software Developer, SDE and SWE occupy **one family slot**. Groq proposes
@@ -718,7 +473,8 @@ Engineer, Software Developer, SDE and SWE occupy **one family slot**. Groq propo
 frontend, fullstack and QA aliases expand matching without using additional family
 slots. Groq can supply additional employer wording without code changes.
 Duplicate family names and equivalent aliases shared across families are rejected.
-Suggestions use the configured Groq model and existing ordered key pool. They are
+Suggestions use the configured Groq model and existing ordered key pool after
+redacting direct identifiers. They are
 saved privately in `resume_role_titles` and reused across runs; a changed resume,
 profile version, or Groq model requires regeneration. If the resume cannot
 support five distinct families, an explicit `insufficient_evidence` result is
@@ -769,8 +525,10 @@ the worker checks other filters to discover pending work but returns no scoreabl
 jobs; role filtering is applied with aliases once the profile has been generated.
 
 The worker orders title matches by family order, then ascending job ID, and
-selects up to **five missing/stale evaluations per account per batch**. Only these
-jobs proceed to complete-JD Groq evaluation. Resolved career-posting titles are
+selects up to **five missing/stale evaluations per account per batch**. The
+default provider scores these jobs with the deterministic local engine and saves
+the component breakdown. The explicit `--provider groq` path retains complete-JD
+Groq evaluation. Resolved career-posting titles are
 checked again before evaluation, and the server rechecks titles before saving
 scores. Title generation shares the 100-operation cycle budget with JD evaluation;
 429 key rotation remains subject to the existing key-pool limits. Suggestions are
@@ -779,8 +537,9 @@ are retained. The separate offline similarity worker and manual local Groq comma
 retain their scoring providers and do not use the hosted family gate. Their shared
 role-preference filter also recognizes equivalent broad role names.
 
-Apply additive migration `018_resume_role_titles.sql` after a verified database
-backup, then reload the website and restart the hosted Groq worker together. The
+Apply additive migration `018_resume_role_titles.sql` and `031_deterministic_breakdown.sql`
+after a verified database backup, then reload the website and restart the hosted
+deterministic worker together. The
 updated `/internal/worker/work` response can request a title profile, which the
 worker saves through the authenticated `/internal/worker/role-titles` endpoint.
 Old workers cannot process that new request. No website request calls Groq to
@@ -1573,7 +1332,7 @@ It checks job links before applying and blocks records with existing history or
 a Skip verdict. It updates/creates an Applied record only after browser
 confirmation. No follow-up messages are sent and other tracker fields stay intact.
 
-Without a Notion integration, use the existing StudentConnect Applications page.
+Without a Notion integration, use the existing Jobspresso Applications page.
 First reconcile your previous Notion applications there, including uncertain
 submissions, so they cannot be submitted twice. Only then set `history_checked`
 to `true` in the private profile. A `false` value prevents live work without
