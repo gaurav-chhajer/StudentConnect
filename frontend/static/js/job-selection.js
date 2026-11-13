@@ -4,6 +4,26 @@
   const status = document.getElementById('job-selection-status');
   let panel = document.getElementById('job-detail');
   if (!list || !status || !panel) return;
+  const slider = document.getElementById('jobs-score');
+  if (slider) slider.addEventListener('input', () => {
+    slider.nextElementSibling.value = `${slider.value}%`;
+  });
+  list.querySelectorAll('.company-job-card').forEach(card => {
+    const roles = [...card.querySelectorAll('.company-role')];
+    let position = 0;
+    function update() {
+      roles.forEach((role, index) => { role.hidden = index !== position; });
+      card.querySelector('.role-position').textContent = `${position + 1} / ${roles.length} shown`;
+      card.querySelector('[data-role-step="-1"]').disabled = position === 0;
+      card.querySelector('[data-role-step="1"]').disabled = position === roles.length - 1;
+    }
+    card.querySelectorAll('[data-role-step]').forEach(button => button.addEventListener('click', () => {
+      position = Math.max(0, Math.min(roles.length - 1, position + Number(button.dataset.roleStep)));
+      update();
+      roles[position].querySelector('.jt-link').focus({preventScroll: true});
+    }));
+    update();
+  });
   let pending;
   let sequence = 0;
 
@@ -42,6 +62,8 @@
       panel = replacement;
       panel.scrollTop = 0;
       highlight(panel.dataset.jobId);
+      panel.scrollIntoView({block: 'start'});
+      panel.focus({preventScroll: true});
       status.textContent = 'Selected match updated.';
     } catch (error) {
       if (request !== sequence) return; // Superseded selections and page shutdown own cancellation.

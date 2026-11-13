@@ -344,7 +344,14 @@ def create_app(database_path=None, upload_dir=None):
         if data["user"]:
             conn = connection()
             user_id = data["user"]["id"]
+            data["company_cards"] = True
             data["matches"], data["pages"] = store.matches(conn, user_id, data, utc_now())
+            data["job_locations"] = store.location_suggestions(conn)
+            data["company_groups"] = []
+            for item in data["matches"]:
+                if not data["company_groups"] or data["company_groups"][-1]["id"] != item["company_id"]:
+                    data["company_groups"].append(dict(id=item["company_id"], name=item["company_name"], roles=[]))
+                data["company_groups"][-1]["roles"].append(item)
             data["saved_searches"] = conn.execute("SELECT id,name,filters_json FROM saved_searches WHERE user_id=? ORDER BY name LIMIT 50", (user_id,)).fetchall()
             data["saved_searches"] = [dict(row, link=url_for("jobs", **json.loads(row["filters_json"]))) for row in data["saved_searches"]]
             if selected_id:

@@ -162,6 +162,24 @@ def matches(conn, user_id, selected_filters, now):
         params.append({"internship": "%intern%", "full-time": "%full%", "part-time": "%part%"}[selected_filters["job_type"]])
     count = conn.execute("SELECT COUNT(*) " + where, params).fetchone()[0]
     order = "s.fit_score DESC,j.id ASC" if selected_filters["sort"] == "best" else "j.first_seen_at DESC,j.id DESC"
+    if selected_filters.get("company_cards") and not selected_filters["company"]:
+        company_count = conn.execute("SELECT COUNT(DISTINCT c.id) " + where, params).fetchone()[0]
+        company_order = "MAX(s.fit_score) DESC,c.id ASC" if selected_filters["sort"] == "best" else "MAX(j.first_seen_at) DESC,c.id ASC"
+        company_ids = [row[0] for row in conn.execute(
+            "SELECT c.id " + where + " GROUP BY c.id ORDER BY " + company_order + " LIMIT 6 OFFSET ?",
+            (*params, (selected_filters["page"] - 1) * 6))]
+        selected_filters["company_count"] = company_count
+        selected_filters["opening_count"] = count
+        if not company_ids:
+            return [], max(1, (company_count + 5) // 6)
+        placeholders = ",".join("?" for _ in company_ids)
+        rows = conn.execute("SELECT * FROM (SELECT " + MATCH_COLUMNS +
+            ",ROW_NUMBER() OVER(PARTITION BY c.id ORDER BY " + order + ") card_rank," +
+            "COUNT(*) OVER(PARTITION BY c.id) company_openings " + where +
+            " AND c.id IN (" + placeholders + ")) WHERE card_rank<=5", (*params, *company_ids)).fetchall()
+        rank = {company_id: index for index, company_id in enumerate(company_ids)}
+        rows = sorted(rows, key=lambda row: (rank[row["company_id"]], row["card_rank"]))
+        return [match(row) for row in rows], max(1, (company_count + 5) // 6)
     rows = conn.execute("SELECT " + MATCH_COLUMNS + " " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                         (*params, PAGE_SIZE, (selected_filters["page"] - 1) * PAGE_SIZE)).fetchall()
     return [match(row) for row in rows], max(1, (count + PAGE_SIZE - 1) // PAGE_SIZE)

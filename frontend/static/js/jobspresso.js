@@ -3,9 +3,9 @@
 (() => {
     const themeButton = document.getElementById("theme");
     const root = document.documentElement;
-    let storedTheme = null;
+    let storedTheme = document.documentElement.dataset.theme || null;
     try {
-        storedTheme = localStorage.getItem("jp-theme");
+        storedTheme = localStorage.getItem("jp-theme") || storedTheme;
     } catch (error) {
         if (!(error instanceof DOMException)) throw error;
     }
@@ -93,7 +93,18 @@
     window.addEventListener("resize", () => moveIndicator());
 
     const boot = document.getElementById("boot");
-    if (boot) {
+    let hasBooted = Boolean(previousPage && previousPage.origin === location.origin);
+    try {
+        hasBooted = hasBooted || sessionStorage.getItem("jp-booted") === "1";
+        sessionStorage.setItem("jp-booted", "1");
+    } catch (error) {
+        // Storage-blocked browsers still skip the intro on internal navigation.
+        if (!(error instanceof DOMException)) throw error;
+    }
+    if (boot && (hasBooted || matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+        boot.remove();
+    } else if (boot) {
+        boot.classList.add("is-starting");
         const bootMessage = boot.querySelector("#bmsg");
         const bootSteps = ["Grinding the beans", "Heating the water", "Brewing your workspace"];
         let bootStep = 0;
@@ -136,6 +147,15 @@
     const loader = document.getElementById("page-loader");
     if (!loader) return;
     let pending = false;
+    let loaderTimer;
+    function resetLoader() {
+        pending = false;
+        window.clearTimeout(loaderTimer);
+        loader.classList.remove("is-active");
+        loader.setAttribute("aria-hidden", "true");
+    }
+    window.addEventListener("pageshow", resetLoader);
+    window.addEventListener("pagehide", resetLoader);
     function showLoader() {
         if (!pending) return;
         loader.classList.add("is-active");
@@ -146,23 +166,33 @@
             anchor.getAttribute("href")?.startsWith("#")) return false;
         try {
             const destination = new URL(anchor.href, location.href);
-            return destination.origin === location.origin && !destination.pathname.startsWith("/static/");
+            return destination.origin === location.origin && !destination.pathname.startsWith("/static/") &&
+                !(destination.pathname === location.pathname && destination.search === location.search);
         } catch (error) {
             if (error instanceof TypeError) return false;
             throw error;
         }
     }
     document.addEventListener("click", event => {
+        if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
         const anchor = event.target instanceof Element ? event.target.closest("a") : null;
         if (isLocalNavigation(anchor)) {
-            pending = true;
-            setTimeout(showLoader, 180);
+            // Let later handlers claim in-page selections before showing a page loader.
+            window.queueMicrotask(() => {
+                if (event.defaultPrevented) return;
+                pending = true;
+                loaderTimer = window.setTimeout(showLoader, 350);
+            });
         }
     });
     document.addEventListener("submit", event => {
-        if (event.target instanceof HTMLFormElement && event.target.method.toLowerCase() === "post") {
-            pending = true;
-            setTimeout(showLoader, 180);
+        if (!event.defaultPrevented && event.target instanceof HTMLFormElement && !event.target.target &&
+                new URL(event.target.action, location.href).origin === location.origin) {
+            window.queueMicrotask(() => {
+                if (event.defaultPrevented) return;
+                pending = true;
+                loaderTimer = window.setTimeout(showLoader, 350);
+            });
         }
     });
 })();

@@ -113,8 +113,8 @@
 .hauth { flex: 0 0 auto; }
 .hauth .btn { padding: 9px 16px; }
 .app .main.jp-shell { width: min(100% - 40px, 1360px); max-width: 1360px; min-height: calc(100vh - 80px); padding: 30px 0 44px; display: block; }
-.app .main.jp-shell > * { animation: page-enter .45s cubic-bezier(.2,.8,.2,1) both; }
-@keyframes page-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.app .main.jp-shell > * { animation: page-enter .16s ease-out both; }
+@keyframes page-enter { from { opacity: .8; } to { opacity: 1; } }
 .app h1, .app h2, .app h3, .app h4 { color: var(--jp-ink); }
 .app .card, .app .job-tile, .app .detail-card, .app .col, .app .kc { background: var(--jp-card); border: 1px solid var(--jp-line); border-radius: 18px; box-shadow: none; color: var(--jp-ink); }
 .app .card { padding: 20px 22px; }
@@ -234,6 +234,111 @@ body, .app, .site-header, .app .card, .app .job-tile, .app .col, .app :is(input,
   .app .stat { min-height: 120px; padding: 15px; }
   .app .card { padding: 17px; }
 }
+/* The script reveals the intro only on the first visit, preventing a flash between pages. */
+#boot { display: none; }
+#boot.is-starting { display: grid; }
+.app .jobs-filters { display: grid; grid-template-columns: minmax(220px,2fr) repeat(3,minmax(120px,1fr)); gap: 12px; margin: 22px 0 12px; }
+.app .jobs-filters input[type=search], .app .jobs-filters select { width: 100%; min-height: 52px; border-radius: 12px; }
+.app .jobs-score { grid-column: 1 / 3; display: flex; align-items: center; gap: 14px; }
+.app .jobs-score input { width: 185px; accent-color: var(--accent); }
+.app .jobs-score output { min-width: 45px; font-weight: 700; }
+.app .company-job-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 20px; }
+.app .company-job-card { border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: var(--surface); min-width: 0; }
+.app .company-job-heading { display: flex; align-items: center; gap: 12px; padding: 18px; }
+.app .company-job-heading h2 { font-size: 18px; }
+.app .company-job-card .job-tile { border: 0; border-radius: 0; box-shadow: none; }
+.app .company-job-card .jt-head { flex-wrap: wrap; }
+.app .company-job-card .jt-skills { display: block; min-height: 0; }
+.app .company-job-card .jt-row { display: block; margin-top: 10px; }
+.app .company-job-card .jt-chips { margin-top: 6px; }
+.app .company-job-card .jt-main { min-width: 120px; }
+.app .company-role[hidden] { display: none; }
+.app .company-role-actions { display: flex; justify-content: space-between; gap: 10px; padding: 12px 18px; }
+.app .company-role-actions form { margin: 0; }
+.app .company-job-footer { display: flex; align-items: center; gap: 7px; padding: 12px; border-top: 1px solid var(--line); font-size: 12px; }
+.app .company-job-footer a { margin-left: auto; }
+.app .company-job-footer .btn { min-width: 36px; padding: 8px; }
+.app .jobs-discovery > .detail-card { margin-top: 24px; scroll-margin-top: 95px; }
+@media (hover:hover) { .app .company-role-actions { opacity: 0; transition: opacity .15s; } .app .company-job-card:hover .company-role-actions, .app .company-job-card:focus-within .company-role-actions { opacity: 1; } }
+@media(max-width:1100px) { .app .company-job-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media(max-width:650px) { .app .company-job-grid { grid-template-columns: 1fr; } .app .jobs-filters { grid-template-columns: 1fr 1fr; } .app .jobs-filters input[type=search] { grid-column: 1 / -1; } .app .jobs-score { grid-column: 1 / -1; flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Replace remaining legacy blue surfaces and focus treatments on live pages. */
+html, body { background: var(--jp-bg); color: var(--jp-ink); }
+.app { background: var(--jp-bg); color: var(--jp-ink); }
+.app :is(button, .btn):not(.jp-theme-toggle) {
+  border-color: var(--jp-line);
+  background: var(--jp-card);
+  color: var(--jp-ink);
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.app .btn.p,
+.app .btn:not(.ghost):not(.jp-theme-toggle),
+.app :is(button, .btn).p {
+  border-color: var(--jp-accent);
+  background: var(--jp-accent);
+  color: var(--on);
+}
+.app :is(button, .btn):not(:disabled):not([aria-disabled="true"]):hover {
+  border-color: var(--jp-accent);
+  background-color: var(--jp-soft);
+  color: var(--jp-ink);
+  box-shadow: none;
+}
+.app .btn.p:hover,
+.app .btn:not(.ghost):not(.jp-theme-toggle):hover {
+  background: var(--jp-accent-dark);
+  color: var(--on);
+}
+.app :is(button, .btn):focus-visible,
+.app :is(input, textarea, select):focus-visible {
+  outline-color: var(--jp-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--jp-accent) 22%, transparent);
+}
+.app .main.jp-shell :is(.filters, .jobs-filters, .field) :is(input, textarea, select) {
+  border-color: var(--jp-line);
+  background-color: var(--jp-card);
+  color: var(--jp-ink);
+}
+.app .main.jp-shell :is(.filters, .jobs-filters, .field) :is(input, textarea, select):focus {
+  border-color: var(--jp-accent);
+  background-color: var(--jp-soft);
+}
+.app input[type="file"]::file-selector-button {
+  border-color: var(--jp-line);
+  background: var(--jp-soft);
+  color: var(--jp-ink);
+}
+.app input[type="file"]::file-selector-button:hover {
+  border-color: var(--jp-accent);
+  background: var(--jp-card);
+  box-shadow: none;
+}
+.app .card::after, .app .kc::after, .app .jc::after { background: none; }
+.app .inputbox i { background: linear-gradient(110deg, var(--jp-soft), var(--jp-card)); }
+.app .inputbox:focus-within { border-color: var(--jp-accent); box-shadow: 0 4px 14px color-mix(in srgb, var(--jp-accent) 14%, transparent); }
+.app .filters :is(select, input):focus,
+.app .field :is(select, input):focus,
+.app textarea:focus { border-color: var(--jp-accent); background-color: var(--jp-soft); }
+.app .landing-hero { background: linear-gradient(135deg, var(--jp-card), var(--jp-soft)); color: var(--jp-ink); }
+.app .landing-hero :is(h1, p:not(.eyebrow), .sub) { color: var(--jp-ink); }
+.app .main .pipeline a { border-color: var(--jp-line); background: var(--jp-card); color: var(--jp-ink); }
+.app .jump { background: linear-gradient(var(--jp-bg) 75%, color-mix(in srgb, var(--jp-bg) 0%, transparent)); }
+.app .job-tile:hover { border-color: var(--jp-accent); box-shadow: var(--jp-shadow); }
+.app .job-tile.is-selected { border-color: var(--jp-accent); background: var(--jp-soft); box-shadow: inset 4px 0 var(--jp-accent), 0 6px 18px color-mix(in srgb, var(--jp-accent) 12%, transparent); }
+.app .logo-tile.lt-0 { background: #b65c12; }
+.app .logo-tile.lt-1 { background: #8d5a3b; }
+.app .logo-tile.lt-2 { background: #a3452a; }
+.app .logo-tile.lt-3 { background: #765344; }
+.app .logo-tile.lt-4 { background: #9b6b3e; }
+.app .logo-tile.lt-5 { background: #87505c; }
+.app .pl-step[data-stage="saved"] { --st: var(--jp-mute); }
+.app .pl-step[data-stage="interview"] { --st: var(--jp-accent); }
+.app .jp-theme-toggle { background: var(--jp-card); border-color: var(--jp-line); color: var(--jp-ink); }
+.jp-error-page, .offline-screen { background-color: var(--jp-bg); color: var(--jp-ink); }
+.offline-screen .err { border-color: var(--jp-line); background: var(--jp-card); color: var(--jp-ink); }

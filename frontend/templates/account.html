@@ -1,5 +1,6 @@
 {% from 'macros.html' import csrf,brand %}
 <!doctype html><html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<script nonce="{{ g.script_nonce }}">try{const t=localStorage.getItem("jp-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){if(!(e instanceof DOMException))throw e}</script>
 <title>{{ {'login':'Sign in','register':'Sign up','forgot':'Recover your account','reset':'Reset your password'}[mode] }} · Jobspresso</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static',filename='css/sc.css') }}"><link rel="stylesheet" href="{{ url_for('static',filename='css/app.css') }}">

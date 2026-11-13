@@ -201,10 +201,10 @@ class WebFlowTests(unittest.TestCase):
                 self.assertEqual(page.status_code, 200)
                 controls = re.findall(rb'<span class="inputbox[^\"]*">(<input[^>]+>)<span class="input-label">[^<]+</span>', page.data)
                 if path == '/jobs':
-                    controls += re.findall(rb'<select\b[^>]*name="min_score"[^>]*>', page.data)
-                    self.assertIn(b'<label>Minimum alignment score<select name="min_score">', page.data)
-                    for score in (0, 50, 60, 70, 80, 90):
-                        self.assertRegex(page.data, ('<option value="' + str(score) + '"').encode())
+                    controls += re.findall(rb'<(?:input|select)\b[^>]*name="(?:q|min_score|location)"[^>]*>', page.data)
+                    self.assertIn(b'<label for="jobs-score">Minimum score</label>', page.data)
+                    self.assertIn(b'type="range" name="min_score" min="0" max="100"', page.data)
+                    self.assertIn(b'<output for="jobs-score">0%</output>', page.data)
                 if path == '/settings':
                     controls += re.findall(rb'<input\b[^>]*id="(?:roles-input|stipend-input)"[^>]*>', page.data)
                 names = {match.group(1).decode() for control in controls
@@ -261,6 +261,31 @@ class WebFlowTests(unittest.TestCase):
         selected=store.filters({'location':'India'})
         rows,pages=store.matches(self.conn,1,selected,datetime.now(timezone.utc))
         self.assertEqual([row['job_id'] for row in rows],[1])
+
+    def test_jobs_groups_companies_with_bounded_roles_and_full_company_view(self):
+        from backend import store
+        self.seed_user()
+        for number in range(3, 30):
+            self.conn.execute("INSERT INTO jobs(id,company_id,external_id,title,url,location,raw_json,first_seen_at,last_seen_at) SELECT ?,1,?,title,url,location,raw_json,first_seen_at,last_seen_at FROM jobs WHERE id=1", (number, str(number)))
+            store_score(self.conn, number, 1, dict(fit_score=84, reasoning='Good fit', matched_skills=['Python'], missing_requirements=[]))
+        self.conn.commit()
+        filters = store.filters({})
+        filters['company_cards'] = True
+        rows, pages = store.matches(self.conn, 1, filters, datetime.now(timezone.utc))
+        self.assertEqual(len(rows), 6)
+        self.assertEqual(filters['company_count'], 2)
+        self.assertEqual(filters['opening_count'], 29)
+        self.assertEqual(rows[0]['company_openings'], 28)
+        self.assertEqual(pages, 1)
+        filters['company'] = 1
+        rows, pages = store.matches(self.conn, 1, filters, datetime.now(timezone.utc))
+        self.assertEqual(len(rows), 20)
+        self.assertEqual(pages, 2)
+        response = self.client.get('/jobs?min_score=85')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'1 companies, 1 matching openings', response.data)
+        self.assertIn(b'name="job_type"', response.data)
+        self.assertIn(b'value="85"', response.data)
 
     def test_location_suggestions_use_active_posting_terms_and_escape_markup(self):
         self.seed_user()
@@ -359,16 +384,16 @@ class WebFlowTests(unittest.TestCase):
                 self.assertNotIn("script-src 'self'", policy)
                 self.assertNotIn("script-src 'unsafe-inline'", policy)
                 if route == "/settings":
-                    self.assertEqual(response.data.count(b"<script"), 3)
+                    self.assertEqual(response.data.count(b"<script"), 4)
                     self.assertIn(b'src="/static/js/companies.js"', response.data)
                     self.assertIn(b'src="/static/js/preferences.js"', response.data)
                     self.assertIn(b'href="/static/css/preferences.css"', response.data)
                 elif route == "/jobs":
-                    self.assertEqual(response.data.count(b"<script"), 2)
+                    self.assertEqual(response.data.count(b"<script"), 3)
                     self.assertIn(b'src="/static/js/job-selection.js"', response.data)
                     self.assertIn("connect-src 'self'", policy)
                 else:
-                    self.assertEqual(response.data.count(b"<script"), 1)
+                    self.assertEqual(response.data.count(b"<script"), 2)
                 self.assertNotIn(b"Scheduled sending is not connected yet", response.data)
                 self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(before, self.database.read_bytes())
