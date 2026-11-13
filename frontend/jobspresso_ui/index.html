@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Jobspresso: jobs that fit your resume</title>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<script>try{var t=JSON.parse(localStorage.getItem("jp-theme"));if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&display=swap">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div id="boot" role="status" aria-live="polite"><svg class="bcup" viewBox="0 0 220 220" aria-hidden="true"><defs><clipPath id="bcp"><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45z"/></clipPath></defs><g clip-path="url(#bcp)"><rect x="50" y="80" width="110" height="95" fill="var(--soft)"/><rect class="bliq" x="50" y="80" width="110" height="95" fill="var(--accent)"/></g><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45zM36 192h138" fill="none" stroke="var(--text)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/><path d="M160 95h8a20 20 0 0 1 0 40h-12" fill="none" stroke="var(--text)" stroke-width="7" stroke-linecap="round"/><path class="bst" d="M90 62c-9-10 9-14 0-30" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/><path class="bst" style="animation-delay:.5s" d="M120 62c-9-10 9-14 0-30" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/></svg><p class="bw">Jobspresso</p><p class="sub" id="bmsg">Grinding the beans</p><div class="bbar"><i></i></div></div>
+<a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap">
+ <a class="logo" href="#home" aria-label="Jobspresso home">
+  <svg width="38" height="38" viewBox="0 0 64 64" fill="none" aria-hidden="true"><path d="M42 15c-3-4 3-5 0-10M50 15c-3-4 3-5 0-10" stroke="var(--accent)" stroke-width="3" stroke-linecap="round"/><path d="M28 22v16a12 12 0 0 1-12 12h-3M20 18h16" stroke="currentColor" stroke-width="9"/><path d="M40 26h14v9a12 12 0 0 1-12 12h-6M54 29h2a5 5 0 0 1 0 10h-2" stroke="currentColor" stroke-width="4.5" stroke-linecap="round"/></svg>
+  Jobspresso</a>
+ <nav aria-label="Main"><span class="ind" id="ind" aria-hidden="true"><b></b></span><a href="#home">Home</a><a href="#jobs">Jobs</a><a href="#resume">Resume</a><a href="#tracker">Tracker</a><a href="#account">Account</a></nav>
+ <div class="hauth" id="hauth"></div>
+ <button class="icon-btn" id="theme" type="button" aria-pressed="false" aria-label="Switch to dark mode">
+  <svg class="i-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg>
+  <svg class="i-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>
+ </button>
+</div></header>
+
+<main id="main" class="wrap">
+<section id="v-home">
+ <div class="card welcome">
+  <div><h1 id="hi">Welcome to Jobspresso</h1><p class="lead" id="sum"></p><a class="btn" href="#jobs">Browse jobs</a> <button class="btn ghost" id="homeSample" type="button" data-sample="1">Try a sample resume</button></div>
+  <figure>
+   <svg id="cup" viewBox="0 0 220 220" style="--lvl:0" role="img" aria-label="Coffee cup filled to your best score">
+    <defs><clipPath id="cp"><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45z"/></clipPath></defs>
+    <g clip-path="url(#cp)"><rect x="50" y="80" width="110" height="95" fill="var(--soft)"/><rect class="liq" x="50" y="80" width="110" height="95" fill="var(--accent)"/></g>
+    <path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45zM36 192h138" fill="none" stroke="var(--text)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+    <path d="M160 95h8a20 20 0 0 1 0 40h-12" fill="none" stroke="var(--text)" stroke-width="7" stroke-linecap="round"/>
+    <path d="M90 62c-9-10 9-14 0-30M120 62c-9-10 9-14 0-30" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/>
+   </svg>
+   <figcaption><b id="best">–</b>best score</figcaption>
+  </figure>
+ </div>
+ <div class="dash" id="stats"></div>
+ <div class="card" id="todoCard"><h2>Get started</h2><ul class="plain" id="todo"></ul></div>
+ <div class="cols">
+  <div class="card"><h2>Your top matches</h2><ul class="rows" id="top"></ul></div>
+  <div class="card"><h2>Your applications</h2><div id="funnel"></div></div>
+ </div>
+</section>
+
+<section id="v-jobs" hidden>
+ <h2 class="pg">Jobs</h2>
+ <div class="card banner" id="banner"><div><h2>See how well you fit every job</h2><p class="sub">Add your resume and Jobspresso scores each opening from 0 to 100.</p></div><div class="soon"><a class="btn" href="#resume">Add my resume</a><button class="btn ghost" type="button" data-sample="1">Try a sample resume</button></div></div>
+ <div class="tools" role="search">
+  <input class="in" id="q" type="search" placeholder="Search roles, companies or skills" aria-label="Search jobs">
+  <select class="in" id="ft" aria-label="Job type"><option value="">All types</option><option>Internship</option><option>Full-time</option></select>
+  <select class="in" id="floc" aria-label="Location"></select><select class="in" id="fsort" aria-label="Sort by"><option value="score">Best match first</option><option value="new">Newest first</option></select>
+  <label class="rng">Minimum score <input type="range" id="fs" min="0" max="100" step="5" value="0"><b id="fsv">0%</b></label>
+ </div>
+ <div class="tabs" id="tabs" role="group" aria-label="Fit level"></div><p class="sub" id="count" aria-live="polite" style="margin-top:6px"></p><div id="chipco" style="margin-top:8px"></div>
+ <div class="jobs" id="list"></div><div class="pager" id="pager" role="navigation" aria-label="Pagination"></div>
+</section>
+
+<section id="v-resume" hidden>
+ <h2 class="pg">Your resume</h2>
+ <p class="sub">Paste your resume or upload a text file. Every job score updates as you type.</p>
+ <div class="two">
+  <div class="card"><label class="lbl" for="resume">Resume text</label><textarea class="in" id="resume" placeholder="Paste your resume here"></textarea>
+   <div class="row" style="margin:12px 0 0;align-items:center"><label class="btn ghost" for="rfile">Upload .txt or .md</label><input id="rfile" class="sr" type="file" accept=".txt,.md,text/plain"><span class="sub" id="rstat"></span></div>
+   <p class="sub" style="margin-top:8px">PDF and Word files are not read yet, so paste the text for now.</p></div>
+  <div style="display:grid;gap:16px;align-content:start">
+   <div class="card"><h2>Found in your resume</h2><div class="chips" id="found"></div></div>
+   <div class="card"><h2>Skills worth adding</h2><ul class="plain" id="gaps"></ul></div>
+  </div>
+ </div>
+</section>
+
+<section id="v-tracker" hidden>
+ <h2 class="pg">Application tracker</h2>
+ <p class="sub" id="tcount"></p>
+ <div class="board" id="board"></div>
+</section>
+
+<section id="v-account" hidden>
+ <h2 class="pg">Account</h2>
+ <form id="acct">
+  <div class="card"><h2>Profile</h2><p class="sub" id="acctline"></p><button class="btn ghost" id="signout" type="button" hidden style="margin-top:8px">Sign out</button>
+   <div class="grid2"><div class="field"><label for="pname">Name</label><input class="in" id="pname" autocomplete="name"></div>
+   <div class="field"><label for="pmail">Email</label><input class="in" id="pmail" type="email" autocomplete="email"></div></div></div>
+  <div class="card"><h2>What you are looking for</h2><p class="sub">These count toward every job score. Separate roles with commas.</p>
+   <div class="field"><label for="proles">Roles</label><input class="in" id="proles" placeholder="Backend, data, machine learning"></div>
+   <div class="grid2"><div class="field"><label for="ploc">Preferred location</label><select class="in" id="ploc"></select></div>
+   <div class="field"><label for="pmin">Minimum pay</label><select class="in" id="pmin"><option value="0">Any pay</option><option value="20000">₹20,000 a month</option><option value="40000">₹40,000 a month</option><option value="60000">₹60,000 a month</option></select></div></div>
+   <div class="field"><span class="lbl">Job types</span><div class="checks"><label><input class="pt" type="checkbox" value="Internship">Internship</label><label><input class="pt" type="checkbox" value="Full-time">Full-time</label></div></div></div>
+  <div class="card"><h2>Email alerts</h2>
+   <div class="field"><div class="checks"><label><input id="palerts" type="checkbox">Email me new matching jobs</label></div></div>
+   <div class="grid2"><div class="field"><label for="pfreq">How often</label><select class="in" id="pfreq"><option>Daily</option><option>Weekly</option></select></div>
+   <div class="field"><label for="pthr">Only above this score</label><select class="in" id="pthr"><option value="60">60%</option><option value="70">70%</option><option value="80">80%</option><option value="90">90%</option></select></div></div></div>
+  <div><button class="btn" type="submit">Save changes</button></div>
+ </form>
+</section>
+<section id="v-signin" hidden></section><section id="v-signup" hidden></section>
+<section id="v-error" hidden><div class="err"><div id="eart"></div><p class="ecode" id="ecode"></p><h1 id="etitle"></h1><p class="lead" id="etext"></p><div class="soon" id="eacts" style="justify-content:center"></div><details id="edet" hidden><summary>Technical details</summary><pre id="emsg"></pre></details></div></section>
+<footer>Sample listings for demonstration. Apply links are placeholders. Your resume and settings stay in this browser.<br>Preview screens: <a href="#loading">loading</a>, <a href="#not-found">404</a>, <a href="#error">error</a>, <a href="#offline">offline</a>.</footer>
+</main>
+<div id='pour' aria-hidden='true'></div><dialog id="dlg" aria-labelledby="dt"><div class="dlg" id="dbody"></div></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

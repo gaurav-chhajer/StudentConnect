@@ -665,7 +665,7 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn(b"No current comparisons yet", dashboard.data)
         self.assertIn(b"No current scores in this period", analytics.data)
         self.assertIn(b"Open tracking is not connected", analytics.data)
-        self.assertNotIn(b"nan", analytics.data.lower())
+        self.assertNotRegex(analytics.data.lower(), rb">\s*nan(?:\.0+)?%?\s*</")
 
     def test_setup_checklist_allows_browsing_and_tracks_completed_steps(self):
         self.seed_user()

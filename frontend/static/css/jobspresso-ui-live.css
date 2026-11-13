@@ -1,0 +1,98 @@
+﻿/* Apply the latest standalone Jobspresso visual system to live Flask screens. */
+.app {
+  --jp-bg: #fff9f3;
+  --jp-card: #fffdf9;
+  --jp-ink: #321d17;
+  --jp-mute: #786456;
+  --jp-line: #e8d9cd;
+  --jp-soft: #f4e7d9;
+  --jp-accent: #b65c12;
+  --jp-accent-dark: #8d430d;
+  --jp-pop: #d97934;
+  --bg: var(--jp-bg);
+  --card: var(--jp-card);
+  --ink: var(--jp-ink);
+  --mute: var(--jp-mute);
+  --line: var(--jp-line);
+  --acc: var(--jp-accent);
+  --accbg: var(--jp-soft);
+  background: var(--jp-bg);
+  color: var(--text);
+  font-family: var(--f);
+}
+:root[data-theme="dark"] .app {
+  --jp-bg: #321d17;
+  --jp-card: #482b23;
+  --jp-ink: #fff8f0;
+  --jp-mute: #cdb6a7;
+  --jp-line: #64473b;
+  --jp-soft: #60351d;
+  --jp-accent: #ff982f;
+  --jp-accent-dark: #ffb45d;
+  --jp-pop: #ff982f;
+}
+.app .main.jp-shell {
+  width: min(100% - 40px, 1120px);
+  min-height: calc(100vh - 72px);
+  margin: 0 auto;
+  padding: 28px 0 48px;
+  gap: 18px;
+}
+.app .sub { color: var(--muted); }
+.app .card,
+.app .jp-panel,
+.app .jp-stat,
+.app .job-tile,
+.app .col,
+.app .kc {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+  box-shadow: none;
+}
+.app .btn { font-family: var(--f); }
+.app :is(input, textarea, select) {
+  background-color: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+  font-family: var(--f);
+}
+.app .jp-home-hero { background: var(--surface); color: var(--text); }
+.app .jp-home-hero h2,
+.app .jp-panel-head h2,
+.app .jp-match-copy strong { color: var(--text); }
+.app .jp-welcome-head h1 { color: var(--text); }
+.app .jp-nav a[aria-current="page"] { color: var(--text); }
+.app .jp-nav a:hover { background: var(--soft); color: var(--text); }
+.app .notice,
+.app .jp-setup,
+.app .jd-alert { background: var(--soft); color: var(--text); border-color: var(--line); }
+.app .pipeline { background: var(--surface); border-color: var(--line); }
+.app .col { background: var(--soft); }
+.app .kc { border: 1px solid var(--line); border-radius: 14px; }
+.app .detail-card { background: var(--surface); }
+.app footer { color: var(--muted); }
+@media (max-width: 720px) {
+  .app .main.jp-shell { width: calc(100% - 28px); padding-top: 20px; }
+  .app .jp-nav { position: static; }
+}
+.app .jp-auth-layout { background: var(--surface); border-color: var(--line); }
+.app .jp-auth-aside { background: #321d17; }
+:root[data-theme="dark"] .app .jp-auth-aside { background: #60351d; }
+.app .jp-auth-panel,
+.app .jp-auth-panel h2,
+.app .jp-auth-field { color: var(--text); }
+.app .jp-auth-intro,
+.app .jp-auth-switch,
+.app .jp-auth-help { color: var(--muted); }
+.app .jp-auth-input { background: var(--surface); color: var(--text); border-color: var(--line); font-family: var(--f); }
+.app .jp-auth-submit { background: var(--accent); border-color: var(--accent); color: var(--on); font-family: var(--f); }
+.app .jp-auth-alert { background: var(--soft); color: var(--text); border-color: var(--line); }
+.app .jp-nav { margin-left: auto; }
+.app .top2 h1 { color: var(--text); }
+.app .resume-layout, .app .split, .app .kan { min-width: 0; }
+.app .resume-side > .card, .app .detail-card, .app .col { min-width: 0; }
+@media (max-width: 760px) {
+  .app .jp-auth-layout { grid-template-columns: 1fr; }
+  .app .jp-auth-aside { display: none; }
+}

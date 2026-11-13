@@ -1,5 +1,5 @@
-{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner with context %}{% block title %}Settings · Jobspresso{% endblock %}
-{% block content %}<div class="top2"><div><h1>Settings</h1><p class="sub">Your profile, job preferences, and company choices.</p></div><button class="btn p" type="submit" form="settings-form">{{ 'Save changes' if user else 'Create profile' }}</button></div>
+{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner with context %}{% block title %}Account · Jobspresso{% endblock %}
+{% block content %}<div class="top2"><div><h1>Account</h1><p class="sub">Manage your profile, job preferences, company choices, and email alerts.</p></div><button class="btn p" type="submit" form="settings-form">{{ 'Save changes' if user else 'Create profile' }}</button></div>
 {% if setup_pending %}{{ page_banner('Your preferences','Finish setting up your profile','Upload your resume to start matching. Your verified email is ready for alerts. You can choose target companies later in Settings.',url_for('dashboard'),'Back to dashboard',url_for('resume'),'Upload resume','settings') }}{% endif %}
 <nav class="jump" aria-label="Settings sections"><a href="#profile">Profile</a>{% if not setup_pending or settings.subscriptions_configured %}<a href="#companies">Companies</a>{% endif %}<a href="#email">Email alerts</a><a href="#preferences">Job preferences</a></nav>
 <form method="post" class="page-form" id="settings-form">{{ csrf() }}

@@ -11,6 +11,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/tiles.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/pages.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui-live.css') }}">
 <script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>{% block extra_head %}{% endblock %}</head>
 <body class="{% block body_class %}{% endblock %}"><a class="skip-link" href="#main">Skip to content</a><div class="app">
 <header class="jp-header"><div class="jp-topbar">{{ brand(url_for('dashboard')) }}

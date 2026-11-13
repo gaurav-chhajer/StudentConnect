@@ -46,3 +46,30 @@ logs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local-only resume, review, and scoring validation data
+/Gaurav_Chhajer_Resume.pdf
+/audit-20261113/
+/audit-test-run.txt
+/backend/scoring_tests/
+/evaluation-independent-reviewers-30/
+/evaluation-reviewed-30-fixed/
+/monotonicity-replay.json
+/review-pairs-30-ready.zip
+/review-pairs-30-ready/
+/review-pairs-30/
+/scoring-test-harness/
+/test-results-*/
+/validation-ats-captures-20261113/
+/validation-evidence/
+/validation-google/
+/validation-ranking-audit/
+/validation-uploaded-resume/
+/not needed/
+
+# Standalone visual prototypes; the authenticated app uses Flask templates/static
+/frontend/assets/
+/frontend/css/
+/frontend/index.html
+/frontend/jobspresso/
+/frontend/js/

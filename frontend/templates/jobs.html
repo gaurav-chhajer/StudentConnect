@@ -1,7 +1,7 @@
 {% extends 'base.html' %}{% from 'macros.html' import csrf,badge,filter_form,pagination,page_banner,company_heading,job_tile,score_ring,fit_label,co_logo with context %}
 {% block extra_head %}<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/job-selection.js') }}"></script>{% endblock %}
-{% block title %}Job matches · Jobspresso{% endblock %}{% block content %}
-<div class="top2"><div><h1>Resume-to-JD comparisons</h1><p class="sub">Openings are sorted by estimated resume-to-JD alignment. Select one to review the evidence, check uncertain requirements, and decide what to pursue.</p></div><div class="actions"><a class="btn" href="{{ url_for('settings_page') }}#companies">Choose companies</a><a class="btn p" href="#save-search">Save search</a></div></div>
+{% block title %}Jobs · Jobspresso{% endblock %}{% block content %}
+<div class="top2"><div><h1>Jobs</h1><p class="sub">Compare your resume with each posting. Review the evidence and requirements before deciding what to pursue.</p></div><div class="actions"><a class="btn" href="{{ url_for('settings_page') }}#companies">Choose companies</a><a class="btn p" href="#save-search">Save search</a></div></div>
 {% if user %}
 {# The marketing banner only appears while setup is incomplete; once set up, matches come first. #}
 {% if setup_pending %}{{ page_banner('Job matches','Find the roles that fit you','Filter your saved matches by company, location, job type, and score. Review the evidence before applying.',url_for('jobs') ~ '#match-list','Review matches',url_for('resume'),'Improve my resume','matches') }}{% endif %}
