@@ -75,6 +75,9 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
         self.assertIn(b'rel="icon" type="image/svg+xml" href="/static/favicon.svg"', page.data)
         self.assertIn(b'href="/static/css/jobspresso.css"', page.data)
+        self.assertIn(b'class="primary-nav" id="primary-nav"', page.data)
+        self.assertIn(b'id="pour"', page.data)
+        self.assertIn(b'id="offline-screen"', page.data)
         self.assertIn(b'id="page-loader"', page.data)
         response = self.client.get('/static/favicon.svg')
         self.addCleanup(response.close)
@@ -309,17 +312,17 @@ class WebFlowTests(unittest.TestCase):
         for route in routes:
             response=self.client.get(route)
             self.assertEqual(response.status_code,200)
-            navigation = re.search(rb'<nav class="nav[^"]*".*?</nav>', response.data, re.S).group(0)
+            navigation = re.search(rb'<nav class="primary-nav".*?</nav>', response.data, re.S).group(0)
             selected = re.findall(rb'<a\b[^>]*aria-current="page"[^>]*>', navigation)
             self.assertEqual(len(selected), 1)
             self.assertIn(b'href=', selected[0])
             self.assertNotIn(b'aria-disabled="true"', selected[0])
-            self.assertIn(b'class="nav jp-nav"', navigation)
-            self.assertIn(b'class="jp-header"', response.data)
+            self.assertIn(b'class="primary-nav"', navigation)
+            self.assertIn(b'class="site-header"', response.data)
             self.assertIn(b'id="theme"', response.data)
             for target in routes:
                 if target != route:
-                    self.assertIn(('href="'+target+'"').encode(),navigation)
+                    self.assertIn(('href="'+target+'"').encode(),response.data)
 
     def test_refined_screens_preserve_local_navigation_and_read_only_rendering(self):
         self.seed_user()
@@ -331,9 +334,9 @@ class WebFlowTests(unittest.TestCase):
                 self.assertIn(b'href="/static/css/theme.css"', response.data)
                 self.assertIn(b'href="/static/css/wow.css"', response.data)
                 if route == '/':
-                    self.assertIn(b'class="jp-home-hero"', response.data)
-                    self.assertIn(b'class="jp-stat-grid"', response.data)
-                    self.assertIn(b'class="jp-home-panels"', response.data)
+                    self.assertIn(b'class="card welcome"', response.data)
+                    self.assertIn(b'class="dash"', response.data)
+                    self.assertIn(b'class="cols"', response.data)
                     self.assertNotIn(b'<aside class="side"', response.data)
                 else:
                     self.assertNotIn(b'class="hero-banner"', response.data)
@@ -398,9 +401,9 @@ class WebFlowTests(unittest.TestCase):
                 self.assertEqual(page.status_code, 200)
                 self.assertIn(b'href="/static/css/jobspresso.css"', page.data)
                 self.assertIn(b'id="page-loader"', page.data)
-                self.assertIn(b'class="jp-topbar"', page.data)
-                self.assertIn(b'class="jp-auth-layout"', page.data)
-                self.assertIn(b'class="jp-auth-panel"', page.data)
+                self.assertIn(b'class="wrap site-header-inner jp-topbar"', page.data)
+                self.assertIn(b'class="auth jp-auth-layout"', page.data)
+                self.assertIn(b'class="fp jp-auth-panel"', page.data)
                 if b'name="password"' in page.data:
                     self.assertIn(b'data-password-toggle', page.data)
                 self.assertNotIn(b'<aside class="side', page.data)
@@ -415,6 +418,12 @@ class WebFlowTests(unittest.TestCase):
         script = self.client.get('/static/js/jobspresso.js')
         self.addCleanup(script.close)
         self.assertEqual(script.status_code, 200)
+        self.assertIn(b'Dark roast, coming up', script.data)
+        self.assertIn(b'prefers-reduced-motion: reduce', script.data)
+        self.assertIn(b'window.addEventListener("offline"', script.data)
+        styles = self.client.get('/static/css/jobspresso-ui.css')
+        self.addCleanup(styles.close)
+        self.assertIn(b'#pour.go .ly', styles.data)
         self.assertNotIn("script-src", script.headers['Content-Security-Policy'])
 
     def test_banner_counts_use_saved_data_and_do_not_include_mockup_claims(self):
@@ -446,7 +455,7 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
                 if route == '/':
-                    self.assertIn(b'class="jp-home-hero"', page.data)
+                    self.assertIn(b'class="card welcome"', page.data)
                 else:
                     self.assertNotIn(b'class="hero-banner"', page.data)
                 self.assertNotIn(b'class="spark"', page.data)
@@ -465,11 +474,13 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
                 if route == '/':
-                    self.assertIn(b'class="jp-home-hero"', page.data)
+                    self.assertIn(b'class="card welcome"', page.data)
+                    self.assertIn(b'Get started', page.data)
+                    self.assertIn(b'Add your resume to see your scores', page.data)
                 else:
                     self.assertIn(b'class="hero-banner"', page.data)
-                self.assertIn(b'Set up your job matches', page.data)
-                self.assertIn(b'href="/resume#resume-editor">Upload resume', page.data)
+                    self.assertIn(b'Set up your job matches', page.data)
+                    self.assertIn(b'href="/resume#resume-editor">Upload resume', page.data)
 
     def test_company_tiles_escape_untrusted_titles_and_company_names(self):
         self.seed_user()
@@ -679,7 +690,10 @@ class WebFlowTests(unittest.TestCase):
                 page = self.client.get(route)
                 self.assertEqual(page.status_code, 200)
                 self.assertIn(b'id="setup-checklist"', page.data)
-                self.assertIn(b'href="/resume#resume-editor">Upload resume</a>', page.data)
+                if route == '/':
+                    self.assertIn(b'href="/resume#resume-editor">Add your resume to see your scores</a>', page.data)
+                else:
+                    self.assertIn(b'href="/resume#resume-editor">Upload resume</a>', page.data)
                 self.assertIn(b'href="/settings#companies">Select companies</a>', page.data)
                 self.assertIn(b'href="/settings#profile">Review email</a>', page.data)
                 self.assertIn(b'Verified email saved', page.data)

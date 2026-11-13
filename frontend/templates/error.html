@@ -1,20 +1,17 @@
+{% from 'macros.html' import brand %}
 <!doctype html>
 <html lang="en" data-theme="dark">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark">
 <title>{{ code }} · Jobspresso</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui-live.css') }}">
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>
 </head>
 <body class="jp-error-page">
-<main class="jp-error" aria-labelledby="error-title">
-<a class="jp-error-brand" href="/">Jobspresso</a>
-<span class="jp-error-code">{{ code }}</span>
-<h1 id="error-title">{{ title }}</h1>
-<p>{{ message }}</p>
-<div class="jp-error-actions"><a class="jp-error-primary" href="{{ home_url }}">Back to Jobspresso</a><a href="{{ url_for('accounts.login') }}">Sign in</a></div>
-</main>
-</body>
-</html>
+<a class="skip-link" href="#error-main">Skip to content</a>
+<div id="boot" role="status" aria-live="polite"><svg class="bcup" viewBox="0 0 220 220" aria-hidden="true"><defs><clipPath id="boot-clip"><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45z"/></clipPath></defs><g clip-path="url(#boot-clip)"><rect x="50" y="80" width="110" height="95" fill="var(--soft)"/><rect class="bliq" x="50" y="80" width="110" height="95" fill="var(--accent)"/></g><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45zM36 192h138" fill="none" stroke="var(--text)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/><path d="M160 95h8a20 20 0 0 1 0 40h-12" fill="none" stroke="var(--text)" stroke-width="7" stroke-linecap="round"/><path class="bst" d="M90 62c-9-10 9-14 0-30M120 62c-9-10 9-14 0-30" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/></svg><p class="bw">Jobspresso</p><p class="sub" id="bmsg">Grinding the beans</p><div class="bbar"><i></i></div></div>
+<header class="site-header"><div class="wrap site-header-inner">{{ brand(home_url) }}<a class="btn ghost" href="{{ url_for('accounts.login') }}">Sign in</a><button class="icon-btn jp-theme-toggle" id="theme" type="button" aria-pressed="false" aria-label="Switch color theme"><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg></button></div></header>
+<main class="wrap" id="error-main"><section class="err" aria-labelledby="error-title"><span class="ecode">Error {{ code }}</span><div class="n404" aria-hidden="true">{% if code == '404' %}<span>4</span>{% elif code == '500' %}<span>5</span>{% else %}<span class="error-numeric">{{ code }}</span>{% endif %}<svg viewBox="0 0 120 120" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M24 44h60v26a28 28 0 0 1-28 28h-4a28 28 0 0 1-28-28z" stroke="var(--text)" stroke-width="7"/><path d="M84 54h6a13 13 0 0 1 0 26h-8M18 108h78" stroke="var(--text)" stroke-width="7"/><path d="M46 32c-5-6 5-9 0-18M64 32c-5-6 5-9 0-18" stroke="var(--accent)" stroke-width="5" stroke-dasharray="1 9"/></svg>{% if code == '404' %}<span>4</span>{% elif code == '500' %}<span>0</span>{% endif %}</div><h1 id="error-title">{{ title }}</h1><p class="lead">{{ message }}</p><div class="soon"><a class="btn" href="{{ home_url }}">Back to Jobspresso</a><a class="btn ghost" href="{{ url_for('accounts.login') }}">Sign in</a></div></section></main>
+<section class="offline-screen" id="offline-screen" role="alert" hidden><div class="err"><span class="ecode">Connection lost</span><h1>You are offline</h1><p class="lead">Check your internet connection, then try again.</p><button class="btn" type="button" data-offline-retry>Try again</button></div></section><div id="pour" aria-hidden="true"></div>
+</body></html>

@@ -1,5 +1,5 @@
-{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner with context %}{% block title %}My resume · Jobspresso{% endblock %}
-{% block content %}<div class="top2"><div><h1>My resume</h1><p class="sub">Keep the text used for matching up to date.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">View matches</a><a class="btn p" href="#resume-editor">{{ 'Upload new version' if has_resume else 'Upload resume' }}</a></div></div>
+{% extends 'base.html' %}{% from 'macros.html' import csrf,page_banner with context %}{% block title %}Your resume · Jobspresso{% endblock %}
+{% block content %}<div class="top2"><div><h1>Your resume</h1><p class="sub">Keep the text used for matching up to date.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">View matches</a><a class="btn p" href="#resume-editor">{{ 'Upload new version' if has_resume else 'Upload resume' }}</a></div></div>
 {% if user %}
 {% if setup_pending %}{{ page_banner('Your resume','Show what you bring to the role','Keep your resume current, review the extracted text, and explore the skills and gaps in your saved matches.','#resume-editor','Update resume',url_for('jobs'),'View job matches','resume') }}{% endif %}
 <div class="resume-layout"><section class="card" id="resume-editor"><div class="hd"><div><h2>Current resume</h2><p class="sub">Updated: {{ resume_updated_display }}</p></div>{% if has_resume %}<span class="tag ok">Resume saved</span>{% else %}<span class="tag gap">No resume yet</span>{% endif %}</div>

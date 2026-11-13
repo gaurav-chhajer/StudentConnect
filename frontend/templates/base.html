@@ -1,6 +1,9 @@
 {% from 'macros.html' import brand %}
 <!doctype html>
-<html lang="en" data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>{% block title %}Jobspresso{% endblock %}</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/sc.css') }}">
@@ -13,41 +16,43 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui-live.css') }}">
-<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>{% block extra_head %}{% endblock %}</head>
-<body class="{% block body_class %}{% endblock %}"><a class="skip-link" href="#main">Skip to content</a><div class="app">
-<header class="jp-header"><div class="jp-topbar">{{ brand(url_for('dashboard')) }}
-{% if user %}<nav class="nav jp-nav" aria-label="Main navigation">
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>
+{% block extra_head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}" data-page="{{ active or '' }}">
+<a class="skip-link" href="#main">Skip to content</a>
+<div id="boot" role="status" aria-live="polite"><svg class="bcup" viewBox="0 0 220 220" aria-hidden="true"><defs><clipPath id="boot-clip"><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45z"/></clipPath></defs><g clip-path="url(#boot-clip)"><rect x="50" y="80" width="110" height="95" fill="var(--soft)"/><rect class="bliq" x="50" y="80" width="110" height="95" fill="var(--accent)"/></g><path d="M50 80h110v50a45 45 0 0 1-45 45h-20a45 45 0 0 1-45-45zM36 192h138" fill="none" stroke="var(--text)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/><path d="M160 95h8a20 20 0 0 1 0 40h-12" fill="none" stroke="var(--text)" stroke-width="7" stroke-linecap="round"/><path class="bst" d="M90 62c-9-10 9-14 0-30M120 62c-9-10 9-14 0-30" fill="none" stroke="var(--accent)" stroke-width="6" stroke-linecap="round"/></svg><p class="bw">Jobspresso</p><p class="sub" id="bmsg">Grinding the beans</p><div class="bbar"><i></i></div></div>
+<div class="app">
+<header class="site-header"><div class="wrap site-header-inner jp-topbar">
+{{ brand(url_for('dashboard')) }}
+<nav class="primary-nav" id="primary-nav" aria-label="Main navigation"><span class="ind" id="ind" aria-hidden="true"><b></b></span>
 <a href="{{ url_for('dashboard') }}" {% if active == 'dashboard' %}aria-current="page"{% endif %}>Home</a>
 <a href="{{ url_for('jobs') }}" {% if active == 'jobs' %}aria-current="page"{% endif %}>Jobs</a>
 <a href="{{ url_for('resume') }}" {% if active == 'resume' %}aria-current="page"{% endif %}>Resume</a>
 <a href="{{ url_for('applications') }}" {% if active == 'applications' %}aria-current="page"{% endif %}>Tracker</a>
-<a href="{{ url_for('settings_page') }}" {% if active == 'settings_page' %}aria-current="page"{% endif %}>Account</a>
-<details class="jp-more"><summary aria-label="More navigation"><span aria-hidden="true">···</span></summary><div class="jp-more-menu">
-<a href="{{ url_for('settings_page') }}#companies">Target companies</a><a href="{{ url_for('settings_page') }}#email">Email alerts</a><a href="{{ url_for('analytics') }}" {% if active == 'analytics' %}aria-current="page"{% endif %}>Analytics</a><a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}aria-current="page"{% endif %}>Give feedback</a>
-{% if is_account_admin %}<hr><a href="{{ url_for('admin_users_page') }}" {% if active == 'admin_users_page' %}aria-current="page"{% endif %}>Users</a><a href="{{ url_for('workflow_monitor_page') }}" {% if active == 'workflow_monitor_page' %}aria-current="page"{% endif %}>Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">Invite testers</a><a href="{{ url_for('feedback.review') }}" {% if active == 'feedback.review' %}aria-current="page"{% endif %}>Tester feedback</a>{% endif %}
+<a href="{{ url_for('settings_page') }}" {% if active in ('settings_page', 'analytics', 'feedback.submit', 'admin_users_page', 'workflow_monitor_page') %}aria-current="page"{% endif %}>Account</a>
+</nav>
+<div class="hauth">
+{% if user %}<details class="jp-more"><summary class="btn ghost" aria-label="More options">More</summary><div class="jp-more-menu">
+<a href="{{ url_for('settings_page') }}#companies">Target companies</a><a href="{{ url_for('settings_page') }}#email">Email alerts</a><a href="{{ url_for('analytics') }}" {% if active == 'analytics' %}aria-current="page"{% endif %}>Analytics</a><a href="{{ url_for('feedback.submit') }}">Give feedback</a>
+{% if is_account_admin %}<hr><a href="{{ url_for('admin_users_page') }}">Users</a><a href="{{ url_for('workflow_monitor_page') }}">Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">Invite testers</a><a href="{{ url_for('feedback.review') }}">Tester feedback</a>{% endif %}
 <hr><form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Sign out</button></form>
-</div></details></nav>
-{% else %}<nav class="nav jp-nav" aria-label="Main navigation"><a href="{{ url_for('dashboard') }}" {% if active == 'dashboard' %}aria-current="page"{% endif %}>Home</a><a href="{{ url_for('accounts.login') }}" {% if active == 'accounts.login' %}aria-current="page"{% endif %}>Sign in</a><a href="{{ url_for('accounts.register') }}" {% if active == 'accounts.register' %}aria-current="page"{% endif %}>Sign up</a><a href="{{ url_for('feedback.submit') }}" {% if active == 'feedback.submit' %}aria-current="page"{% endif %}>Feedback</a></nav>{% endif %}
-<button class="icon-btn jp-theme-toggle" id="theme" type="button" aria-pressed="false" aria-label="Switch to dark mode"><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg></button>
-</div></header><main class="main jp-shell" id="main" tabindex="-1">
+</div></details>
+{% else %}<a class="btn ghost si" href="{{ url_for('accounts.login') }}">Sign in</a><a class="btn su" href="{{ url_for('accounts.register') }}">Sign up</a>{% endif %}
+</div>
+<button class="icon-btn jp-theme-toggle" id="theme" type="button" aria-pressed="false" aria-label="Switch color theme"><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg></button>
+</div></header>
+<main class="main wrap jp-shell" id="main" tabindex="-1">
 {% for notice in get_flashed_messages() %}<p class="notice" role="status">{{ notice }}</p>{% endfor %}
 {% if message and active != 'feedback.submit' %}<p class="notice" role="status">{{ message }}</p>{% endif %}
-{% if setup_pending and active != 'dashboard' %}<section class="card jp-setup" aria-labelledby="setup-title" id="setup-checklist">
-<h2 id="setup-title">Finish setting up your matches</h2><p class="sub">Upload your resume, review your email, and select companies to receive relevant matches. You can keep browsing while you complete setup.</p>
-{% if not has_resume %}<p class="sub">Add a resume to start matching.</p>{% endif %}
-<ol>
-<li>{% if has_resume %}<strong>Resume added</strong>{% else %}<a href="{{ url_for('resume') }}#resume-editor">Upload resume</a>{% endif %}</li>
-<li><a href="{{ url_for('settings_page') }}#profile">Review email</a> {% if has_email %}<span class="tag ok">Verified email saved</span>{% endif %}</li>
-<li>{% if has_companies %}<strong>Companies selected</strong>{% else %}<a href="{{ url_for('settings_page') }}#companies">Select companies</a>{% endif %}</li>
-</ol></section>{% endif %}
-{% if matching_status and not setup_pending %}<p class="notice" role="status">
-{% if not user.resume_text|trim %}<strong>Matching pending.</strong> Add a resume to start matching.
-{% elif matching_status.status == 'pending' %}<strong>Matching pending.</strong> Your current openings will be checked automatically. Refresh this page to see updated results.
-{% elif matching_status.status == 'running' %}<strong>Matching in progress.</strong> Refresh this page to see updated results.
-{% elif matching_status.status == 'failed' %}<strong>Matching needs another attempt.</strong> Some openings could not be checked. Saved matches remain available; matching will retry automatically.
-{% else %}<strong>Matching complete.</strong> All currently eligible openings have been checked. Email delivery follows your saved schedule.
-{% endif %}</p>{% endif %}
+{% if setup_pending and active != 'dashboard' %}<section class="card jp-setup" aria-labelledby="setup-title" id="setup-checklist"><h2 id="setup-title">Finish setting up your matches</h2><p class="sub">Upload your resume, review your email, and select companies to receive relevant matches. You can keep browsing while you complete setup.</p>{% if not has_resume %}<p class="sub">Add a resume to start matching.</p>{% endif %}<ol><li>{% if has_resume %}<strong>Resume added</strong>{% else %}<a href="{{ url_for('resume') }}#resume-editor">Upload resume</a>{% endif %}</li><li><a href="{{ url_for('settings_page') }}#profile">Review email</a> {% if has_email %}<span class="tag ok">Verified email saved</span>{% endif %}</li><li>{% if has_companies %}<strong>Companies selected</strong>{% else %}<a href="{{ url_for('settings_page') }}#companies">Select companies</a>{% endif %}</li></ol></section>{% endif %}
+{% if matching_status and not setup_pending %}<p class="notice" role="status">{% if not user.resume_text|trim %}<strong>Matching pending.</strong> Add a resume to start matching.{% elif matching_status.status == 'pending' %}<strong>Matching pending.</strong> Your current openings will be checked automatically. Refresh this page to see updated results.{% elif matching_status.status == 'running' %}<strong>Matching in progress.</strong> Refresh this page to see updated results.{% elif matching_status.status == 'failed' %}<strong>Matching needs another attempt.</strong> Some openings could not be checked. Saved matches remain available; matching will retry automatically.{% else %}<strong>Matching complete.</strong> All currently eligible openings have been checked. Email delivery follows your saved schedule.{% endif %}</p>{% endif %}
 {% if not user and active not in ('dashboard', 'settings_page', 'feedback.submit', 'feedback.review') %}<p><a class="btn p" href="{{ url_for('accounts.register') }}">Create your account</a></p>{% endif %}
 {% block content %}{% endblock %}
-{% if active not in ('feedback.submit', 'feedback.review') and (user or active != 'dashboard') %}<p class="sub">Scores estimate how closely your resume text aligns with a job description. They are not interview odds or hiring decisions; check the evidence and the original posting.</p>{% endif %}
-</main></div><div class="page-loader" id="page-loader" role="status" aria-live="polite" aria-hidden="true"><span class="loader-cup" aria-hidden="true"></span><span>Brewing your workspace…</span></div></body></html>
+{% if active not in ('feedback.submit', 'feedback.review') and (user or active != 'dashboard') %}<p class="sub score-disclaimer">Scores estimate how closely your resume text aligns with a job description. They are not interview odds or hiring decisions; check the evidence and the original posting.</p>{% endif %}
+</main>
+{% if active not in ('feedback.submit', 'feedback.review') %}<footer class="wrap app-footer">Jobspresso helps you compare your resume with available job descriptions. Review each posting and score evidence before applying.</footer>{% endif %}
+</div>
+<div class="page-loader" id="page-loader" role="status" aria-live="polite" aria-hidden="true"><span class="loader-cup" aria-hidden="true"></span><span>Brewing your workspace…</span></div>
+<section class="offline-screen" id="offline-screen" role="alert" hidden><div class="err"><span class="ecode">Connection lost</span><h1>You are offline</h1><p class="lead">Check your internet connection, then try again.</p><button class="btn" type="button" data-offline-retry>Try again</button></div></section><div id="pour" aria-hidden="true"></div>
+</body></html>
