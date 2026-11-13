@@ -104,10 +104,13 @@ class SimilaritySelectionTests(unittest.TestCase):
         client, scorer = MagicMock(), MagicMock()
         with patch.object(local_embeddings, "LocalScorer", return_value=scorer), \
                 patch.object(runner, "_fetch_and_score", return_value=0) as evaluate, \
+                patch.object(runner, "score_pending_deterministic", return_value=0) as deterministic, \
                 patch.object(runner, "GroqKeyPool") as groq, \
-                patch.object(runner.pipeline, "GROQ_API_KEY", ""):
+                patch.object(runner.pipeline, "GROQ_API_KEY", ""), \
+                patch.object(runner.time, "monotonic", return_value=0):
             self.assertEqual(runner.fetch_and_score(client, 1000, provider="deterministic"), 0)
         evaluate.assert_called_once()
+        deterministic.assert_called_once_with(client, 1000, scorer)
         groq.assert_not_called()
         scorer.close.assert_called_once()
 

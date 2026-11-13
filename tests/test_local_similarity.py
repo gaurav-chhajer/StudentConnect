@@ -2,12 +2,14 @@
 
 import json
 import math
+import sys
 import re
 import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from backend import local_embeddings, similarity
 
@@ -112,9 +114,11 @@ class SimilarityTests(unittest.TestCase):
             model_dir = Path(directory)
             (model_dir / "model.safetensors").write_bytes(b"local-placeholder")
             loaded = object()
+            constructor = Mock(return_value=loaded)
             with patch.object(local_embeddings, "MODEL_DIR", model_dir), \
                     patch.object(local_embeddings, "_MODEL", None), \
-                    patch("sentence_transformers.SentenceTransformer", return_value=loaded) as constructor:
+                    patch.dict(sys.modules, {"sentence_transformers":
+                                              SimpleNamespace(SentenceTransformer=constructor)}):
                 self.assertIs(local_embeddings.load_model(), loaded)
                 self.assertIs(local_embeddings.load_model(), loaded)
                 constructor.assert_called_once()
