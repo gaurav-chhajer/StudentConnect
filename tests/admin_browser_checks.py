@@ -14,6 +14,91 @@ from tests import test_admin_integration
 
 class AdminBrowserChecks(test_admin_integration.AdminIntegrationTests):
     # Only browser methods are run by load_tests below; fixture setup is reused.
+    def coffee_palette(self):
+        root=Path(__file__).resolve().parents[1]
+        output=root/'tests/artifacts/coffee-palette'
+        output.mkdir(parents=True,exist_ok=True)
+        scan='''() => {
+            const failures=[];
+            const properties=['color','backgroundColor','backgroundImage','borderTopColor',
+                'borderRightColor','borderBottomColor','borderLeftColor','outlineColor',
+                'boxShadow','textShadow','fill','stroke','accentColor'];
+            for (const el of document.querySelectorAll('body *')) {
+                if (!el.getClientRects().length || getComputedStyle(el).visibility==='hidden') continue;
+                for (const pseudo of [null,'::before','::after',
+                    ...(el.matches('input[type=file]') ? ['::file-selector-button'] : [])]) {
+                    const style=getComputedStyle(el,pseudo);
+                    if (pseudo && pseudo!=='::file-selector-button' && ['none','normal'].includes(style.content)) continue;
+                    for (const property of properties) {
+                        for (const match of style[property].matchAll(/rgba?\\((\\d+), (\\d+), (\\d+)(?:, ([\\d.]+))?\\)/g)) {
+                            if (match[4]==='0') continue;
+                            const [r,g,b]=match.slice(1,4).map(Number);
+                            const max=Math.max(r,g,b),min=Math.min(r,g,b),delta=max-min;
+                            if (!delta || delta/max<=.035) continue;
+                            let hue=max===r ? (g-b)/delta : max===g ? (b-r)/delta+2 : (r-g)/delta+4;
+                            hue=(hue*60+360)%360;
+                            if (hue>=175 && hue<=285) failures.push(`${el.tagName}.${el.className} ${pseudo||''} ${property}: ${match[0]}`);
+                        }
+                    }
+                }
+            }
+            return [...new Set(failures)];
+        }'''
+        with patch.dict(os.environ,{'PLAYWRIGHT_BROWSERS_PATH':str(root/'data/browser-binaries')}), sync_playwright() as runtime:
+            browser=runtime.chromium.launch(headless=True)
+            try:
+                context=browser.new_context(service_workers='block',reduced_motion='reduce')
+                try:
+                    def serve(route):
+                        url=urlsplit(route.request.url)
+                        if url.hostname!='localhost':
+                            route.abort()
+                            return
+                        with self.client.get(url.path+('?' + url.query if url.query else '')) as response:
+                            headers={key:value for key,value in response.headers if key.lower() not in ('content-length','set-cookie')}
+                            route.fulfill(status=response.status_code,headers=headers,body=response.data)
+                    context.route('**/*',serve)
+                    page=context.new_page()
+                    paths=['/','/jobs','/resume','/settings','/settings#companies','/settings#email',
+                           '/applications','/analytics','/feedback','/admin/workflow-monitor',
+                           '/accounts/invitations','/admin/feedback','/missing-palette-page']
+                    paths += ['/admin/area/'+key for key,_ in admin.PAGES]
+                    for authenticated in (True,False):
+                        if not authenticated:
+                            with self.client.session_transaction() as session:
+                                session.clear()
+                        for width in (1440,390):
+                            page.set_viewport_size({'width':width,'height':1000})
+                            for path in paths if authenticated else ['/','/login','/register','/forgot-password','/reset-password','/verify-account']:
+                                page.goto('about:blank')
+                                response=page.goto('http://localhost'+path)
+                                self.assertEqual(response.status,404 if path=='/missing-palette-page' else 200,path)
+                                page.locator('#boot').wait_for(state='hidden')
+                                for theme in ('light','dark'):
+                                    page.evaluate('(theme) => document.documentElement.dataset.theme=theme',theme)
+                                    page.evaluate('() => new Promise(requestAnimationFrame)')
+                                    self.assertEqual(page.evaluate(scan),[],(path,width,theme,'default'))
+                                    controls=page.locator('button:visible, a.btn:visible, input:not([type=hidden]):visible, select:visible, textarea:visible')
+                                    for index in range(controls.count()):
+                                        control=controls.nth(index)
+                                        if not control.is_enabled(): continue
+                                        control.evaluate('el => el.focus()')
+                                        page.keyboard.press('Tab')
+                                        page.keyboard.press('Shift+Tab')
+                                        page.evaluate('() => new Promise(requestAnimationFrame)')
+                                        self.assertEqual(page.evaluate(scan),[],(path,width,theme,'focus',index))
+                                        control.hover(force=True)
+                                        page.evaluate('() => new Promise(requestAnimationFrame)')
+                                        self.assertEqual(page.evaluate(scan),[],(path,width,theme,'hover',index))
+                                    page.evaluate('document.activeElement.blur()')
+                                    page.mouse.move(1,1)
+                                    page.evaluate('window.scrollTo(0,0)')
+                                    page.screenshot(path=str(output/f'{"account" if authenticated else "public"}-{path.replace("/","_").replace("#","_")}-{width}-{theme}.png'),full_page=True)
+                finally:
+                    context.close()
+            finally:
+                browser.close()
+
     def header_controls(self):
         root=Path(__file__).resolve().parents[1]
         output=root/'tests/artifacts/header-controls'
@@ -136,4 +221,4 @@ class AdminBrowserChecks(test_admin_integration.AdminIntegrationTests):
 
 
 def load_tests(loader, tests, pattern):
-    return unittest.TestSuite([AdminBrowserChecks('header_controls'), AdminBrowserChecks('browser_checks')])
+    return unittest.TestSuite([AdminBrowserChecks('header_controls'), AdminBrowserChecks('browser_checks'), AdminBrowserChecks('coffee_palette')])

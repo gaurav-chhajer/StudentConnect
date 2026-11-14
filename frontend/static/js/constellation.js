@@ -110,11 +110,11 @@
         for (let first = 0; first < nodes.length; first++) {
             for (let second = first + 1; second < nodes.length; second++) {
                 const a = nodes[first], b = nodes[second], distance = Math.hypot(a.x - b.x, a.y - b.y);
-                if (distance < 125) line(a.x, a.y, b.x, b.y, `rgba(47,75,234,${(1 - distance / 125) * .14})`);
+                if (distance < 125) line(a.x, a.y, b.x, b.y, `rgba(182,92,18,${(1 - distance / 125) * .14})`);
             }
         }
         for (const ripple of ripples) {
-            context.strokeStyle = `rgba(255,122,89,${(1 - ripple.radius / 320) * .5})`;
+            context.strokeStyle = `rgba(217,121,52,${(1 - ripple.radius / 320) * .5})`;
             context.lineWidth = 2; context.beginPath();
             context.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2); context.stroke();
         }
@@ -123,9 +123,9 @@
             node.obscured += ((hitsContent(node.x - 12, node.y - 12, 24, 24) ? 1 : 0) - node.obscured) *
                 (motion.matches ? 1 : .12 * step);
             context.globalAlpha = 1 - .85 * node.obscured;
-            const color = node.score >= 85 ? '235,95,60' : node.score >= 70 ? '47,75,234' : '30,160,125';
+            const color = node.score >= 85 ? '141,90,59' : node.score >= 70 ? '182,92,18' : '30,160,125';
             const radius = node.radius * (1 + boost * .7);
-            if (node.distance < SCAN_RADIUS) line(x, y, node.x, node.y, `rgba(255,122,89,${boost * .4})`);
+            if (node.distance < SCAN_RADIUS) line(x, y, node.x, node.y, `rgba(217,121,52,${boost * .4})`);
             if (node.score >= 85 || boost > .2) {
                 const glow = context.createRadialGradient(node.x, node.y, 0, node.x, node.y, radius * 5);
                 glow.addColorStop(0, `rgba(${color},${.28 + boost * .3})`);
@@ -142,7 +142,7 @@
                 node.label = false; node.cooldown = tick + 150;
             }
         }
-        context.save(); context.strokeStyle = 'rgba(14,21,48,.14)'; context.lineWidth = 1;
+        context.save(); context.strokeStyle = 'rgba(50,29,23,.14)'; context.lineWidth = 1;
         context.setLineDash([4, 8]); context.lineDashOffset = -tick * .4;
         context.beginPath(); context.arc(x, y, SCAN_RADIUS, 0, Math.PI * 2); context.stroke(); context.restore();
 
@@ -162,7 +162,7 @@
                 const text = node.score + '% match';
                 context.globalAlpha = node.alpha * .8; context.font = '600 11px system-ui,sans-serif';
                 const pillWidth = context.measureText(text).width + 14;
-                context.fillStyle = 'rgba(47,75,234,.92)'; context.beginPath();
+                context.fillStyle = 'rgba(182,92,18,.92)'; context.beginPath();
                 const top = labelTop(node);
                 context.roundRect(node.x - pillWidth / 2, top, pillWidth, 18, 9); context.fill();
                 context.fillStyle = '#fff'; context.textAlign = 'center'; context.fillText(text, node.x, top + 13);

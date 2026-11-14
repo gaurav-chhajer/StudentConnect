@@ -1,22 +1,22 @@
-.app{--bg:#F2F4FB;--card:#fff;--ink:#0E1530;--mute:#515C7D;--line:#E0E4F2;--acc:#2E4BE8;--accbg:#E6EBFF;--ok:#0A6B4B;--okbg:#D6F5E6;--warn:#7C4600;--warnbg:#FFE9C2;--side:#0E1530;--pop:#FF7A59}
+.app{--bg:var(--jp-bg);--card:#fff;--ink:var(--jp-ink);--mute:var(--jp-mute);--line:var(--jp-line);--acc:var(--jp-accent);--accbg:var(--jp-soft);--ok:#0A6B4B;--okbg:#D6F5E6;--warn:#7C4600;--warnbg:#FFE9C2;--side:var(--jp-ink);--pop:#FF7A59}
 .app .side{background:var(--side);border-color:transparent;color:#fff}
 .app .logo{color:#fff;text-decoration:none}
 .app .logo i{background:var(--pop);transform:rotate(12deg);transition:transform .3s}
 .app .logo:hover i{transform:rotate(-12deg) scale(1.1)}
-.app .nav a{color:#B8C1DF;transition:background .2s,color .2s,transform .2s}
+.app .nav a{color:#d2b6a4;transition:background .2s,color .2s,transform .2s}
 .app .nav a:hover{background:rgba(255,255,255,.08);color:#fff;transform:translateX(3px)}
 .app .nav a.on,.app .nav a.on:hover{background:var(--acc);color:#fff}
-.app .cap{color:#93A0CB}
+.app .cap{color:#cdb6a7}
 .app .me{border-color:rgba(255,255,255,.16)}
-.app .me .co{color:#B8C1DF}
-.app .av{background:var(--pop);color:#0E1530}
+.app .me .co{color:#d2b6a4}
+.app .av{background:var(--pop);color:var(--jp-ink)}
 .app .btn{text-decoration:none;transition:transform .15s,box-shadow .2s,background .2s}
-.app .btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(14,21,48,.12)}
+.app .btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(50,29,23,.12)}
 .app .btn:active{transform:scale(.97)}
-.app .btn.p{color:#fff}.app .btn.p:hover{background:#2339C4}
+.app .btn.p{color:#fff}.app .btn.p:hover{background:var(--jp-accent-dark)}
 .app .chip{transition:background .2s,transform .15s}.app .chip:hover{transform:translateY(-1px)}
 .app .card,.app .kc,.app .jc{transition:transform .25s ease,box-shadow .25s ease,border-color .25s}
-.app .card:hover,.app .kc:hover,.app .jc:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(14,21,48,.09)}
+.app .card:hover,.app .kc:hover,.app .jc:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(50,29,23,.09)}
 .app tbody tr{transition:background .2s}.app tbody tr:hover{background:var(--bg)}
 @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 @keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
