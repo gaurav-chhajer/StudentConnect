@@ -14,6 +14,70 @@ from tests import test_admin_integration
 
 class AdminBrowserChecks(test_admin_integration.AdminIntegrationTests):
     # Only browser methods are run by load_tests below; fixture setup is reused.
+    def header_controls(self):
+        root=Path(__file__).resolve().parents[1]
+        output=root/'tests/artifacts/header-controls'
+        output.mkdir(parents=True,exist_ok=True)
+        with patch.dict(os.environ,{'PLAYWRIGHT_BROWSERS_PATH':str(root/'data/browser-binaries')}), sync_playwright() as runtime:
+            browser=runtime.chromium.launch(headless=True)
+            try:
+                context=browser.new_context(service_workers='block',reduced_motion='reduce')
+                try:
+                    def serve(route):
+                        url=urlsplit(route.request.url)
+                        if url.hostname!='localhost':
+                            route.abort()
+                            return
+                        with self.client.get(url.path+('?' + url.query if url.query else '')) as response:
+                            headers={key:value for key,value in response.headers if key.lower() not in ('content-length','set-cookie')}
+                            route.fulfill(status=response.status_code,headers=headers,body=response.data)
+                    context.route('**/*',serve)
+                    page=context.new_page()
+                    for width in (1440,900,390):
+                        page.set_viewport_size({'width':width,'height':900})
+                        page.goto('http://localhost/settings')
+                        page.locator('#boot').wait_for(state='hidden')
+                        self.assertEqual(page.locator('.jp-more').count(),0)
+                        self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'),width)
+                        for theme in ('light','dark'):
+                            page.evaluate('(theme) => {document.documentElement.dataset.theme=theme}',theme)
+                            for selector in ('.jp-signout','.jp-theme-toggle'):
+                                control=page.locator(selector)
+                                for state in ('default','hover','focus'):
+                                    page.mouse.move(1,1)
+                                    page.locator('#main').focus()
+                                    if state=='hover':
+                                        control.hover()
+                                    elif state=='focus':
+                                        control.focus()
+                                        page.keyboard.press('Tab')
+                                        page.keyboard.press('Shift+Tab')
+                                        self.assertTrue(control.evaluate("el => el.matches(':focus-visible')"))
+                                    page.evaluate('() => new Promise(requestAnimationFrame)')
+                                    style=control.evaluate('''(el) => {
+                                        const style=getComputedStyle(el),probe=document.createElement('span');
+                                        el.parentElement.append(probe);
+                                        const colors={};
+                                        for (const token of ['card','soft','ink','line','accent']) {
+                                            probe.style.color=`var(--jp-${token})`;
+                                            colors[token]=getComputedStyle(probe).color;
+                                        }
+                                        probe.remove();
+                                        return {image:style.backgroundImage,bg:style.backgroundColor,color:style.color,
+                                            border:style.borderTopColor,outline:style.outlineColor,colors};
+                                    }''')
+                                    self.assertEqual(style['image'],'none',(width,theme,selector,state))
+                                    self.assertEqual(style['bg'],style['colors']['card' if state=='default' else 'soft'])
+                                    self.assertEqual(style['color'],style['colors']['ink'])
+                                    self.assertEqual(style['border'],style['colors']['line' if state=='default' else 'accent'])
+                                    if state=='focus':
+                                        self.assertEqual(style['outline'],style['colors']['accent'])
+                                    page.locator('.site-header').screenshot(path=str(output/f'{width}-{theme}-{selector[1:]}-{state}.png'))
+                finally:
+                    context.close()
+            finally:
+                browser.close()
+
     def browser_checks(self):
         root=Path(__file__).resolve().parents[1]
         output=root/'tests/artifacts/admin-integration'
@@ -72,4 +136,4 @@ class AdminBrowserChecks(test_admin_integration.AdminIntegrationTests):
 
 
 def load_tests(loader, tests, pattern):
-    return unittest.TestSuite([AdminBrowserChecks('browser_checks')])
+    return unittest.TestSuite([AdminBrowserChecks('header_controls'), AdminBrowserChecks('browser_checks')])

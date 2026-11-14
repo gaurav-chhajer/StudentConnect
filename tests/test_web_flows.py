@@ -76,6 +76,7 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn(b'rel="icon" type="image/svg+xml" href="/static/favicon.svg"', page.data)
         self.assertIn(b'href="/static/css/jobspresso.css"', page.data)
         self.assertIn(b'class="primary-nav" id="primary-nav"', page.data)
+
         self.assertIn(b'id="pour"', page.data)
         self.assertIn(b'id="offline-screen"', page.data)
         self.assertIn(b'id="page-loader"', page.data)
@@ -90,6 +91,17 @@ class WebFlowTests(unittest.TestCase):
         self.assertIn(b'href="/static/favicon.svg"', page.data)
         self.assertIn("img-src 'self'", page.headers['Content-Security-Policy'].split('; '))
         self.assertIn("default-src 'none'", page.headers['Content-Security-Policy'].split('; '))
+
+    def test_header_exposes_direct_csrf_protected_signout_without_more_menu(self):
+        self.seed_user()
+        with self.client.get('/settings') as response:
+            header = re.search(rb'<header\b.*?</header>', response.data, re.S).group(0)
+            form = re.search(rb'<form method="post" action="/logout">(.*?)</form>', header, re.S)
+            self.assertIsNotNone(form)
+            self.assertIn(b'name="csrf_token"', form.group(1))
+            self.assertIn(b'class="btn ghost jp-signout" type="submit">Sign out</button>', form.group(1))
+            self.assertNotIn(b'jp-more', header)
+            self.assertNotIn(b'>More</summary>', header)
 
     def test_unknown_route_uses_branded_error_page_and_keeps_status(self):
         response = self.client.get('/not-a-real-page')

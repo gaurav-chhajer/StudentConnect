@@ -37,9 +37,7 @@
 {% if is_account_admin %}<a href="{{ url_for('admin.page') }}" {% if active and (active.startswith('admin.') or active in ('admin_users_page','workflow_monitor_page','accounts.invitations','feedback.review')) %}aria-current="page"{% endif %}>Admin</a>{% endif %}
 </nav>
 <div class="hauth">
-{% if user %}<details class="jp-more"><summary class="btn ghost" aria-label="More options">More</summary><div class="jp-more-menu">
-<hr><form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Sign out</button></form>
-</div></details>
+{% if user %}<form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="btn ghost jp-signout" type="submit">Sign out</button></form>
 {% else %}<a class="btn ghost si" href="{{ url_for('accounts.login') }}">Sign in</a><a class="btn su" href="{{ url_for('accounts.register') }}">Sign up</a>{% endif %}
 </div>
 <button class="icon-btn jp-theme-toggle" id="theme" type="button" aria-pressed="false" aria-label="Switch color theme"><svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5z"/></svg><svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg></button>

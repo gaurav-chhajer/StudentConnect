@@ -340,5 +340,24 @@ html, body { background: var(--jp-bg); color: var(--jp-ink); }
 .app .pl-step[data-stage="saved"] { --st: var(--jp-mute); }
 .app .pl-step[data-stage="interview"] { --st: var(--jp-accent); }
 .app .jp-theme-toggle { background: var(--jp-card); border-color: var(--jp-line); color: var(--jp-ink); }
+/* Outrank the legacy wow.css interaction selector and clear its gradient image. */
+.app .site-header :is(.jp-signout, .jp-theme-toggle) {
+  background: var(--jp-card);
+  border-color: var(--jp-line);
+  color: var(--jp-ink);
+  box-shadow: none;
+}
+.app .site-header .jp-signout { border-radius: 999px; font-size: 1rem; padding-inline: 12px; }
+.app .site-header .hauth form { margin: 0; }
+.app .site-header :is(.jp-signout, .jp-theme-toggle):is(:hover, :focus-visible):not(:disabled):not([aria-disabled="true"]) {
+  background: var(--jp-soft);
+  border-color: var(--jp-accent);
+  color: var(--jp-ink);
+  box-shadow: none;
+}
+.app .site-header :is(.jp-signout, .jp-theme-toggle):focus-visible:not(:disabled):not([aria-disabled="true"]) {
+  outline-color: var(--jp-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--jp-accent) 22%, transparent);
+}
 .jp-error-page, .offline-screen { background-color: var(--jp-bg); color: var(--jp-ink); }
 .offline-screen .err { border-color: var(--jp-line); background: var(--jp-card); color: var(--jp-ink); }
