@@ -1,42 +1,28 @@
-name: Deploy PythonAnywhere
+name: Read-only hosting storage inspection
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Serialize deployment with the scheduled workers using the same hosted database.
-concurrency:
-  group: studentconnect-daily-automation
-  cancel-in-progress: false
-
 jobs:
-  deploy:
-    if: github.ref == 'refs/heads/main'
+  inspect:
+    if: github.ref == 'refs/heads/hosting-storage-inspection'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
         with:
           python-version: '3.12'
       - name: Install project dependencies
         run: python -m pip install -r requirements.txt
-      - name: Run offline tests
-        run: python -B -m unittest discover -s tests
-      - name: Upload verified release and reload
-        env:
-          PYTHONANYWHERE_API_TOKEN: ${{ secrets.PYTHONANYWHERE_API_TOKEN }}
-          DEPLOY_SHA: ${{ github.sha }}
-        run: python -B -m scripts.deploy_pythonanywhere_api --sha "$DEPLOY_SHA"
-      - name: Inspect hosted storage after deployment failure
-        if: failure()
+      - name: Test read-only inspection
+        run: python -B -m unittest tests.test_hosting_storage_inspection
+      - name: Inspect hosted storage without changes
         env:
           PYTHONANYWHERE_API_TOKEN: ${{ secrets.PYTHONANYWHERE_API_TOKEN }}
         run: python -B -m scripts.inspect_pythonanywhere_storage

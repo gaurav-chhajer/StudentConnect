@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from pathlib import PurePosixPath
 
 import requests
@@ -72,6 +73,19 @@ def inspect(session):
                   release_directories_observed=len(release_ids),
                   release_listing_may_be_truncated=len(releases) == 1000,
                   archive_bytes=file_size(root / 'data/deploy-release.zip'))
+    result['release_shas'] = sorted(value for value in release_ids if re.fullmatch(r'[0-9a-f]{40}', value))
+    result['staging_directories_observed'] = sum(bool(re.fullmatch(r'[0-9a-f]{40}\.staging', value)) for value in release_ids)
+    for label, filename in (('active_release', 'active-release.json'), ('pending_release', 'deploy-request.json')):
+        with get('files/path' + str(root / 'data' / filename)) as response:
+            if response.status_code == 404:
+                result[label] = None
+                continue
+            response.raise_for_status()
+            metadata = bounded_json(response)
+            sha = metadata.get('sha') if isinstance(metadata, dict) else None
+            if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
+                raise ValueError('Invalid release identity')
+            result[label] = sha
     with get('files/path' + str(root / 'data/deployment-status.json')) as response:
         if response.status_code == 200:
             status = bounded_json(response)

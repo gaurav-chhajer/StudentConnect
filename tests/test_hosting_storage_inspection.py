@@ -24,6 +24,7 @@ class StorageInspectionTests(unittest.TestCase):
         values.extend(self.response(size=size) for size in (sizes if sizes is not None else [100,200]))
         values.extend([self.response([root+'/.releases/'+'a'*40+'/backend/app.py']),
                        self.response(size=300),self.response(size=50),
+                       self.response(dict(sha='a'*40)), self.response(dict(sha='b'*40)),
                        self.response(dict(stage='migrations',migration_step='backup',sqlite_errorname='SQLITE_IOERR_FSYNC',sqlite_errorcode=1034))])
         session.fixture_responses = values
         session.get.side_effect = values
@@ -36,6 +37,9 @@ class StorageInspectionTests(unittest.TestCase):
         self.assertEqual(report['measured_backup_bytes'],300)
         self.assertEqual(report['backup_file_count'],2)
         self.assertEqual(report['sqlite_errorname'],'SQLITE_IOERR_FSYNC')
+        self.assertEqual(report['active_release'],'a'*40)
+        self.assertEqual(report['pending_release'],'b'*40)
+        self.assertEqual(report['release_shas'],['a'*40])
         session.post.assert_not_called()
         session.delete.assert_not_called()
         session.fixture_responses[4].iter_content.assert_not_called()
@@ -50,7 +54,7 @@ class StorageInspectionTests(unittest.TestCase):
         report=inspection.inspect(session)
         self.assertEqual(report['backup_file_count'],50)
         self.assertEqual(report['backup_headers_checked'],20)
-        self.assertEqual(session.get.call_count,25)
+        self.assertEqual(session.get.call_count,27)
 
     def test_unknown_sizes_are_reported_as_unknown(self):
         report=inspection.inspect(self.session(sizes=[None,100]))
