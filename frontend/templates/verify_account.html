@@ -1,0 +1,2 @@
+{% extends 'base.html' %}{% from 'macros.html' import csrf %}
+{% block content %}<section class="card"><h1>Verify your email</h1><form method="post" class="page-form">{{ csrf() }}<label>Email<input type="email" name="email" maxlength="254" required></label><label>Verification code<input name="code" maxlength="43" required autocomplete="one-time-code"></label><button class="btn">Verify email</button></form></section>{% endblock %}

@@ -1,0 +1,3 @@
+{% extends 'base.html' %}
+{% block title %}Admins only · Jobspresso{% endblock %}
+{% block content %}<section class="card err"><p class="sub">403</p><h1>Admins only</h1><p>This area is available only to accounts with administrator access.</p><a class="btn" href="{{ url_for('dashboard') }}">Back to Home</a></section>{% endblock %}

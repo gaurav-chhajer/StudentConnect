@@ -28,7 +28,8 @@ class PreHistoryMigrationTests(unittest.TestCase):
         with self.assertLogs(self.app.logger, level='ERROR') as logs:
             page = self.client.get('/')
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'Analytics', page.data)
+        self.assertIn(b'Tracker', page.data)
+        self.assertIn(b'href="/applications"', page.data)
         self.assertIn(b'Software Engineer 1', page.data)
         self.assertNotIn(b'Groq key history', page.data)
         self.assertNotIn(b'Saved dashboard data could not be loaded', page.data)
@@ -36,7 +37,7 @@ class PreHistoryMigrationTests(unittest.TestCase):
         self.assertIn('008_groq_key_history.sql', ' '.join(logs.output))
         self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM scores').fetchone()[0], 2)
         analytics = self.client.get('/analytics')
-        self.assertIn(b'Matches scored per week', analytics.data)
+        self.assertIn(b'Strong matches per week', analytics.data)
         apply_migrations(self.conn)
         page = self.client.get('/')
         self.assertEqual(page.status_code, 200)
@@ -46,9 +47,10 @@ class PreHistoryMigrationTests(unittest.TestCase):
     def test_nonadmin_dashboard_does_not_need_history_migration(self):
         page = self.client.get('/')
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b'Analytics', page.data)
+        self.assertIn(b'Tracker', page.data)
+        self.assertIn(b'href="/applications"', page.data)
         self.assertNotIn(b'Groq key history', page.data)
-        self.assertIn(b'Matches scored per week', self.client.get('/analytics').data)
+        self.assertIn(b'Strong matches per week', self.client.get('/analytics').data)
 
 
 class GroqHistoryTests(unittest.TestCase):

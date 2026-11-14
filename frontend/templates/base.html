@@ -18,6 +18,8 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/jobspresso-ui-live.css') }}">
 <script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/jobspresso.js') }}"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin-live.css') }}">
+<script defer nonce="{{ g.script_nonce }}" src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}" data-page="{{ active or '' }}">
@@ -30,13 +32,12 @@
 <a href="{{ url_for('dashboard') }}" {% if active == 'dashboard' %}aria-current="page"{% endif %}>Home</a>
 <a href="{{ url_for('jobs') }}" {% if active == 'jobs' %}aria-current="page"{% endif %}>Jobs</a>
 <a href="{{ url_for('resume') }}" {% if active == 'resume' %}aria-current="page"{% endif %}>Resume</a>
-<a href="{{ url_for('applications') }}" {% if active == 'applications' %}aria-current="page"{% endif %}>Tracker</a>
-<a href="{{ url_for('settings_page') }}" {% if active in ('settings_page', 'analytics', 'feedback.submit', 'admin_users_page', 'workflow_monitor_page') %}aria-current="page"{% endif %}>Account</a>
+<a href="{{ url_for('applications') }}" {% if active in ('applications','analytics') %}aria-current="page"{% endif %}>Tracker</a>
+<a href="{{ url_for('settings_page') }}" {% if active == 'settings_page' %}aria-current="page"{% endif %}>Settings</a>
+{% if is_account_admin %}<a href="{{ url_for('admin.page') }}" {% if active and (active.startswith('admin.') or active in ('admin_users_page','workflow_monitor_page','accounts.invitations','feedback.review')) %}aria-current="page"{% endif %}>Admin</a>{% endif %}
 </nav>
 <div class="hauth">
 {% if user %}<details class="jp-more"><summary class="btn ghost" aria-label="More options">More</summary><div class="jp-more-menu">
-<a href="{{ url_for('settings_page') }}#companies">Target companies</a><a href="{{ url_for('settings_page') }}#email">Email alerts</a><a href="{{ url_for('analytics') }}" {% if active == 'analytics' %}aria-current="page"{% endif %}>Analytics</a><a href="{{ url_for('feedback.submit') }}">Give feedback</a>
-{% if is_account_admin %}<hr><a href="{{ url_for('admin_users_page') }}">Users</a><a href="{{ url_for('workflow_monitor_page') }}">Workflow monitor</a><a href="{{ url_for('accounts.invitations') }}">Invite testers</a><a href="{{ url_for('feedback.review') }}">Tester feedback</a>{% endif %}
 <hr><form method="post" action="{{ url_for('accounts.logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">Sign out</button></form>
 </div></details>
 {% else %}<a class="btn ghost si" href="{{ url_for('accounts.login') }}">Sign in</a><a class="btn su" href="{{ url_for('accounts.register') }}">Sign up</a>{% endif %}
@@ -52,7 +53,7 @@
 {% block content %}{% endblock %}
 {% if active not in ('feedback.submit', 'feedback.review') and (user or active != 'dashboard') %}<p class="sub score-disclaimer">Scores estimate how closely your resume text aligns with a job description. They are not interview odds or hiring decisions; check the evidence and the original posting.</p>{% endif %}
 </main>
-{% if active not in ('feedback.submit', 'feedback.review') %}<footer class="wrap app-footer">Jobspresso helps you compare your resume with available job descriptions. Review each posting and score evidence before applying.</footer>{% endif %}
+{% if active not in ('feedback.submit', 'feedback.review') %}<footer class="wrap app-footer">Jobspresso helps you compare your resume with available job descriptions. Review each posting and score evidence before applying. <a href="{{ url_for('feedback.submit') }}" data-open-dialog="feedback-dialog">Feedback</a></footer>{% include 'feedback_dialog.html' %}{% endif %}
 </div>
 <div class="page-loader" id="page-loader" role="status" aria-live="polite" aria-hidden="true"><span class="loader-cup" aria-hidden="true"></span><span>Brewing your workspace…</span></div>
 <section class="offline-screen" id="offline-screen" role="alert" hidden><div class="err"><span class="ecode">Connection lost</span><h1>You are offline</h1><p class="lead">Check your internet connection, then try again.</p><button class="btn" type="button" data-offline-retry>Try again</button></div></section><div id="pour" aria-hidden="true"></div>

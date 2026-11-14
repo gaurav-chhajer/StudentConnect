@@ -1,0 +1,75 @@
+"""Offline Chromium checks; every HTTP request is fulfilled by Flask's test client."""
+
+import os
+import unittest
+from pathlib import Path
+from urllib.parse import urlsplit
+from unittest.mock import patch
+
+from playwright.sync_api import sync_playwright
+
+from backend import admin
+from tests import test_admin_integration
+
+
+class AdminBrowserChecks(test_admin_integration.AdminIntegrationTests):
+    # Only browser methods are run by load_tests below; fixture setup is reused.
+    def browser_checks(self):
+        root=Path(__file__).resolve().parents[1]
+        output=root/'tests/artifacts/admin-integration'
+        output.mkdir(parents=True,exist_ok=True)
+        with patch.dict(os.environ,{'PLAYWRIGHT_BROWSERS_PATH':str(root/'data/browser-binaries')}), sync_playwright() as runtime:
+            browser=runtime.chromium.launch(headless=True)
+            try:
+                context=browser.new_context(service_workers='block',reduced_motion='reduce')
+                try:
+                    errors=[]
+                    context.on('page',lambda page: page.on('pageerror',lambda error:errors.append(str(error))))
+                    def serve(route):
+                        url=urlsplit(route.request.url)
+                        if url.hostname!='localhost':
+                            route.abort()
+                            return
+                        path=url.path+('?' + url.query if url.query else '')
+                        with self.client.open(path,method=route.request.method,data=route.request.post_data,
+                             content_type=route.request.headers.get('content-type')) as response:
+                            headers={key:value for key,value in response.headers if key.lower() not in ('content-length','set-cookie')}
+                            route.fulfill(status=response.status_code,headers=headers,body=response.data)
+                    context.route('**/*',serve)
+                    page=context.new_page()
+                    for width in (1440,900,390):
+                        page.set_viewport_size({'width':width,'height':1000})
+                        for key,_ in admin.PAGES:
+                            page.goto('http://localhost/admin/area/'+key)
+                            page.locator('#boot').wait_for(state='hidden')
+                            self.assertEqual(page.locator('.aside2 a').count(),11)
+                            self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'),width)
+                            page.screenshot(path=str(output/f'{key}-{width}.png'),full_page=True)
+                    page.goto('http://localhost/admin/area/users')
+                    page.get_by_role('button',name='View',exact=True).click()
+                    self.assertTrue(page.locator('dialog.admin-drawer').is_visible())
+                    page.get_by_role('button',name='Close',exact=True).first.click()
+                    page.goto('http://localhost/settings')
+                    page.get_by_role('link',name='Companies',exact=True).click()
+                    page.locator('#companies').wait_for(state='visible')
+                    self.assertTrue(page.locator('#companies').is_visible())
+                    self.assertFalse(page.locator('#profile').is_visible())
+                    page.get_by_role('link',name='Email',exact=True).click()
+                    page.locator('#email').wait_for(state='visible')
+                    self.assertTrue(page.locator('#email').is_visible())
+                    page.get_by_role('link',name='Feedback',exact=True).click()
+                    self.assertTrue(page.locator('#feedback-dialog').is_visible())
+                    page.get_by_role('button',name='Close',exact=True).click()
+                    page.goto('http://localhost/applications')
+                    page.get_by_role('link',name='Analytics',exact=True).click()
+                    self.assertTrue(page.get_by_role('heading',name='Response rate',exact=True).is_visible())
+                    page.screenshot(path=str(output/'tracker-analytics-390.png'),full_page=True)
+                    self.assertEqual(errors,[])
+                finally:
+                    context.close()
+            finally:
+                browser.close()
+
+
+def load_tests(loader, tests, pattern):
+    return unittest.TestSuite([AdminBrowserChecks('browser_checks')])

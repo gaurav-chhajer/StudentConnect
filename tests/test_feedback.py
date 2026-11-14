@@ -47,7 +47,8 @@ class FeedbackTests(unittest.TestCase):
         self.assertIn(b"Find roles that fit your resume", response.data)
         self.assertIn(b"Sign in", response.data)
         self.assertIn(b"Sign up", response.data)
-        self.assertNotIn(b"Send feedback", response.data)
+        self.assertIn(b'data-open-dialog="feedback-dialog">Feedback</a>', response.data)
+        self.assertIn(b'<dialog id="feedback-dialog"', response.data)
 
     def test_signed_in_user_can_submit_and_is_saved(self):
         self.seed_user()

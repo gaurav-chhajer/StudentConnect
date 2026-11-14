@@ -285,7 +285,8 @@ def upsert_jobs(conn, company_id, fetched_jobs, *, additive=False):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(company_id, external_id) DO UPDATE SET
                     title=excluded.title, location=excluded.location, department=excluded.department,
-                    url=excluded.url, raw_json=excluded.raw_json, last_seen_at=excluded.last_seen_at, is_active=1
+                    url=excluded.url, raw_json=excluded.raw_json, last_seen_at=excluded.last_seen_at,
+                    is_active=CASE WHEN jobs.admin_closed=1 THEN 0 ELSE 1 END
                 """,
                 (company_id, job["external_id"], job["title"], job.get("location"), job.get("department"),
                  job.get("url"), raw_json, now, now),

@@ -1,6 +1,7 @@
 """Apply additive, versioned migrations without deleting existing data."""
 
 import hashlib
+import sqlite3
 from pathlib import Path
 
 
@@ -16,10 +17,15 @@ def apply_migrations(conn):
                 if applied[0] != checksum:
                     raise ValueError("An applied migration was modified: " + path.name)
                 continue
-            # Migration files contain simple DDL/DML, without triggers or semicolons in literals.
-            for statement in sql.split(";"):
-                if statement.strip():
+            # complete_statement keeps trigger bodies and quoted semicolons intact.
+            statement = ""
+            for line in sql.splitlines(keepends=True):
+                statement += line
+                if sqlite3.complete_statement(statement):
                     conn.execute(statement)
+                    statement = ""
+            if statement.strip():
+                conn.execute(statement)
             conn.execute("INSERT INTO schema_migrations(name,checksum) VALUES(?,?)", (path.name, checksum))
 
 

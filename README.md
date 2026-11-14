@@ -2,7 +2,7 @@
 
 Jobspresso tracks company openings, evaluates resume fit with deterministic scoring, and lets users review evidence, manage applications, and receive eligible match digests. The authenticated Flask app keeps scoring independent from optional LLM explanations.
 
-The live UI is rendered from `frontend/templates/` with assets in `frontend/static/`. `frontend/jobspresso_ui/` is the latest visual reference; the Flask pages reuse its design while retaining server-side routes, forms, and data. Its demo handlers and local-storage data do not power the authenticated app. See `frontend/README.md` for the source-of-truth map. Local review outputs and older static previews are archived under `not needed/` and are excluded from git.
+The live UI is rendered from `frontend/templates/` with assets in `frontend/static/`. `frontend/jobspresso.zip` is the updated student/admin visual reference; `frontend/jobspresso_ui/` preserves the earlier reference. The Flask pages reuse the design while retaining server-side routes, forms, and data. Demo handlers and local-storage data do not power the authenticated app. See `frontend/README.md` for the source-of-truth map, migration requirements, and offline admin/UI checks. Local review outputs and older static previews are archived under `not needed/` and are excluded from git.
 To activate real automatic emails, run the same command without `-WhatIf` and
 confirm its prompt. Store `GMAIL_APP_PASSWORD` and `DIGEST_FROM_EMAIL` in persistent
 Windows User/Machine environment variables first, then sign out/in so scheduled

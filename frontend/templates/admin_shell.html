@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+{% block content %}<div class="adm">
+<aside class="aside2" aria-label="Administration"><h4>Monitor</h4>
+{% for key,label in admin_pages %}{% if loop.index == 5 %}<h4>Manage</h4>{% elif loop.index == 9 %}<h4>Quality</h4>{% elif loop.index == 10 %}<h4>Admin</h4>{% endif %}
+<a href="{{ url_for('admin.page',page=key) }}" {% if admin_page == key %}aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}</aside>
+<div class="admc">{% block admin_content %}{% endblock %}</div></div>{% endblock %}

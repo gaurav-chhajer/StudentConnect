@@ -11,14 +11,13 @@ from pathlib import Path
 from flask import Flask, flash, g, jsonify, redirect, render_template, request, session, url_for
 from werkzeug.utils import secure_filename
 
-from backend import accounts, automatic_matching, cloud_worker, email_unsubscribe, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, scoring_feedback, store, workflow_monitor
+from backend import accounts, admin, automatic_matching, cloud_worker, email_unsubscribe, feedback, google_accounts, groq_limits, hosting, matching_tasks, resumes, scoring_feedback, store, tracker_analytics, workflow_monitor
 from backend.pipeline_skeleton import extract_job_description, get_unsent_top_matches
 
 ROOT = Path(__file__).resolve().parents[1]
 NAVIGATION = (("dashboard", "Dashboard"), ("jobs", "Job matches"),
               ("resume", "My resume"), ("applications", "Applications"),
               ("analytics", "Analytics"), ("settings_page", "Settings"))
-ADMIN_USERS_PAGE_SIZE = 100
 
 
 def utc_now():
@@ -62,7 +61,7 @@ def create_app(database_path=None, upload_dir=None):
                     has_companies=has_companies, setup_pending=bool(user and not (has_resume and has_email and has_companies)),
                     navigation=NAVIGATION, active=request.endpoint, message=None, matches=[], companies=[],
                     digest=[], trend=[], metrics=None, page=1, pages=1, search="", company=0, min_score=0,
-                    location="", job_type="", sort="best", days=0, application_counts={}, stale_count=0,
+                    location="", job_type="", sort="best", days=0, only_mine=0, application_counts={}, stale_count=0,
                     by_company=[], skills=[], saved_searches=[], selected=None)
 
     def render(page, data, status=200):
@@ -105,7 +104,7 @@ def create_app(database_path=None, upload_dir=None):
                 g.user = dict(connection().execute("SELECT * FROM users WHERE id=?",(user_id,)).fetchone())
         public = {"accounts.login", "accounts.register", "accounts.registration_code", "accounts.forgot", "accounts.reset",
                   "dashboard", "feedback.submit", "unsubscribe_page",
-                  "google_accounts.login", "google_accounts.callback", "google_accounts.complete_link", "static"}
+                  "google_accounts.login", "google_accounts.callback", "google_accounts.complete_link", "accounts.verify_account", "static"}
         if request.url_rule is not None and request.endpoint not in public and g.user is None:
             if request.method == "GET":
                 next_url = request.full_path[:-1] if request.full_path.endswith("?") else request.full_path
@@ -290,7 +289,7 @@ def create_app(database_path=None, upload_dir=None):
         if not data["user"]:
             return render("landing", data)
         try:
-            args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days'))
+            args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days', 'only_mine'))
             data.update(store.filters(args))
             history_before = (store.integer(request.args.get("history_before", "0"), 0, 9223372036854775807)
                               if getattr(g, "account", None) and g.account["is_admin"] else 0)
@@ -334,7 +333,7 @@ def create_app(database_path=None, upload_dir=None):
     def jobs():
         data = context()
         try:
-            args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days'))
+            args = filter_arguments(('q', 'company', 'min_score', 'location', 'job_type', 'sort', 'days', 'only_mine'))
             data.update(store.filters(args))
             selected_id = store.integer(request.args.get("job", "0"), 0, 2147483647)
         except ValueError as error:
@@ -355,7 +354,9 @@ def create_app(database_path=None, upload_dir=None):
             data["saved_searches"] = conn.execute("SELECT id,name,filters_json FROM saved_searches WHERE user_id=? ORDER BY name LIMIT 50", (user_id,)).fetchall()
             data["saved_searches"] = [dict(row, link=url_for("jobs", **json.loads(row["filters_json"]))) for row in data["saved_searches"]]
             if selected_id:
-                row = conn.execute("SELECT " + store.MATCH_COLUMNS + " " + store.MATCH_FROM + " AND j.id=?", (user_id, user_id, user_id, selected_id)).fetchone()
+                row = conn.execute("SELECT " + store.MATCH_COLUMNS + " " + store.MATCH_FROM +
+                    " AND j.id=? AND (?=0 OR EXISTS(SELECT 1 FROM company_subscriptions mine WHERE mine.user_id=s.user_id AND mine.company_id=c.id))",
+                    (user_id, user_id, user_id, selected_id, data['only_mine'])).fetchone()
                 if not row:
                     data["message"] = "This match is unavailable or needs rescoring."
                     return render("jobs", data, 404)
@@ -396,7 +397,7 @@ def create_app(database_path=None, upload_dir=None):
             if not name or len(name) > 80:
                 raise ValueError("Give the search a name of at most 80 characters")
             query = dict(q=selected["search"], company=selected["company"], min_score=selected["min_score"],
-                         location=selected["location"], job_type=selected["job_type"], sort=selected["sort"], days=selected["days"])
+                         location=selected["location"], job_type=selected["job_type"], sort=selected["sort"], days=selected["days"], only_mine=selected['only_mine'])
             conn = connection()
             with conn:
                 conn.execute("""INSERT INTO saved_searches(user_id,name,filters_json,updated_at) VALUES(?,?,?,?)
@@ -627,43 +628,8 @@ def create_app(database_path=None, upload_dir=None):
     @application.get('/admin/users')
     def admin_users_page():
         if not g.account['is_admin']:
-            return 'Administrator access required.',403
-        try:
-            requested_page = store.integer(request.args.get('page', '1'), 1, 1000000)
-        except ValueError:
-            return 'Choose a valid user page.',400
-        conn = connection()
-        user_total = conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
-        page_total = max(1, (user_total + ADMIN_USERS_PAGE_SIZE - 1) // ADMIN_USERS_PAGE_SIZE)
-        page = min(requested_page, page_total)
-        users = conn.execute("""WITH match_counts AS (
-                SELECT s.user_id,COUNT(*) match_count
-                FROM scores s JOIN jobs j ON j.id=s.job_id JOIN companies c ON c.id=j.company_id
-                WHERE s.is_stale=0 AND j.is_active=1 AND c.active=1
-                  AND (NOT EXISTS (SELECT 1 FROM user_settings us
-                                   WHERE us.user_id=s.user_id AND us.subscriptions_configured=1)
-                       OR EXISTS (SELECT 1 FROM company_subscriptions sub
-                                  WHERE sub.user_id=s.user_id AND sub.company_id=c.id))
-                GROUP BY s.user_id
-            )
-            SELECT a.user_id,u.name,u.email,u.active,a.email_verified,a.is_admin,a.created_at,
-                   a.last_login_at,COALESCE(mc.match_count,0) match_count
-            FROM accounts a JOIN users u ON u.id=a.user_id
-            LEFT JOIN match_counts mc ON mc.user_id=a.user_id
-            ORDER BY a.last_login_at IS NULL,a.last_login_at DESC,a.created_at DESC,a.user_id
-            LIMIT ? OFFSET ?""", (ADMIN_USERS_PAGE_SIZE, (page - 1) * ADMIN_USERS_PAGE_SIZE)).fetchall()
-        ist = timezone(timedelta(hours=5, minutes=30))
-        account_users = []
-        for account in users:
-            display_account = dict(account)
-            if display_account['last_login_at']:
-                sign_in = datetime.fromisoformat(display_account['last_login_at']).astimezone(ist)
-                display_account['last_login_display'] = sign_in.strftime('%d %b %Y, %I:%M %p')
-            else:
-                display_account['last_login_display'] = None
-            account_users.append(display_account)
-        return render('admin_users', dict(context(), account_users=account_users, user_total=user_total,
-                                          user_page=page, user_pages=page_total))
+            return render('admin_denied', context(), 403)
+        return application.view_functions['admin.page'](page='users')
 
     @application.post("/admin/users/<int:user_id>/delete")
     def admin_delete_user(user_id):
@@ -680,7 +646,7 @@ def create_app(database_path=None, upload_dir=None):
             flash("Enter the account email exactly to confirm deletion.")
             return redirect(url_for("admin_users_page"))
         try:
-            email = accounts.delete_user_data(connection(), user_id, uploads)
+            email = accounts.delete_user_data(connection(), user_id, uploads, actor_id=g.user['id'], now=utc_now())
         except ValueError as error:
             flash(str(error))
             return redirect(url_for("admin_users_page"))
@@ -689,7 +655,7 @@ def create_app(database_path=None, upload_dir=None):
             flash("The account was deleted, but some private files could not be cleared. Check the application logs.")
             return redirect(url_for("admin_users_page"))
         flash(f"Deleted the account for {email} and its personal data.")
-        return redirect(url_for("admin_users_page"))
+        return redirect(url_for("admin.page", page='users'))
 
     @application.get("/analytics")
     def analytics():
@@ -703,9 +669,7 @@ def create_app(database_path=None, upload_dir=None):
         data["weeks"] = weeks
         if data["user"]:
             data.update(store.summary(connection(), data["user"]["id"], utc_now(), weeks))
-            applied = sum(data["application_counts"][status] for status in store.STATUSES if status != "saved")
-            replies = sum(data["application_counts"][status] for status in ("interview", "offer", "rejected"))
-            data["response_rate"] = round(100 * replies / applied, 1) if applied else None
+            data.update(tracker_analytics.snapshot(connection(), data['user']['id'], utc_now(), weeks))
         return render("analytics", data)
 
     @application.context_processor
@@ -719,6 +683,7 @@ def create_app(database_path=None, upload_dir=None):
     accounts.register_routes(application, connection, context, lambda: utc_now(), uploads)
     feedback.register_routes(application, connection, context, lambda: utc_now())
     scoring_feedback.register_routes(application, connection, lambda: utc_now())
+    admin.register_routes(application, connection, context, lambda: utc_now(), database, uploads)
     google_accounts.register_routes(application, connection, lambda: utc_now())
     cloud_worker.register_routes(application, connection, database)
     return application

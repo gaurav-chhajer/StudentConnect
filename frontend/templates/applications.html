@@ -1,22 +1,23 @@
 {% extends 'base.html' %}{% from 'macros.html' import csrf,badge,page_banner,company_heading,score_ring,co_logo with context %}{% block title %}Application tracker · Jobspresso{% endblock %}
 {% block content %}<div class="top2"><div><h1>Application tracker</h1><p class="sub">Track each role from saved to offer. You control the stage and notes.</p></div><div class="actions"><a class="btn" href="{{ url_for('jobs') }}">Find a job</a>{% if user %}<a class="btn p" href="#add">Add application</a>{% endif %}</div></div>
+{% include "tracker_tabs.html" %}
 {% if user %}
 {% set tracked = application_counts.values()|sum %}{% set interviews = application_counts.get('interview',0) %}{% set offers = application_counts.get('offer',0) %}
 {% if setup_pending %}{{ page_banner('Your pipeline',tracked|string ~ (' application tracked' if tracked == 1 else ' applications tracked'),interviews|string ~ (' interview and ' if interviews == 1 else ' interviews and ') ~ offers|string ~ (' offer recorded.' if offers == 1 else ' offers recorded.') ~ ' Keep each stage up to date.',url_for('jobs'),'Find more roles',url_for('analytics'),'See analytics','applications') }}{% endif %}
-<ul class="pipeline" aria-label="Pipeline summary">{% for status in statuses %}<li class="pl-step" data-stage="{{ status }}"><a href="#stage-{{ status }}"><b>{{ application_counts.get(status,0) }}</b><span>{{ status|title }}</span></a></li>{% endfor %}</ul>
+<ul class="pipeline" aria-label="Pipeline summary">{% for status in statuses %}<li class="pl-step" data-stage="{{ status }}"><a href="#stage-{{ status }}"><b>{{ application_counts.get(status,0) }}</b><span>{{ status|replace('_',' ')|title }}</span></a></li>{% endfor %}</ul>
 <details class="card" id="add"><summary>Add an application</summary><form method="post" class="page-form spaced">{{ csrf() }}<div class="fields">
 <label class="field"><span class="inputbox"><input name="title" maxlength="200" required placeholder=" "><span class="input-label">Role</span><i aria-hidden="true"></i></span></label><label class="field"><span class="inputbox"><input name="company_name" maxlength="200" required placeholder=" "><span class="input-label">Company</span><i aria-hidden="true"></i></span></label>
 <label class="field"><span class="inputbox"><input name="url" type="url" maxlength="2000" placeholder=" "><span class="input-label">Job URL (optional)</span><i aria-hidden="true"></i></span></label>
-<label class="field">Stage<select name="status">{% for status in statuses %}<option value="{{ status }}">{{ status|title }}</option>{% endfor %}</select></label></div>
+<label class="field">Stage<select name="status">{% for status in statuses %}<option value="{{ status }}">{{ status|replace('_',' ')|title }}</option>{% endfor %}</select></label></div>
 <label class="field">Notes<textarea name="notes" maxlength="2000" rows="3"></textarea></label><button class="btn p">Add application</button></form></details>
-<div class="kan">{% for status in statuses %}<section class="col" id="stage-{{ status }}" data-stage="{{ status }}" aria-label="{{ status|title }} applications"><h3><span>{{ status|title }}</span><span class="co">{{ application_counts.get(status,0) }}</span></h3>
+<div class="kan">{% for status in statuses %}<section class="col" id="stage-{{ status }}" data-stage="{{ status }}" aria-label="{{ status|replace('_',' ')|title }} applications"><h3><span>{{ status|replace('_',' ')|title }}</span><span class="co">{{ application_counts.get(status,0) }}</span></h3>
 {% for item in application_rows if item.status == status %}<article class="kc app-card">
 <div class="ac-top">{{ co_logo(item.company_name) }}<div class="ac-id"><h4 class="ac-title">{{ item.title }}</h4><p class="ac-co">{{ item.company_name }}</p></div>{% if item.fit_score is not none %}{{ score_ring(item.fit_score, small=true) }}{% endif %}</div>
 {% if item.notes %}<p class="ac-notes">{{ item.notes }}</p>{% endif %}
 <div class="ac-meta"><span>Updated <time>{{ item.updated_at }}</time></span>{% if item.url %}<a href="{{ item.url }}" target="_blank" rel="noopener noreferrer">Company posting<span class="visually-hidden"> (opens in a new tab)</span> &#8599;</a>{% endif %}</div>
 <details class="ac-edit"><summary>Edit stage or notes</summary>
 <form method="post" class="page-form">{{ csrf() }}<input type="hidden" name="application_id" value="{{ item.id }}">
-<label class="field">Stage<select name="status">{% for option in statuses %}<option value="{{ option }}" {% if option == item.status %}selected{% endif %}>{{ option|title }}</option>{% endfor %}</select></label>
+<label class="field">Stage<select name="status">{% for option in statuses %}<option value="{{ option }}" {% if option == item.status %}selected{% endif %}>{{ option|replace('_',' ')|title }}</option>{% endfor %}</select></label>
 <label class="field">Notes<textarea name="notes" rows="3" maxlength="2000">{{ item.notes }}</textarea></label><button class="btn">Save changes</button></form></details></article>
 {% else %}<p class="col-empty">Nothing here yet.{% if status == 'saved' %} Save a job from <a href="{{ url_for('jobs') }}">Job matches</a>.{% endif %}</p>{% endfor %}</section>{% endfor %}</div>
 <p class="sub">Shows the latest 200 entries. Clicking a company link does not automatically change an application status.</p>{% endif %}{% endblock %}

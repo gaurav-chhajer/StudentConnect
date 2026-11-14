@@ -43,10 +43,10 @@ def register_routes(app, connection, now):
             if row is None or score_signature(row) != signature:
                 flash("This score has changed. Review the updated match before rating it.")
                 return redirect(url_for("jobs", job=job_id))
-            conn.execute("""INSERT INTO score_feedback(user_id,job_id,score_signature,rating,created_at)
-                VALUES(?,?,?,?,?) ON CONFLICT(user_id,job_id,score_signature)
-                DO UPDATE SET rating=excluded.rating,created_at=excluded.created_at""",
-                (g.user["id"], job_id, signature, rating, now().isoformat()))
+            conn.execute("""INSERT INTO score_feedback(user_id,job_id,score_signature,rating,created_at,fit_score)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,job_id,score_signature)
+                DO UPDATE SET rating=excluded.rating,created_at=excluded.created_at,fit_score=excluded.fit_score""",
+                (g.user["id"], job_id, signature, rating, now().isoformat(), row['fit_score']))
         flash("Thanks. Your score feedback was saved.")
         return redirect(url_for("jobs", job=job_id))
 

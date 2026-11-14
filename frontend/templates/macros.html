@@ -114,6 +114,6 @@
 </article>
 {% endmacro %}
 {% macro pagination(action) %}<div class="pagination">
-{% if page > 1 %}<a class="btn" href="{{ url_for(action,page=page-1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}">Previous</a>{% endif %}
+{% if page > 1 %}<a class="btn" href="{{ url_for(action,page=page-1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort,only_mine=only_mine|default(0)) }}">Previous</a>{% endif %}
 <span>Page {{ page }} of {{ pages }}</span>
-{% if page < pages %}<a class="btn" href="{{ url_for(action,page=page+1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort) }}">Next</a>{% endif %}</div>{% endmacro %}
+{% if page < pages %}<a class="btn" href="{{ url_for(action,page=page+1,q=search,company=company,min_score=min_score,location=location,job_type=job_type,days=days,sort=sort,only_mine=only_mine|default(0)) }}">Next</a>{% endif %}</div>{% endmacro %}

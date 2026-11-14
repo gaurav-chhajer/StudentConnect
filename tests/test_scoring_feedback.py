@@ -23,7 +23,7 @@ class ScoreFeedbackTests(unittest.TestCase):
     def test_jobs_page_shows_feedback_for_selected_saved_score(self):
         page = self.client.get("/jobs?job=1")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Was this score useful?", page.data)
+        self.assertIn(b"Was this score accurate?", page.data)
         self.assertIn(b'name="score_signature"', page.data)
 
     def test_owner_can_review_aggregated_score_ratings(self):

@@ -59,7 +59,7 @@ def safe_next_url(value):
     return value
 
 
-def delete_user_data(conn, user_id, upload_dir):
+def delete_user_data(conn, user_id, upload_dir, *, actor_id=None, now=None):
     """Delete one account and its private records, retaining shared postings."""
     account = conn.execute("""SELECT u.email,a.is_admin FROM users u
         JOIN accounts a ON a.user_id=u.id WHERE u.id=?""", (user_id,)).fetchone()
@@ -72,6 +72,17 @@ def delete_user_data(conn, user_id, upload_dir):
         "SELECT file_name FROM resume_versions WHERE user_id=? AND file_name IS NOT NULL", (user_id,))]
     email = account["email"]
     with conn:
+        conn.execute('BEGIN IMMEDIATE')
+        protected = conn.execute('SELECT is_admin FROM accounts WHERE user_id=?', (user_id,)).fetchone()
+        if protected and protected[0] and not conn.execute('''SELECT 1 FROM accounts a JOIN users u ON u.id=a.user_id
+                WHERE a.is_admin=1 AND a.email_verified=1 AND u.active=1 AND a.user_id<>? LIMIT 1''', (user_id,)).fetchone():
+            raise ValueError('The last active verified administrator cannot be deleted.')
+        if actor_id is not None:
+            from backend.admin import audit
+            audit(conn, actor_id, 'delete_user', 'user', user_id, now)
+        conn.execute('DELETE FROM application_events WHERE application_id IN (SELECT id FROM applications WHERE user_id=?)', (user_id,))
+        conn.execute('DELETE FROM strong_match_firsts WHERE user_id=?', (user_id,))
+        conn.execute('DELETE FROM account_verifications WHERE user_id=?', (user_id,))
         conn.execute("DELETE FROM recruiter_run_history WHERE run_id IN (SELECT id FROM application_runs WHERE user_id=?)", (user_id,))
         conn.execute("DELETE FROM recruiter_jobs WHERE workflow_id IN (SELECT id FROM recruiter_workflows WHERE user_id=?)", (user_id,))
         conn.execute("DELETE FROM recruiter_followups WHERE user_id=?", (user_id,))
@@ -382,6 +393,31 @@ def register_routes(app, connection, context, now, upload_dir):
             return redirect(url_for("accounts.login"))
         return page("reset")
 
+    @routes.route('/verify-account', methods=['GET','POST'])
+    def verify_account():
+        data=context()
+        if request.method=='POST':
+            if not request_allowed(connection(),'reset',now()):
+                return render_template('verify_account.html', **dict(data,message='Too many attempts. Wait five minutes.')),429
+            try:
+                email=email_address(request.form.get('email',''))
+                digest=token_digest(request.form.get('code','').strip())
+                conn=connection()
+                with conn:
+                    conn.execute('BEGIN IMMEDIATE')
+                    target=conn.execute('''SELECT v.user_id FROM account_verifications v JOIN users u ON u.id=v.user_id
+                        WHERE lower(u.email)=? AND v.token_hash=? AND v.expires_at>? AND u.active=1''',
+                        (email,digest,int(now().timestamp()))).fetchone()
+                    if target is None:
+                        raise ValueError('The code is invalid, expired, or already used.')
+                    conn.execute('UPDATE accounts SET email_verified=1,session_version=session_version+1 WHERE user_id=?',(target[0],))
+                    conn.execute('DELETE FROM account_verifications WHERE user_id=?',(target[0],))
+            except ValueError:
+                return render_template('verify_account.html', **dict(data,message='The code is invalid, expired, or already used.')),400
+            flash('Email verified. Sign in to continue.')
+            return redirect(url_for('accounts.login'))
+        return render_template('verify_account.html', **data)
+
     @routes.route("/accounts/invitations",methods=["GET","POST"])
     def invitations():
         if not g.account["is_admin"]:
@@ -389,6 +425,9 @@ def register_routes(app, connection, context, now, upload_dir):
         data=context()
         if request.method=="POST":
             try:
+                from backend.admin import audit
+                with connection() as conn:
+                    audit(conn,g.user['id'],'invite_send','invitation',None,now(),'requested via invitations form')
                 issue_invitation(connection(),request.form.get("email",""),now())
             except ValueError as error:
                 return render_template("invitations.html",**dict(data,message=str(error))),400

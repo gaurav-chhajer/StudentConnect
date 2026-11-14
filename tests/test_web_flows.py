@@ -13,7 +13,7 @@ from unittest.mock import patch
 from backend.app import create_app
 from backend.migrate import apply_migrations
 from backend import pipeline_skeleton
-from backend.store import location_suggestions
+from backend.store import location_suggestions, STATUSES
 from backend.pipeline_skeleton import SCHEMA, _render_email_html, _render_email_text, filter_candidate_jobs, get_unsent_top_matches, store_score, upsert_jobs
 
 
@@ -234,7 +234,7 @@ class WebFlowTests(unittest.TestCase):
         before = self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         apply_migrations(self.conn)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], before)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 32)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0], 33)
 
     def test_deterministic_breakdown_is_saved_and_shown_with_evidence(self):
         self.seed_user()
@@ -346,7 +346,7 @@ class WebFlowTests(unittest.TestCase):
             self.assertIn(b'class="site-header"', response.data)
             self.assertIn(b'id="theme"', response.data)
             for target in routes:
-                if target != route:
+                if target != route and target != "/analytics":
                     self.assertIn(('href="'+target+'"').encode(),response.data)
 
     def test_refined_screens_preserve_local_navigation_and_read_only_rendering(self):
@@ -384,16 +384,16 @@ class WebFlowTests(unittest.TestCase):
                 self.assertNotIn("script-src 'self'", policy)
                 self.assertNotIn("script-src 'unsafe-inline'", policy)
                 if route == "/settings":
-                    self.assertEqual(response.data.count(b"<script"), 4)
+                    self.assertEqual(response.data.count(b"<script"), 5)
                     self.assertIn(b'src="/static/js/companies.js"', response.data)
                     self.assertIn(b'src="/static/js/preferences.js"', response.data)
                     self.assertIn(b'href="/static/css/preferences.css"', response.data)
                 elif route == "/jobs":
-                    self.assertEqual(response.data.count(b"<script"), 3)
+                    self.assertEqual(response.data.count(b"<script"), 4)
                     self.assertIn(b'src="/static/js/job-selection.js"', response.data)
                     self.assertIn("connect-src 'self'", policy)
                 else:
-                    self.assertEqual(response.data.count(b"<script"), 2)
+                    self.assertEqual(response.data.count(b"<script"), 3)
                 self.assertNotIn(b"Scheduled sending is not connected yet", response.data)
                 self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
         self.assertEqual(before, self.database.read_bytes())
@@ -487,7 +487,7 @@ class WebFlowTests(unittest.TestCase):
                 if route == '/jobs':
                     self.assertIn(b'No current matches for these filters.', page.data)
                 if route == '/applications':
-                    self.assertEqual(page.data.count(b'class="col-empty"'), 5)
+                    self.assertEqual(page.data.count(b'class="col-empty"'), len(STATUSES))
         self.assertIn(b"0 current resume-to-JD comparisons", self.client.get("/").data)
 
     def test_setup_banner_remains_available_until_profile_is_complete(self):
@@ -502,6 +502,9 @@ class WebFlowTests(unittest.TestCase):
                     self.assertIn(b'class="card welcome"', page.data)
                     self.assertIn(b'Get started', page.data)
                     self.assertIn(b'Add your resume to see your scores', page.data)
+                elif route == '/analytics':
+                    self.assertIn(b'id="setup-checklist"', page.data)
+                    self.assertIn(b'Finish setting up your matches', page.data)
                 else:
                     self.assertIn(b'class="hero-banner"', page.data)
                     self.assertIn(b'Set up your job matches', page.data)
@@ -533,10 +536,10 @@ class WebFlowTests(unittest.TestCase):
             self.assertEqual(dashboard.status_code, 200)
             self.assertEqual(analytics.status_code, 200)
             self.assertNotIn(b'class="weekly-chart"', dashboard.data)
-            self.assertIn(b'class="weekly-chart"', analytics.data)
+            self.assertIn(b'Strong matches per week', analytics.data)
             self.conn.execute("UPDATE scores SET scored_at='2026-10-05T00:00:00+00:00'")
             self.conn.commit()
-            self.assertIn(b'class="weekly-chart"', self.client.get("/analytics").data)
+            self.assertIn(b'Strong matches per week', self.client.get("/analytics").data)
 
     def test_location_picker_has_one_input_and_preserves_escaped_selections(self):
         self.seed_user()
@@ -664,43 +667,36 @@ class WebFlowTests(unittest.TestCase):
 
     def test_charts_use_actual_scores_and_counts_at_boundaries(self):
         self.seed_user()
+        self.conn.execute("DELETE FROM strong_match_firsts")
         self.conn.execute("UPDATE scores SET scored_at='2026-10-01T00:00:00+00:00',fit_score=0 WHERE job_id=1")
         self.conn.execute("UPDATE scores SET scored_at='2026-10-08T00:00:00+00:00',fit_score=100 WHERE job_id=2")
         self.conn.commit()
         with patch("backend.app.utc_now", return_value=datetime(2026, 10, 9, tzinfo=timezone.utc)):
-            page = self.client.get("/analytics")
-            chart = re.search(rb'<div class="weekly-chart".*?</div></div>', page.data, re.S)
-            self.assertIsNotNone(chart)
-            self.assertIn(b'2026-W39', chart.group(0))
-            self.assertIn(b'2026-W40', chart.group(0))
-            self.assertEqual(page.data.count(b'class="week-column"'), 2)
-            self.assertIn(b'0.0% average', page.data)
-            self.assertIn(b'100.0% average', page.data)
-            analytics = self.client.get("/analytics?weeks=4")
-            self.assertEqual(analytics.status_code, 200)
-            self.assertEqual(analytics.data.count(b'class="week-column"'), 2)
-            self.assertEqual(analytics.data.count(b'height:180.0px'), 2)
-            self.assertIn(b"1 matches", analytics.data)
-            self.assertIn(b"100.0% average", analytics.data)
-            self.assertIn(b'aria-current="true" href="/analytics?weeks=4"', analytics.data)
-            # A single week must render without division by zero.
-            self.conn.execute("UPDATE scores SET scored_at='2026-10-01T00:00:00+00:00'")
+            page = self.client.get("/analytics?weeks=4")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(b'Strong matches per week', page.data)
+            self.assertIn(b'Week of 2026-10-05', page.data)
+            self.assertEqual(page.data.count(b'first strong matches in week of'), 4)
+            self.assertIn(b'1 first strong matches in week of 2026-10-05', page.data)
+            self.assertIn(b'aria-current="page" href="/analytics?weeks=4"', page.data)
+            self.conn.execute("UPDATE scores SET fit_score=0,is_stale=1")
+            self.conn.execute("UPDATE jobs SET is_active=0")
             self.conn.commit()
-            self.assertEqual(self.client.get("/analytics").status_code, 200)
+            self.assertIn(b'1 first strong matches in week of 2026-10-05', self.client.get('/analytics').data)
 
     def test_chart_empty_states_do_not_invent_metrics(self):
         self.seed_user()
+        self.conn.execute("DELETE FROM strong_match_firsts")
         self.conn.execute("UPDATE scores SET is_stale=1")
         self.conn.commit()
         dashboard = self.client.get("/")
         analytics = self.client.get("/analytics")
         self.assertEqual(dashboard.status_code, 200)
         self.assertEqual(analytics.status_code, 200)
-        self.assertNotIn(b'class="trend-chart"', dashboard.data)
-        self.assertNotIn(b'class="weekly-chart"', analytics.data)
         self.assertIn(b"No current comparisons yet", dashboard.data)
-        self.assertIn(b"No current scores in this period", analytics.data)
-        self.assertIn(b"Open tracking is not connected", analytics.data)
+        self.assertIn(b"0 of 0 replied", analytics.data)
+        self.assertIn(b"Time to first reply</h2><b>Unavailable", analytics.data)
+        self.assertNotIn(b'1 first strong matches', analytics.data)
         self.assertNotRegex(analytics.data.lower(), rb">\s*nan(?:\.0+)?%?\s*</")
 
     def test_setup_checklist_allows_browsing_and_tracks_completed_steps(self):
@@ -967,7 +963,7 @@ class WebFlowTests(unittest.TestCase):
         self.assertEqual(row["notes"], "Interview scheduled")
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM applications").fetchone()[0], 1)
         self.assertIn(b"Interview scheduled", self.client.get("/applications").data)
-        self.assertIn(b"100.0%", self.client.get("/analytics").data)
+        self.assertIn(b"1 of 1 replied", self.client.get("/analytics").data)
 
     def test_manual_application_and_user_scoping(self):
         self.seed_user()

@@ -8,7 +8,7 @@ from backend.locations import matches as location_matches
 from urllib.parse import urlsplit
 
 PAGE_SIZE = 20
-STATUSES = ("saved", "applied", "interview", "offer", "rejected")
+STATUSES = ("saved", "applied", "screen", "assessment", "interview", "offer", "rejected", "no_reply")
 DEFAULT_SETTINGS = dict(university="", graduation_year=None, cadence="daily", send_time="08:00",
                         timezone="Asia/Kolkata", min_score=60, include_gaps=1, subscriptions_configured=0)
 MATCH_FROM = """FROM scores s JOIN jobs j ON j.id=s.job_id JOIN companies c ON c.id=j.company_id
@@ -135,7 +135,8 @@ def filters(args):
                   min_score=integer(args.get("min_score", "0"), 0, 100),
                   search=args.get("q", "").strip(), location=args.get("location", "").strip(),
                   job_type=args.get("job_type", ""), sort=args.get("sort", "best"),
-                  days=integer(args.get("days", "0"), 0, 365))
+                  days=integer(args.get("days", "0"), 0, 365),
+                  only_mine=integer(args.get("only_mine", "0"), 0, 1))
     if len(result["search"]) > 200 or len(result["location"]) > 100:
         raise ValueError("Search or location is too long")
     if result["job_type"] not in ("", "internship", "full-time", "part-time") or result["sort"] not in ("best", "recent"):
@@ -147,6 +148,8 @@ def matches(conn, user_id, selected_filters, now):
     conn.create_function("location_matches",2,location_matches,deterministic=True)
     params = [user_id] * 3
     where = MATCH_FROM + " AND s.fit_score>=? AND (?=0 OR c.id=?)"
+    if selected_filters.get('only_mine'):
+        where += " AND EXISTS(SELECT 1 FROM company_subscriptions mine WHERE mine.user_id=s.user_id AND mine.company_id=c.id)"
     params.extend((selected_filters["min_score"], selected_filters["company"], selected_filters["company"]))
     pattern = like_pattern(selected_filters["search"])
     where += " AND (j.title LIKE ? ESCAPE '\\' OR c.name LIKE ? ESCAPE '\\' OR s.matched_skills LIKE ? ESCAPE '\\')"
