@@ -35,3 +35,8 @@ jobs:
           PYTHONANYWHERE_API_TOKEN: ${{ secrets.PYTHONANYWHERE_API_TOKEN }}
           DEPLOY_SHA: ${{ github.sha }}
         run: python -B -m scripts.deploy_pythonanywhere_api --sha "$DEPLOY_SHA"
+      - name: Inspect hosted storage after deployment failure
+        if: failure()
+        env:
+          PYTHONANYWHERE_API_TOKEN: ${{ secrets.PYTHONANYWHERE_API_TOKEN }}
+        run: python -B -m scripts.inspect_pythonanywhere_storage
